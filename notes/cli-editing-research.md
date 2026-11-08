@@ -6,7 +6,8 @@ Date: 2026-11-08. Scope: let Claude make real edits (looks, transitions, speed, 
 
 1. **Engine: plain ffmpeg, driven from Python.** It is already installed (Homebrew ffmpeg 9.0.2) and already used by `media.py`. Everything in Phase 1 was verified on this machine (see "What I tested").
 2. **Architecture: Claude edits a declarative edit spec through validated MCP tools. It never writes ffmpeg commands.** A Python compiler (`render.py`) turns the spec into ffmpeg runs: per-clip normalized segments (cached), then one join pass. The same spec renders a cheap preview from the 540p proxies and the final from originals. It also still exports OTIO and FCP XML for Resolve.
-3. **First phase (about 1 day):** spec + renderer for cuts, crossfade transitions, speed, looks (eq + bundled .cube LUTs), HDR to SDR, 9:16/1:1/16:9 with center or manual crop, preview and final render jobs, and 7 MCP tools.
+3. **Style references (section 8):** extract a measurable style profile from an inspiration video (TransNetV2 shots and transition types, beat alignment, camera motion, OCR, color statistics baked into a `.cube`) and let Claude judge the rest from a contact sheet. Tested on a synthetic reference.
+4. **First phase (about 1 day):** spec + renderer for cuts, crossfade transitions, speed, looks (eq + bundled .cube LUTs), HDR to SDR, 9:16/1:1/16:9 with center or manual crop, preview and final render jobs, and 7 MCP tools.
 
 ## What is installed here
 
@@ -235,6 +236,110 @@ Estimates are for a Claude Code session doing the work, plus the user's review t
 4. **Taste.** Claude cannot judge a render it cannot see. The output contact sheet in `render_status` closes that loop; a short-clip preview (`start`/`end`) keeps iteration cheap.
 5. **Dependencies and licenses.** librosa brings numba (about 26 packages, slow first call). ffmpeg here is a GPL-3 build: fine for a personal app, but redistributing the app with it bundled would bring GPL obligations. Remotion's license is free only for individuals and companies of up to 3 people.
 
+## 8. Copying the editing style of a reference video
+
+Goal: the user drops in an inspiration video (a reel, a trip edit) and Claude makes their footage "cut like that". Split the reference into two layers:
+
+- **Measurable layer, extracted by code:** shot boundaries, transition types, shot lengths, how cuts sit on the beat, camera motion per shot, on-screen text, color statistics. These are numbers a renderer can apply.
+- **Semantic layer, judged by Claude:** shot scale (wide, medium, close), subject, story order, speed ramps, energy. Claude already reads contact sheets through `look_at`, so give it one frame per reference shot and let it judge. No extra model.
+
+### What I tested
+
+Synthetic reference built from lavfi sources with known ground truth: 6 shots (1.0, 1.5, 1.0, 1.5, 1.0, 1.0 s), hard cuts at 1.0, 2.5, 4.5, 5.5 s, a 0.5 s dissolve at 3.0 to 3.5 s, a pan shot (moving crop over a still), a push-in (zoompan), the warm LUT from section "What I tested", a burned-in title, and a 120 BPM click track. Scripts: `notes/poc/style_profile.py` (reference to profile JSON) and `notes/poc/look_lut.py` (profile look to `.cube`). Both are throwaway PoCs, run with `uv run --no-project --with ...`.
+
+| Step | Tool | Result |
+|---|---|---|
+| Hard cuts | PySceneDetect `ContentDetector` | 1.0, 2.5, 4.5, 5.5: all exact. Missed the dissolve |
+| Hard cuts | PySceneDetect `AdaptiveDetector` (what `media.py` uses) | Same 4, plus the dissolve start (3.03) reported as a plain cut |
+| Cuts + transition type | TransNetV2 (`transnetv2-pytorch`, CPU) | All 5 boundaries. The many-hot head marks the transition extent: 1 frame for hard cuts, 13 frames (0.43 s) for the 0.5 s dissolve. So "cut vs gradual + duration" falls out of the model for free. About 10 s for a 6.5 s clip including model load |
+| Hand-rolled frame-difference classifier | numpy | **Failed**: high-motion shots (pans, cellular automaton) produced 9 false transitions. Do not hand-roll this |
+| Beat alignment | librosa beats vs cut times | Tempo 117.5 (true 120), 4/5 cuts within 60 ms of a beat (the dissolve center is off-beat, correctly), shot lengths in beats `[1.96, 2.94, 1.57, 2.35, 1.96, 1.96]` |
+| Camera motion | OpenCV LK optical flow + `estimateAffinePartial2D` per frame pair, averaged per shot | Pan shot: `pan-right` (correct). Push-in: `push-in` (correct). Static test patterns: `static` (correct). The scrolling cellular automaton came out as `pull-out` (false positive) |
+| On-screen text | Apple Vision `VNRecognizeTextRequest` via `pyobjc-framework-Vision`, frames at 2 fps | Found "Kyoto, 2026" with confidence 1.0, position and size, at 0.0 and 0.5 s only (the title was on screen for 1 s). Also read the test pattern's timecode, so filter tiny or changing strings |
+| Look transfer | Reinhard (Lab mean/std) baked into a 33-point `.cube`, applied with `lut3d` to an ungraded copy of the same edit | Warmth (Lab b mean) offset to the reference dropped from 5.77 to 1.15; mean per-pixel Lab difference from 3.77 to 2.54 |
+
+Apple Silicon fit: everything above ran on CPU in seconds for short clips. TransNetV2 also runs on MPS, but the port prints a warning about numerical inconsistency on MPS, so keep it on CPU (it is a small model working on 48x27 frames). Apple Vision runs on-device on the Neural Engine. librosa and OpenCV are CPU. A 60 s reel should analyze in well under a minute.
+
+### Tooling by question
+
+| Question | Recommended | Alternatives and notes |
+|---|---|---|
+| Where are the shots? | **TransNetV2** (`pip install transnetv2-pytorch`, inference-only PyTorch port, MIT-labelled, weights bundled) | PySceneDetect (already in the engine) is fine for hard cuts and keeps working for the user's own footage. AutoShot (Kuaishou, 2023) is trained on short-form vertical video, so it may fit reels better; code availability not verified. OmniShotCut and TransVLM (2026) handle complex transitions; research code, heavier |
+| Cut, dissolve, or wipe? | TransNetV2 transition extent (1 to 2 frames = cut, longer = gradual) | Telling wipe from dissolve: check whether the blend is spatially uniform (dissolve) or has a moving edge (wipe) inside the gradual window; untested. TransVLM classifies transition types directly. AutoTransition (ECCV 2022, code public) learns which of 30 transition types editors use between two shots; useful as research, too heavy to run here |
+| Pacing? | Shot-length list, in seconds and in beats; median, coefficient of variation, cuts per minute | All arithmetic on the boundary list |
+| Do cuts follow the music? | librosa beats; per-cut offset to the nearest beat; % within 60 ms | madmom downbeats would say "cuts land on bar starts" but it is unmaintained |
+| Camera motion | OpenCV similarity transform per frame pair: translation = pan/tilt, scale = push-in/pull-out | Flags textured motion (water, crowds) as camera motion. Feature-sparse shots return `unknown`. Good enough as a hint, since Claude also sees the frames |
+| Shot scale | Claude judges from the reference contact sheet | Optional numeric version: Apple Vision face/human box height as a fraction of the frame, or zero-shot with the engine's existing image embedding model ("close-up shot" vs "wide shot" prompts); both untested |
+| Speed ramps | Claude judges from frames, plus a flow-magnitude jump inside one shot as a hint | No reliable open detector found. Low priority |
+| Text overlays | Apple Vision OCR (on-device, free) | Gives text, position and size, which map directly onto our title styles. Filter strings that change every frame (timecodes, scrolling text) |
+| Color look | Reinhard Lab transfer baked into a `.cube` (tested) | `color-matcher` (pip, hahnec) adds MKL, histogram matching and the compound HM-MVGD-HM method, which the author reports works best; it transfers image to image, so baking into a LUT means re-implementing its transform on a lattice. Check its license before vendoring |
+
+### The style profile
+
+One JSON per reference, stored in the db and shown to Claude. Trimmed example from the PoC run:
+
+```json
+{
+  "source": "ref_title.mp4", "duration": 6.5, "fps": 30,
+  "pacing": {"shots": 6, "cuts_per_min": 46.2, "median_shot": 1.0, "shot_length_cv": 0.2},
+  "transitions": {"cut": 4, "gradual": 1,
+                  "list": [{"t": 3.3, "type": "gradual", "duration": 0.43}]},
+  "music": {"tempo": 117.5, "cuts_on_beat_pct": 80, "median_offset_s": 0.028},
+  "shots": [{"start": 1.0, "length": 1.5, "beats": 2.94, "camera": "pan-right"},
+            {"start": 3.3, "length": 1.2, "beats": 2.35, "camera": "push-in"}],
+  "look": {"lab_mean": [55.2, 12.6, 6.9], "lab_std": [25.3, 45.4, 42.8],
+           "warmth_b": 6.9, "saturation": 0.62, "contrast_L_std": 25.3, "black_level_L_p2": 0.4},
+  "text": [{"t": 0.0, "text": "Kyoto, 2026", "y": 0.07, "height": 0.21}]
+}
+```
+
+Plus a contact sheet with one frame per reference shot, labelled with shot index, length and camera motion (reuse `media.contact_sheet`).
+
+### How it plugs into the Phase 1 spec and renderer
+
+1. **Ingest:** reference comes from a Photos item (saved reels are often in the library, so a uuid) or a file in an allowlisted folder (`~/Movies/Safelight/references`). No URL downloading; the user saves the file. Analysis runs as a background job, like `analyze_clip`.
+2. **New spec field:** `"style": {"reference_id": 4, "look_strength": 0.7, "follow_pacing": true}`.
+3. **Look:** at render time `render.py` computes Lab statistics of the project's own clips (from proxies), builds the Reinhard `.cube` against the reference statistics, and applies it in the segment pass as one more `lut3d`, after HDR to SDR and before the user's per-clip adjustments. `look_strength` blends toward identity. Cache the LUT by (reference id, clip set hash).
+4. **Pacing:** the profile gives a sequence of shot lengths in beats and a transition pattern. With music set, `snap_to_beats` gets a new mode `pattern=reference`: slot k gets length `beats[k mod n] x beat period` of the user's track, so a reference that cuts every 2 beats with a 4-beat hold before the drop cuts the same way on different music. Without music, use the lengths in seconds, scaled to the target duration.
+5. **Transitions:** copy the ratio and placement of gradual transitions (for example "dissolve, 0.4 s, only into the last shot") with `set_transition`.
+6. **Camera motion:** when a slot calls for `push-in` but the user's clip is static, the renderer can fake it with a time-varying crop (the zoompan test in section "What I tested" works on stills; for video use `crop` with `t` in the width expression plus `scale`). Add as a `reframe.mode=push` option.
+7. **Titles:** text style and position from OCR boxes map onto `add_title` style and position.
+
+Claude stays in charge of selection and order: the profile is a constraint and a hint. The renderer only applies measurable things (look, durations, transitions).
+
+### MCP tools (2 more, on top of section 6)
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `analyze_reference` | `uuid` (Photos item) or `path` (allowlisted folder) | `reference_id`, job id. Re-analysis is cached by file hash |
+| `get_style_profile` | `reference_id` | Profile JSON plus the contact sheet path for `look_at` |
+
+Applying it uses the existing tools: `apply_look(look="ref:4", strength=0.7)`, `snap_to_beats(pattern="reference", reference_id=4)`, `set_transition`, `add_title`. No new render path.
+
+### Prior art and research
+
+| Work | What it does | Relevance |
+|---|---|---|
+| [TransNet V2](https://www.alphaxiv.org/abs/2008.04838) (2020), [PyTorch port](https://pypi.org/project/transnetv2-pytorch/) | Shot transition detection, cuts and gradual | **Use it.** Tested above |
+| [AutoShot](https://www.alphaxiv.org/abs/2304.06116) (Kuaishou, 2023) | Short-video shot boundary dataset and model | Better match for reels; code not verified |
+| [OmniShotCut](https://www.alphaxiv.org/abs/2604.24762), [TransVLM](https://www.alphaxiv.org/abs/2604.27975) (2026) | Shot detection with transition types and complex transitions | Watch; heavier research code |
+| [AutoTransition](https://github.com/acherstyx/AutoTransition) (ECCV 2022) | Recommends transition type between two shots, learned from edited videos | Ideas only; Claude does this choice |
+| [CutClaw](https://www.alphaxiv.org/abs/2603.29664) (2026, [code](https://github.com/GVCLab/CutClaw)) | Multi-agent LLM editor: music keypoints (downbeats, energy shifts) anchor shot selection, with Playwriter, Editor and Reviewer agents | Closest system to Safelight's Ask Claude. Worth borrowing: music-structure segments as the pacing skeleton, and a reviewer pass |
+| [EditDuet](https://www.alphaxiv.org/abs/2509.10761) (Adobe, 2025) | Multi-agent editor/critic for non-linear editing | Same reviewer-loop idea |
+| [Let Your Video Listen to Your Music](https://www.alphaxiv.org/abs/2506.18881) (2025) | Aligns visual motion rhythm to music beats | Beyond cut snapping: retime motion peaks to beats. Later |
+| [TemplateCraft](https://www.alphaxiv.org/abs/2609.31451) (Kuaishou, 2026) | Agentic generation of reusable CapCut-style visual templates | Confirms "template = timing + effects + text slots", which is our style profile |
+| [RefVFX](https://www.alphaxiv.org/abs/2601.07833) (Snap, 2026) | Generative transfer of visual effects from a reference video | Generative, GPU-heavy, not for this app |
+| Google patent US 12,437,782 B2 | Shot boundaries + per-shot camera motion to characterize and transfer editing style | Same decomposition as ours; a patent, not code |
+
+No open-source project does "edit my footage like this video" end to end. The building blocks are mature (TransNetV2, librosa, OpenCV, Apple Vision) and an LLM covers the semantic part, so a Safelight-specific glue layer of about 300 lines is the right size.
+
+### Plan and risks
+
+- **Phase 5, style reference (about 1 day, after Phases 1 and 2):** `reference.py` (profile extraction, from the PoC), look LUT in `render.py`, `pattern=reference` in `snap_to_beats`, two MCP tools, a test on the synthetic reference (assert boundaries within 1 frame, gradual vs cut, LUT reduces the b offset). New deps: `transnetv2-pytorch` (torch is already in the engine), `pyobjc-framework-Vision`, librosa from Phase 2.
+- **Risk, look transfer copies content:** Reinhard matches global statistics, so a sunset reference turns daytime footage orange. Mitigation: default strength 0.6, clamp the per-channel shift, and compute reference statistics from mid-tones only. Upgrade path: MKL or histogram-matching methods.
+- **Risk, reference audio:** reels often have music plus voice; beat tracking on the mix is noisier. Mitigation: report beat confidence and fall back to seconds-based pacing.
+- **Risk, copyright:** copying pacing and a look is fine; the reference's music may not be, if the user plans to post. The music stays the user's choice.
+
 ## Sources
 
 - FFmpeg filters docs: https://ffmpeg.org/ffmpeg-filters.html (xfade, lut3d, tonemap, zoompan, deshake, sidechaincompress, loudnorm)
@@ -253,3 +358,9 @@ Estimates are for a Claude Code session doing the work, plus the user's review t
 - Other ffmpeg MCP servers: https://lobehub.com/ja/mcp/conneroisu-vfx-mcp , https://lobehub.com/es/mcp/dahshury-video_editing_mcp , https://awesome.ecosyste.ms/projects/github.com%2Fkush36agrawal%2Fvideo_editor_mcp
 - Apple Vision saliency request: https://docs.rs/objc2-vision/latest/objc2_vision/struct.VNGenerateAttentionBasedSaliencyImageRequest.html (API reference via Rust bindings; same Objective-C class through pyobjc-framework-Vision)
 - librosa beat tracking: https://librosa.org/doc/latest/generated/librosa.beat.beat_track.html
+- TransNetV2 PyTorch port: https://pypi.org/project/transnetv2-pytorch/ ; original: https://github.com/soCzech/TransNetV2
+- color-matcher: https://github.com/hahnec/color-matcher
+- AutoTransition: https://github.com/acherstyx/AutoTransition
+- CutClaw: https://arxiv.org/abs/2603.29664 , https://github.com/GVCLab/CutClaw
+- Google patent US 12,437,782 B2: https://patentsgazette.uspto.gov/week40/OG/html/1539-1/US12437782-20251007.html
+- Apple Vision text recognition: https://developer.apple.com/documentation/vision/vnrecognizetextrequest
