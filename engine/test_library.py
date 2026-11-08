@@ -60,6 +60,16 @@ assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": -1}).status_
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"pos": 9}).json()["t1"] == 5  # other fields kept
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t1": None}).json() == {"item_id": iid, "t0": 2, "t1": None}
 
+# reorder: positions stay 1..n, so repeated "move between the first two" never runs out of float precision
+mv = c.post("/collections", json={"name": "Reorder", "kind": "project"}).json()["id"]
+c.post(f"/collections/{mv}/items", json={"uuids": ["A", "B", "C"]})
+for _ in range(81):
+    its = c.get(f"/collections/{mv}").json()["items"]
+    c.patch(f"/collections/{mv}/items/{its[2]['item_id']}", json={"pos": (its[0]["pos"] + its[1]["pos"]) / 2})
+its = c.get(f"/collections/{mv}").json()["items"]
+assert [i["pos"] for i in its] == [1, 2, 3] and [i["uuid"] for i in its] == ["A", "C", "B"], its
+c.delete(f"/collections/{mv}")
+
 # asset detail lists its collections
 a = c.get("/asset/B").json()
 assert {x["name"] for x in a["collections"]} == {"Summer", "Japan cut"}, a["collections"]

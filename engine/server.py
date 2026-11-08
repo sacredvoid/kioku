@@ -79,12 +79,26 @@ def load():
     state["index"], state["stamp"], state["checked"] = core.Index(db), stamp(db), time.time()
 
 
-def fresh_index():
-    """Reload the in-memory index if the db changed (checked at most every RELOAD_EVERY s)."""
-    if time.time() - state["checked"] > RELOAD_EVERY:
-        state["checked"] = time.time()
-        if stamp(core.connect()) != state["stamp"]:
+rebuilding = threading.Lock()  # held while a background reload runs: at most one at a time
+
+
+def reload_if_changed():
+    try:
+        db = core.connect()
+        if stamp(db) != state["stamp"]:
             load()
+    except Exception:
+        log.exception("index reload failed; keeping the old index")
+    finally:
+        rebuilding.release()
+
+
+def fresh_index():
+    """Current index. Every RELOAD_EVERY s, check the db in a background thread and swap in a rebuilt index when
+    it changed; requests keep using the old one meanwhile."""
+    if time.time() - state["checked"] > RELOAD_EVERY and rebuilding.acquire(blocking=False):
+        state["checked"] = time.time()
+        threading.Thread(target=reload_if_changed, daemon=True).start()
     return state["index"]
 
 

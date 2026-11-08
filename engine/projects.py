@@ -95,12 +95,15 @@ def originals(uuids, dest):
 
 def probe(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                        "stream=avg_frame_rate:format=duration", "-of", "json", str(path)],
+                        "stream=r_frame_rate:format=duration", "-of", "json", str(path)],
                        capture_output=True, text=True)
     info = json.loads(r.stdout or "{}")
-    num, _, den = (info.get("streams") or [{}])[0].get("avg_frame_rate", "30/1").partition("/")
+    # r_frame_rate is the nominal rate (30/1, 30000/1001, 60000/1001). avg_frame_rate is not: iPhone video is
+    # variable-rate, so its average lands on values like 2550/91 (28.02) that no editor timeline uses.
+    num, _, den = (info.get("streams") or [{}])[0].get("r_frame_rate", "30/1").partition("/")
+    # keep the exact ratio (30000/1001, not 29.97 or 30): the fcp_xml writer sets ntsc from it, so Resolve reads 29.97
     fps = float(num) / float(den or 1) if float(den or 1) else 30.0
-    return round(fps, 3) or 30.0, float(info.get("format", {}).get("duration") or 0)
+    return fps or 30.0, float(info.get("format", {}).get("duration") or 0)
 
 
 def build_timeline(name, clips, rate):
@@ -148,14 +151,14 @@ def do_export(cid):
         clips.append((f, is_video, fps, t0, max(t1 - t0, 0.04), length or t1))
     if not clips:
         raise RuntimeError(f"no clips could be downloaded ({len(missing)} failed)")
-    rate = Counter(round(c[2]) for c in clips if c[1]).most_common(1)[0][0] if any(c[1] for c in clips) else 30
+    rate = Counter(c[2] for c in clips if c[1]).most_common(1)[0][0] if any(c[1] for c in clips) else 30
     tl = build_timeline(col["name"], clips, rate)
     xml = out / f"{slug(col['name'])}.xml"
     otio.adapters.write_to_file(tl, str(xml), adapter_name="fcp_xml")
     otio.adapters.write_to_file(tl, str(xml.with_suffix(".otio")))
     total = sum(c[4] for c in clips)
     return {"path": str(xml), "folder": str(out), "clips": len(clips), "missing": missing,
-            "seconds": round(total, 1), "message": f"{len(clips)} clips, {total:.0f}s at {rate} fps"
+            "seconds": round(total, 1), "message": f"{len(clips)} clips, {total:.0f}s at {rate:.3f} fps"
             + (f" ({len(missing)} couldn't be downloaded from iCloud and were left out)" if missing else "")}
 
 

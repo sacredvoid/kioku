@@ -2,7 +2,7 @@
 // viewport exist in the DOM, so 58k items scroll like 58.
 import { fmtDur, thumb, type Item } from "./api";
 
-const MIN_TILE = 168, GAP = 3, HEAD = 58, BUFFER = 1200;
+const MIN_TILE = 168, GAP = 3, HEAD = 58, BUFFER = 1200, LOAD_DELAY = 100; // ms
 type Row = { y: number; h: number; label?: string; start: number; end: number };
 
 const monthLabel = (ym: string) =>
@@ -42,8 +42,7 @@ export class Grid {
 
   private layout() {
     // always drop the old layout: a hidden grid (project view) must not keep rows that index the previous items
-    this.live.forEach((el) => el.remove());
-    this.live.clear();
+    this.live.forEach((el, r) => this.recycle(r, el));
     this.rows = [];
     const W = this.el.clientWidth;
     if (!W) return; // laid out again by the ResizeObserver once it's visible
@@ -81,16 +80,35 @@ export class Grid {
     return lo;
   }
 
+  private loadTimers = new Map<number, number>();
+
+  // cancel a pending load, and drop src so an in-flight thumb request is aborted
+  private recycle(r: number, el: HTMLElement) {
+    clearTimeout(this.loadTimers.get(r));
+    this.loadTimers.delete(r);
+    el.querySelectorAll("img").forEach((img) => img.removeAttribute("src"));
+    el.remove();
+    this.live.delete(r);
+  }
+
   private paint() {
     if (!this.rows.length) return;
     const top = -this.el.getBoundingClientRect().top - BUFFER; // viewport top in grid coordinates
     const bottom = top + window.innerHeight + 2 * BUFFER;
     const want = new Set<number>();
     for (let r = this.firstVisible(top); r < this.rows.length && this.rows[r].y < bottom; r++) want.add(r);
-    this.live.forEach((el, r) => { if (!want.has(r)) { el.remove(); this.live.delete(r); } });
+    this.live.forEach((el, r) => { if (!want.has(r)) this.recycle(r, el); });
     const frag = document.createDocumentFragment();
     want.forEach((r) => {
-      if (!this.live.has(r)) { const el = this.rowEl(this.rows[r]); this.live.set(r, el); frag.append(el); }
+      if (this.live.has(r)) return;
+      const el = this.rowEl(this.rows[r]);
+      this.live.set(r, el);
+      frag.append(el);
+      // thumbs are generated on request, so only ask for rows that stay on screen past LOAD_DELAY (not fling-by rows)
+      this.loadTimers.set(r, window.setTimeout(() => {
+        this.loadTimers.delete(r);
+        el.querySelectorAll("img").forEach((img) => { img.src = img.dataset.src!; });
+      }, LOAD_DELAY));
     });
     this.el.append(frag);
   }
@@ -119,7 +137,7 @@ export class Grid {
     const img = document.createElement("img");
     img.decoding = "async";
     img.alt = "";
-    img.src = thumb(it.uuid);
+    img.dataset.src = thumb(it.uuid);
     img.onload = () => b.classList.add("in");
     img.onerror = () => b.classList.add("noimg");
     b.append(img);

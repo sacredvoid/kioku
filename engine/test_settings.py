@@ -85,4 +85,40 @@ assert c.get("/settings", headers={"Origin": "tauri://localhost"}).status_code =
 assert c.get("/settings", headers={"Origin": "http://localhost:1420"}).headers["access-control-allow-origin"] == "http://localhost:1420"
 assert TestClient(server.app, base_url="http://rebound.example:8765").get("/settings").status_code == 400
 assert TestClient(server.app, base_url="http://localhost:8765").get("/settings").status_code == 200
+# export keeps the exact 30000/1001 rate: FCP XML says timebase 30 + ntsc TRUE (Resolve reads 29.97); true 30 stays FALSE
+import opentimelineio as otio  # noqa: E402
+import core  # noqa: E402
+import sqlite3  # noqa: E402
+ntsc = 30000 / 1001
+for rate, flag in [(ntsc, "TRUE"), (30, "FALSE")]:
+    xml = otio.adapters.write_to_string(projects.build_timeline("t", [(Path("/x/a.mov"), True, rate, 0, 2, 5)], rate), "fcp_xml")
+    assert f"<timebase>30</timebase>" in xml and f"<ntsc>{flag}</ntsc>" in xml and (flag == "TRUE") == ("<ntsc>FALSE" not in xml), flag
+vid = Path(tempfile.mkdtemp()) / "n.mp4"
+import subprocess  # noqa: E402
+subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:r=30000/1001:d=1", str(vid)], check=True)
+assert projects.probe(vid)[0] == ntsc, projects.probe(vid)
+# variable frame rate (phone-style timestamps): nominal 30 fps even though the average is lower
+vfr = vid.with_name("vfr.mp4")
+subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:r=30:d=2", "-vf",
+                r"select=not(eq(mod(n\,3)\,1))", "-fps_mode", "vfr", str(vfr)], check=True)
+assert projects.probe(vfr)[0] == 30, projects.probe(vfr)
+
+# core.connect: WAL is switched on once per process; a busy db must not break connect()
+core.DB_PATH = Path(tempfile.mkdtemp()) / "w.db"
+core._wal.clear()
+assert core.connect(core.DB_PATH).execute("pragma journal_mode").fetchone()[0] == "wal" and core.DB_PATH in core._wal
+busy = Path(tempfile.mkdtemp()) / "b.db"
+holder = sqlite3.connect(busy)
+holder.execute("create table t(x)"); holder.commit()
+holder.execute("begin exclusive")
+orig = sqlite3.connect
+sqlite3.connect = lambda p, timeout=30: orig(p, timeout=0.1)
+try:
+    core.connect(busy)  # locked: logs and carries on... schema script also needs the lock, so only the pragma is checked
+except sqlite3.OperationalError:
+    pass
+finally:
+    sqlite3.connect = orig
+assert busy not in core._wal
+holder.rollback()
 print("settings checks passed")
