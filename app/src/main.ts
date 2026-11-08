@@ -10,6 +10,19 @@ const el = (tag: string, cls = "", text = "") => {
   if (text) e.textContent = text;
   return e;
 };
+const icon = (name: string) => { const s = el("span", `ico ico-${name}`); s.setAttribute("aria-hidden", "true"); return s; };
+
+// ---------- theme: a per-device preference. No saved theme = follow the system (mist light, dusk dark)
+const THEMES = ["mist", "peach", "mint", "dusk"];
+function applyTheme(t: string) {
+  if (THEMES.includes(t)) document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+try { applyTheme(localStorage.getItem("safelight.theme") ?? ""); } catch { /* storage blocked: follow the system */ }
+document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
+  applyTheme(r.value);
+  try { localStorage.setItem("safelight.theme", r.value); } catch { /* applies for this session only */ }
+}));
 
 type View = { type: "lib"; kind: string } | { type: "col"; id: number };
 let view: View = { type: "lib", kind: "" };
@@ -97,9 +110,16 @@ function newCollection(kind: "album" | "project", box: Element, then?: (c: Colle
 }
 
 // ---------- views
+let lastKey = "";
 async function go(v: View, search = q.value.trim()) {
   view = v;
   const my = ++seq;
+  // content settles in on navigation only; a live refresh of the same view must not replay it
+  const key = `${v.type}:${v.type === "lib" ? v.kind : v.id}:${search}`;
+  const main = document.querySelector<HTMLElement>(".main")!;
+  main.classList.remove("enter");
+  if (key !== lastKey) { void main.offsetWidth; main.classList.add("enter"); }
+  lastKey = key;
   empty.hidden = true;
   project.hidden = true;
   $("grid").style.display = ""; // a project view hides it; everything else shows it
@@ -213,7 +233,9 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const askBtn = el("button", "primary", "Ask Claude") as HTMLButtonElement;
   askBtn.type = "submit";
   const askOut = el("div", "ask-out");
-  ask.append(el("span", "spark", "✦"), askIn, askBtn);
+  const spark = icon("spark");
+  spark.classList.add("spark");
+  ask.append(spark, askIn, askBtn);
   ask.addEventListener("submit", async (e) => {
     e.preventDefault();
     // empty box + a brief on an empty project = "just make it"
@@ -282,8 +304,9 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
   };
   range.append(mk("In", it.t0, "t0"), mk("Out", it.t1, "t1"));
   const actions = el("div", "clip-actions");
-  const btn = (txt: string, label: string, fn: () => void) => {
-    const b = el("button", "ghost icon", txt) as HTMLButtonElement;
+  const btn = (ico: string, label: string, fn: () => void) => {
+    const b = el("button", "ghost icon") as HTMLButtonElement;
+    b.append(icon(ico));
     b.type = "button"; b.setAttribute("aria-label", label); b.title = label; b.onclick = fn; return b;
   };
   const move = (to: number) => async () => {
@@ -295,8 +318,8 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
     await api(`/collections/${cid}/items/${it.item_id}`, "PATCH", { pos }).catch(fail("move the clip"));
     go(view);
   };
-  actions.append(btn("↑", "Move earlier", move(i - 1)), btn("↓", "Move later", move(i + 1)),
-    btn("✕", "Remove from project", async () => { await api(`/collections/${cid}/items/${it.item_id}`, "DELETE").catch(fail("remove the clip")); go(view); loadCollections(); }));
+  actions.append(btn("up", "Move earlier", move(i - 1)), btn("down", "Move later", move(i + 1)),
+    btn("close", "Remove from project", async () => { await api(`/collections/${cid}/items/${it.item_id}`, "DELETE").catch(fail("remove the clip")); go(view); loadCollections(); }));
   li.append(el("span", "clip-n", String(i + 1)), img, info, range, actions);
   return li;
 }
@@ -611,11 +634,14 @@ $("settings-btn").onclick = async () => {
     return row;
   });
   $("settings-fields").replaceChildren(...fields);
+  const theme = document.documentElement.dataset.theme ?? "";
+  form.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => (r.checked = r.value === theme));
   msg.textContent = "";
   msg.className = "set-msg";
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const body = Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, cur.schema[k]?.type === "integer" || typeof cur.schema[k]?.enum?.[0] === "number" ? Number(v) : v]));
+    // only the engine's own fields (the theme picker lives in this form too, but it's a local preference)
+    const body = Object.fromEntries([...new FormData(form)].filter(([k]) => k in cur.schema).map(([k, v]) => [k, cur.schema[k]?.type === "integer" || typeof cur.schema[k]?.enum?.[0] === "number" ? Number(v) : v]));
     try {
       await api("/settings", "PUT", body);
       dlg.close();

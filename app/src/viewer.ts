@@ -107,7 +107,7 @@ export class Viewer {
       if (this.i !== i) return;
       this.loadBtn.hidden = false;
       this.loadBtn.disabled = false;
-      this.loadBtn.firstChild!.textContent = "▶ Play video "; // not the last video's progress or error text
+      this.loadBtn.firstChild!.textContent = "Play video "; // not the last video's progress or error text
       this.loadBtn.onclick = async () => {
         this.loadBtn.disabled = true;
         this.loadBtn.firstChild!.textContent = "Fetching from iCloud and finding scenes… ";

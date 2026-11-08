@@ -13,23 +13,23 @@
     <div class="brand"><span class="lamp" aria-hidden="true"></span>Safelight</div>
     <nav aria-label="Library">
       <div class="group">
-        <button type="button" class="nav-item" data-nav="lib:"><span class="ico ico-all"></span>All</button>
-        <button type="button" class="nav-item" data-nav="lib:image"><span class="ico ico-photo"></span>Photos</button>
-        <button type="button" class="nav-item" data-nav="lib:video"><span class="ico ico-video"></span>Videos</button>
+        <button type="button" class="nav-item" data-nav="lib:"><span class="ico ico-all" aria-hidden="true"></span>All</button>
+        <button type="button" class="nav-item" data-nav="lib:image"><span class="ico ico-photo" aria-hidden="true"></span>Photos</button>
+        <button type="button" class="nav-item" data-nav="lib:video"><span class="ico ico-video" aria-hidden="true"></span>Videos</button>
       </div>
       <div class="group">
-        <div class="group-head"><h3>Albums</h3><button type="button" class="add" data-new="album" aria-label="New album">+</button></div>
+        <div class="group-head"><h3>Albums</h3><button type="button" class="add" data-new="album" aria-label="New album" title="New album"><span class="ico ico-plus" aria-hidden="true"></span></button></div>
         <div id="albums" class="list"></div>
       </div>
       <div class="group">
-        <div class="group-head"><h3>Projects</h3><button type="button" class="add" data-new="project" aria-label="New video project">+</button></div>
+        <div class="group-head"><h3>Projects</h3><button type="button" class="add" data-new="project" aria-label="New video project" title="New video project"><span class="ico ico-plus" aria-hidden="true"></span></button></div>
         <div id="projects" class="list"></div>
       </div>
     </nav>
     <div id="activity" class="activity" hidden aria-live="polite"></div>
     <div class="engine-row">
       <div id="engine" class="engine" title="Search engine status"><span class="dot"></span><span id="engine-text">Connecting</span></div>
-      <button type="button" id="settings-btn" class="add gear" aria-label="Settings" title="Settings" disabled>⚙</button>
+      <button type="button" id="settings-btn" class="add gear" aria-label="Settings" title="Settings" disabled><span class="ico ico-gear" aria-hidden="true"></span></button>
     </div>
   </aside>
 
@@ -66,6 +66,16 @@
   <dialog id="settings" class="settings" aria-labelledby="settings-title">
     <form id="settings-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
+      <fieldset class="themes">
+        <legend>Appearance</legend>
+        <div class="theme-opts">
+          <label class="theme-opt"><input type="radio" name="theme" value=""><span class="sw sw-system"></span><span class="tn">System</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="mist"><span class="sw sw-mist"></span><span class="tn">Mist</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="peach"><span class="sw sw-peach"></span><span class="tn">Peach</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="mint"><span class="sw sw-mint"></span><span class="tn">Mint</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="dusk"><span class="sw sw-dusk"></span><span class="tn">Dusk</span></label>
+        </div>
+      </fieldset>
       <div id="settings-fields"></div>
       <p id="settings-msg" class="set-msg" role="alert"></p>
       <div class="set-actions">
@@ -77,15 +87,15 @@
 
   <div id="viewer" class="viewer" hidden role="dialog" aria-modal="true" aria-label="Preview">
     <div id="stage" class="stage">
-      <button type="button" class="nav prev" id="prev" aria-label="Previous">‹</button>
+      <button type="button" class="nav prev" id="prev" aria-label="Previous"><span class="ico ico-prev" aria-hidden="true"></span></button>
       <img id="viewer-img" alt="">
       <video id="viewer-video" controls playsinline preload="metadata" hidden></video>
-      <button type="button" id="load-video" class="load-video" hidden>▶ Play video <span>downloads it from iCloud once</span></button>
-      <button type="button" class="nav next" id="next" aria-label="Next">›</button>
+      <button type="button" id="load-video" class="load-video" hidden>Play video <span>downloads it from iCloud once</span></button>
+      <button type="button" class="nav next" id="next" aria-label="Next"><span class="ico ico-next" aria-hidden="true"></span></button>
       <span id="counter" class="counter"></span>
     </div>
     <aside id="info" class="info"></aside>
-    <button type="button" class="close" id="close" aria-label="Close">✕</button>
+    <button type="button" class="close" id="close" aria-label="Close"><span class="ico ico-close" aria-hidden="true"></span></button>
   </div>
 </body>
 </html>

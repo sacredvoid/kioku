@@ -2,7 +2,7 @@
 // viewport exist in the DOM, so 58k items scroll like 58.
 import { fmtDur, thumb, type Item } from "./api";
 
-const MIN_TILE = 168, GAP = 3, HEAD = 58, BUFFER = 1200, LOAD_DELAY = 100; // ms
+const MIN_TILE = 168, GAP = 4, HEAD = 58, BUFFER = 1200, LOAD_DELAY = 100; // ms
 type Row = { y: number; h: number; label?: string; start: number; end: number };
 
 const monthLabel = (ym: string) =>
