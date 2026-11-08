@@ -4,6 +4,7 @@ Add to Claude Code once:
   claude mcp add safelight -- uv run --directory ~/Documents-Local/github/contact-sheet/engine mcp_server.py
 """
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -168,6 +169,113 @@ def export_project(collection_id: int) -> dict:
 def export_status(collection_id: int) -> dict:
     """Status of the last export: running, done (with file path) or failed."""
     return call("GET", f"/collections/{collection_id}/export")
+
+
+# ---------- editing: format, look, captions, per-clip effects, transitions, renders
+
+def drop_unset(**kw):
+    return {k: v for k, v in kw.items() if v is not None}
+
+
+@server.tool(annotations=READ_ONLY)
+def get_edit(collection_id: int) -> dict:
+    """The project's edit: format, look, per-clip speed/adjust/look/reframe, transitions, captions state, where each clip
+    starts on the output timeline, total length, warnings, and the allowed options (looks, aspects, transition types).
+    Call it before changing anything and after, to check the length. Also returns edit_hash and captions readiness
+    (ready, pending, no_speech clip counts)."""
+    res = call("GET", f"/collections/{collection_id}/edit")
+    if "error" in res:
+        return res
+    cap = call("GET", f"/collections/{collection_id}/captions")
+    res["captions_status"] = cap if "error" not in cap else cap["error"]
+    return res
+
+
+@server.tool()
+def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, look: str = "", look_strength: float = -1,
+             captions: bool | None = None, caption_style: str = "") -> dict:
+    """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
+    stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop). size: short side 720, 1080 or 2160.
+    fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
+    unless the user wants it strong. captions=true burns the spoken words in and writes an .srt next to the video: it
+    transcribes each clip's audio once (needs whisper.cpp; the error says how to install it); silent clips and music
+    get no captions. caption_style: bold or box. Turning captions on starts the transcription and returns at once;
+    check get_edit captions_status.pending before rendering."""
+    body = drop_unset(aspect=aspect or None, size=size or None, fps=fps or None, look_strength=None if look_strength < 0 else look_strength,
+                      captions=captions, caption_style=caption_style or None)
+    if look:
+        body["look"] = None if look.lower() == "none" else look
+    if not body:
+        return {"error": "Nothing to change: pass at least one argument."}
+    return call("PATCH", f"/collections/{collection_id}/edit", body)
+
+
+@server.tool()
+def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, volume: float | None = None,
+                exposure: float | None = None, contrast: float | None = None, saturation: float | None = None,
+                warmth: float | None = None, look: str | None = None, look_strength: float | None = None,
+                reframe_mode: str | None = None, reframe_pos: float | None = None, reframe_from: float | None = None,
+                reframe_to: float | None = None) -> dict:
+    """Change one clip's look and motion. Only the arguments you pass change; speed also scales its audio (0.25 to 4;
+    photos cannot change speed). volume 0 to 2. exposure and warmth -1 to 1, contrast 0.8 to 1.3, saturation 0 to 1.6.
+    look: a name from get_edit, or "none" for no look on this clip even when the project has one.
+    reframe_mode: center, manual (reframe_pos) or pan (reframe_from to reframe_to); positions are 0 to 1 along the
+    axis being cropped. Item ids come from get_collection."""
+    body = drop_unset(speed=speed, volume=volume, exposure=exposure, contrast=contrast, saturation=saturation,
+                      warmth=warmth, look_strength=look_strength, reframe_mode=reframe_mode, reframe_pos=reframe_pos,
+                      reframe_from=reframe_from, reframe_to=reframe_to)
+    if look is not None:
+        body["look"] = None if look.lower() == "none" else look
+    if not body:
+        return {"error": "Nothing to change: pass at least one effect."}
+    return call("PATCH", f"/collections/{collection_id}/edit/clips/{item_id}", body)
+
+
+@server.tool()
+def set_transition(collection_id: int, after_item_id: int, type: str, duration: float = 0.5) -> dict:
+    """Join a clip to the next one. type: cut, dissolve, fade-black, wipe-left, wipe-right, slide-left. Duration 0.2 to 2 s,
+    capped at half the shorter clip; transitions shorten the edit by their duration. Use 'cut' to remove one."""
+    path = f"/collections/{collection_id}/edit/transitions/{after_item_id}"
+    return call("DELETE", path) if type == "cut" else call("PUT", path, {"type": type, "duration": duration})
+
+
+@server.tool()
+def render_preview(collection_id: int, start: float = 0, end: float = 0) -> dict:
+    """Render a quick low-resolution preview from the playable copies. Optional start/end (seconds on the output
+    timeline) render only that part; end=0 means to the end. Returns at once; poll render_status."""
+    body = {"mode": "preview", **({"start": start} if start > 0 else {}), **({"end": end} if end > 0 else {})}
+    return call("POST", f"/collections/{collection_id}/render", body)
+
+
+@server.tool()
+def render_final(collection_id: int, codec: str = "hevc") -> dict:
+    """Render the finished video from the original files (downloads iCloud originals, can take minutes). Only when the
+    user asked for the finished video. codec: hevc or h264. Output goes under ~/Movies/Safelight. Poll render_status."""
+    return call("POST", f"/collections/{collection_id}/render", {"mode": "final", "codec": codec})
+
+
+@server.tool(annotations=READ_ONLY)
+def render_status(collection_id: int, mode: str = "preview", wait_seconds: int = 0) -> list:
+    """State of the last preview or final render (mode: preview or final): stage, progress, output path, .srt path,
+    warnings, error. When done it also returns a contact sheet image of the result: look at it and fix what you see
+    (cuts, crop, color, caption position). wait_seconds (0 to 90) waits for it to finish, so you do not need to poll
+    in a tight loop."""
+    if mode not in ("preview", "final"):
+        return [{"error": "mode must be preview or final"}]
+    path = f"/collections/{collection_id}/render/{mode}"
+    deadline = time.time() + max(0, min(wait_seconds, 90))
+    while True:
+        j = call("GET", path)
+        if "error" in j or j.get("status") != "running" or time.time() >= deadline:
+            break
+        time.sleep(1)
+    if j.get("status") != "done":
+        return [j]
+    try:
+        with urllib.request.urlopen(f"{API}{path}/sheet", timeout=60) as r:
+            return [j, Image(data=r.read(), format="jpeg")]
+    except (urllib.error.URLError, TimeoutError):
+        return [{**j, "sheet_error": "no contact sheet available"}]
 
 
 if __name__ == "__main__":

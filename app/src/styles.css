@@ -364,6 +364,14 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
 @keyframes shimmer { to { transform: translateX(100%) } }
 .ask-out.failed { color: var(--danger) }
 .proj-meta { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); padding: 4px 2px }
+.render-row { padding-top: 10px }
+.cap-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer }
+.cap-toggle input { accent-color: var(--accent) }
+.prog-row { display: flex; align-items: center; gap: 12px; position: relative; z-index: 1 }
+.prog-text { font-size: 13px; white-space: nowrap }
+.prog-row progress { flex: 1; min-width: 80px; height: 8px; accent-color: var(--accent) }
+.prog-row button { padding: 4px 12px }
+.preview-video { display: block; width: 100%; max-width: 560px; max-height: 60vh; border-radius: var(--r); background: #000 }
 .clips { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px }
 .clip { display: grid; grid-template-columns: 22px 112px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 7px 10px 7px 8px;
   background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px;
