@@ -97,6 +97,11 @@ vid = Path(tempfile.mkdtemp()) / "n.mp4"
 import subprocess  # noqa: E402
 subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:r=30000/1001:d=1", str(vid)], check=True)
 assert projects.probe(vid)[0] == ntsc, projects.probe(vid)
+# variable frame rate (phone-style timestamps): nominal 30 fps even though the average is lower
+vfr = vid.with_name("vfr.mp4")
+subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:r=30:d=2", "-vf",
+                r"select=not(eq(mod(n\,3)\,1))", "-fps_mode", "vfr", str(vfr)], check=True)
+assert projects.probe(vfr)[0] == 30, projects.probe(vfr)
 
 # core.connect: WAL is switched on once per process; a busy db must not break connect()
 core.DB_PATH = Path(tempfile.mkdtemp()) / "w.db"

@@ -95,10 +95,12 @@ def originals(uuids, dest):
 
 def probe(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                        "stream=avg_frame_rate:format=duration", "-of", "json", str(path)],
+                        "stream=r_frame_rate:format=duration", "-of", "json", str(path)],
                        capture_output=True, text=True)
     info = json.loads(r.stdout or "{}")
-    num, _, den = (info.get("streams") or [{}])[0].get("avg_frame_rate", "30/1").partition("/")
+    # r_frame_rate is the nominal rate (30/1, 30000/1001, 60000/1001). avg_frame_rate is not: iPhone video is
+    # variable-rate, so its average lands on values like 2550/91 (28.02) that no editor timeline uses.
+    num, _, den = (info.get("streams") or [{}])[0].get("r_frame_rate", "30/1").partition("/")
     # keep the exact ratio (30000/1001, not 29.97 or 30): the fcp_xml writer sets ntsc from it, so Resolve reads 29.97
     fps = float(num) / float(den or 1) if float(den or 1) else 30.0
     return fps or 30.0, float(info.get("format", {}).get("duration") or 0)
