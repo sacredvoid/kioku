@@ -53,6 +53,15 @@ A local Mac app for the user's Photos library (58,396 items; 54k iCloud-only):
 - Deferred fixes are GitHub issues #1 to #5 on sacredvoid/safelight (also listed in WORK.md). Close them from commits with `Fixes #N`.
 - Tests: `uv run test_library.py`, `test_media.py`, `test_settings.py` (settings, queues, log filter, origin checks).
 
+## Editing, captions, smart albums (2026-11-08 afternoon)
+- Designs: notes/editing-design.md, notes/smart-album-design.md, combined notes/build-plan.md (Fable-reviewed).
+- Built in 4 worktrees and merged: edit.py (spec, validation, timeline, looks), render.py (ffmpeg preview/final, chunked join, HDR, portrait), captions.py (whisper-cli, cue PNG overlay, .srt), albums.py + app/src/review.ts (smart album drafts). 7 new MCP tools (22 total). Integration commit 04f1b03.
+- Tests: test_edit, test_render, test_captions, test_albums, test_contract (all set CS_DB before importing core).
+- Smoke-tested on a spare engine (port 8766, db copy): 8 s 9:16 warm preview of Halloween rendered upright, bt709; smart album draft via real claude -p returned 150 candidates.
+- Index details panel: click "N indexed" (a594e1c); Fetch new photos = POST /reindex?newer=true.
+- Still needs Sam: `brew install whisper-cpp` + ggml-small.bin into data/models/, then confirm whisper-cli flags with `whisper-cli -h`; one real iPhone HLG portrait clip through preview + final, compare in QuickTime; try the review screen; test_media.py once by hand.
+- Known nit: preview contact sheet leaves wide gaps for portrait tiles.
+
 ## Next up (in order)
 
 1. When the Fall 2026 edit (project 3) finishes, restart the engine in iTerm to load everything above. Then check that a new Ask analyzes several videos at once (sidebar activity panel).

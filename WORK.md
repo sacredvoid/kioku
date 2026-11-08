@@ -50,6 +50,15 @@ Status keys: [x] done · [~] in progress · [ ] todo
 - [~] Fall 2026 edit (project 3), started on the old engine, one video at a time
 - [ ] Restart engine to load all of the above (after Fall finishes)
 
+## Editing, captions, smart albums (2026-11-08 afternoon)
+- Designs: notes/editing-design.md, notes/smart-album-design.md, combined notes/build-plan.md (Fable-reviewed).
+- Built in 4 worktrees and merged: edit.py (spec, validation, timeline, looks), render.py (ffmpeg preview/final, chunked join, HDR, portrait), captions.py (whisper-cli, cue PNG overlay, .srt), albums.py + app/src/review.ts (smart album drafts). 7 new MCP tools (22 total). Integration commit 04f1b03.
+- Tests: test_edit, test_render, test_captions, test_albums, test_contract (all set CS_DB before importing core).
+- Smoke-tested on a spare engine (port 8766, db copy): 8 s 9:16 warm preview of Halloween rendered upright, bt709; smart album draft via real claude -p returned 150 candidates.
+- Index details panel: click "N indexed" (a594e1c); Fetch new photos = POST /reindex?newer=true.
+- Still needs Sam: `brew install whisper-cpp` + ggml-small.bin into data/models/, then confirm whisper-cli flags with `whisper-cli -h`; one real iPhone HLG portrait clip through preview + final, compare in QuickTime; try the review screen; test_media.py once by hand.
+- Known nit: preview contact sheet leaves wide gaps for portrait tiles.
+
 ## Open issues (deferred from the audit, tracked on GitHub)
 
 - [ ] #1 WAL for index.db (do after the indexer stops)
