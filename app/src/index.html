@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safelight</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./main.ts"></script>
+</head>
+<body>
+  <aside class="side">
+    <div class="side-drag" data-tauri-drag-region></div>
+    <div class="brand"><span class="lamp" aria-hidden="true"></span>Safelight</div>
+    <nav aria-label="Library">
+      <div class="group">
+        <button type="button" class="nav-item" data-nav="lib:"><span class="ico ico-all"></span>All</button>
+        <button type="button" class="nav-item" data-nav="lib:image"><span class="ico ico-photo"></span>Photos</button>
+        <button type="button" class="nav-item" data-nav="lib:video"><span class="ico ico-video"></span>Videos</button>
+      </div>
+      <div class="group">
+        <div class="group-head"><h3>Albums</h3><button type="button" class="add" data-new="album" aria-label="New album">+</button></div>
+        <div id="albums" class="list"></div>
+      </div>
+      <div class="group">
+        <div class="group-head"><h3>Projects</h3><button type="button" class="add" data-new="project" aria-label="New video project">+</button></div>
+        <div id="projects" class="list"></div>
+      </div>
+    </nav>
+    <div id="engine" class="engine" title="Search engine status"><span class="dot"></span><span id="engine-text">Connecting</span></div>
+  </aside>
+
+  <div class="main">
+    <header class="bar" data-tauri-drag-region>
+      <label class="search">
+        <span class="sr">Search your library</span>
+        <span class="ico ico-search" aria-hidden="true"></span>
+        <input id="q" type="search" placeholder="Search: “sunset from the car”, “mom”, “tacos in october”" autocomplete="off" spellcheck="false">
+        <kbd>⌘K</kbd>
+      </label>
+    </header>
+
+    <div id="head" class="view-head"></div>
+    <p id="summary" class="summary" aria-live="polite"></p>
+    <div id="project" class="project" hidden></div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" hidden></div>
+  </div>
+
+  <div id="selbar" class="selbar" hidden>
+    <span id="sel-count"></span>
+    <div class="sel-actions">
+      <button type="button" id="sel-add-album">Add to album</button>
+      <button type="button" id="sel-add-project">Add to project</button>
+      <button type="button" id="sel-remove" hidden>Remove from here</button>
+      <button type="button" id="sel-clear" class="ghost">Clear</button>
+    </div>
+    <div id="menu" class="menu" hidden role="menu"></div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <div id="viewer" class="viewer" hidden role="dialog" aria-modal="true" aria-label="Preview">
+    <div id="stage" class="stage">
+      <button type="button" class="nav prev" id="prev" aria-label="Previous">‹</button>
+      <img id="viewer-img" alt="">
+      <video id="viewer-video" controls playsinline preload="metadata" hidden></video>
+      <button type="button" id="load-video" class="load-video" hidden>▶ Play video <span>downloads it from iCloud once</span></button>
+      <button type="button" class="nav next" id="next" aria-label="Next">›</button>
+      <span id="counter" class="counter"></span>
+    </div>
+    <aside id="info" class="info"></aside>
+    <button type="button" class="close" id="close" aria-label="Close">✕</button>
+  </div>
+</body>
+</html>

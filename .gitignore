@@ -1,0 +1,17 @@
+# Personal data: index, thumbnails, video proxies, audio, tags/albums db. Never commit.
+data/
+*.db
+*.db-*
+*.sqlite
+.env
+.env.*
+
+# Build / tooling
+.venv/
+__pycache__/
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.playwright-mcp/
+.DS_Store
