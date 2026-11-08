@@ -16,15 +16,17 @@ server = MCPServer("safelight", instructions=(
     "pointers to Photos items (uuid), never copies. Times are in seconds."))
 
 
-def call(method, path, body=None):
+def call(method, path, body=None, timeout=120):
     req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read()
             return json.loads(raw) if raw else {"ok": True}
     except urllib.error.HTTPError as e:
         return {"error": f"{e.code}: {e.read().decode()[:500]}"}
+    except TimeoutError:
+        return {"error": f"No answer after {timeout} s. The engine keeps working; call the same tool again to wait for it."}
     except urllib.error.URLError:
         return {"error": "Safelight engine isn't running. Open Safelight or run `uv run server.py`."}
 
@@ -52,7 +54,8 @@ def analyze_clip(uuid: str) -> list:
     movement or camera shake), and returns a contact sheet image with one labelled frame per scene (#idx, start-end s).
     First call per video downloads it from iCloud and takes 10-60 s; later calls are instant.
     Cut on scene boundaries: use a scene's t0/t1 (or a sub-range of it) with set_clip_range."""
-    res = call("POST", f"/media/{uuid}/analyze")
+    # an iCloud download alone may take up to Settings > iCloud download timeout (180 s by default)
+    res = call("POST", f"/media/{uuid}/analyze", timeout=600)
     if "error" in res:
         return [res]
     req = urllib.request.Request(API + res["sheet"])
