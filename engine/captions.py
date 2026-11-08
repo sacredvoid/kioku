@@ -7,7 +7,6 @@ import hashlib
 import itertools
 import json
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -148,8 +147,8 @@ def run_whisper(wav, base, seconds):
     cmd = [whisper_bin(), "-m", str(model_path()), "-f", str(wav), "-l", "auto", "-oj", "-of", str(base), "-sns", "-t", "4", "-np"]
     for attempt in (cmd, cmd + ["-ng"]):  # -ng = no GPU, the retry when Metal fails
         try:
-            r = subprocess.run(attempt, capture_output=True, text=True, timeout=max(120, 2 * seconds),
-                               preexec_fn=lambda: os.nice(10))
+            # nice as a prefix, like render.run_ffmpeg: preexec_fn is documented unsafe in a threaded process
+            r = subprocess.run(["nice", "-n", "10", *attempt], capture_output=True, text=True, timeout=max(120, 2 * seconds))
         except subprocess.TimeoutExpired:
             raise RuntimeError("whisper took too long on one clip; skipped it")
         if r.returncode == 0:
