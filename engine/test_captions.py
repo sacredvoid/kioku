@@ -63,6 +63,8 @@ captions.write_srt([Cue(0.5, 1.5, "hello"), Cue(3725.25, 3726.0, "late")], srt, 
 assert srt.read_text() == "1\n00:00:00,000 --> 00:00:01,000\nhello\n\n2\n01:02:04,750 --> 01:02:05,500\nlate\n", repr(srt.read_text())
 captions.write_srt([Cue(0.0, 1.0, "gone"), Cue(2.0, 3.0, "kept")], srt, shift=1.5)  # ends before the window: skipped
 assert srt.read_text().startswith("1\n00:00:00,500 --> 00:00:01,500\nkept")
+captions.write_srt([Cue(1.0, 2.0, "in"), Cue(2.5, 4.0, "clipped"), Cue(5.0, 6.0, "after")], srt, shift=1.0, end=2.0)
+assert srt.read_text() == "1\n00:00:00,000 --> 00:00:01,000\nin\n\n2\n00:00:01,500 --> 00:00:02,000\nclipped\n", repr(srt.read_text())
 
 # ---------- clean
 L = lambda *t: [Line(i, i + 1, x) for i, x in enumerate(t)]  # noqa: E731
