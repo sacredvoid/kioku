@@ -38,8 +38,8 @@ import render
 
 log = logging.getLogger("safelight")
 LOG_FILE = core.DATA / "engine.log"
-# the app polls these every 1-2 s (and loads hundreds of thumbs); successful hits are noise in the access log
-QUIET = re.compile(r"^/(health|index/info|media/activity|collections/\d+/(ask|export|render/(preview|final)|captions/job)|drafts/\d+/job|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
+# the app polls these every 1-5 s (and loads hundreds of thumbs); successful hits are noise in the access log
+QUIET = re.compile(r"^/(health|index/info|media/activity|collections|drafts|collections/\d+/(ask|export|render/(preview|final)|captions/job)|drafts/\d+/job|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
 
 
 class QuietPolls(logging.Filter):

@@ -73,6 +73,8 @@ assert not f.filter(rec("GET", "/thumb/ABC", 200))
 assert f.filter(rec("GET", "/media/activity", 404))
 assert f.filter(rec("POST", "/collections/2/ask", 202))
 assert f.filter(rec("GET", "/search?q=dog", 200))
+assert not f.filter(rec("GET", "/collections", 200)) and not f.filter(rec("GET", "/drafts", 200))  # sidebar polls, every 5 s
+assert f.filter(rec("GET", "/collections/2", 200)) and f.filter(rec("GET", "/drafts/2", 200))  # opening one is a real request
 
 # unexpected exceptions come back as readable JSON, not a bare 500
 @server.app.get("/__boom")
