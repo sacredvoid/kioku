@@ -28,7 +28,7 @@
     </nav>
     <div id="activity" class="activity" hidden aria-live="polite"></div>
     <div class="engine-row">
-      <div id="engine" class="engine" title="Search engine status"><span class="dot"></span><span id="engine-text">Connecting</span></div>
+      <button type="button" id="engine" class="engine" title="Search index details"><span class="dot"></span><span id="engine-text">Connecting</span></button>
       <button type="button" id="settings-btn" class="add gear" aria-label="Settings" title="Settings" disabled><span class="ico ico-gear" aria-hidden="true"></span></button>
     </div>
   </aside>
@@ -83,6 +83,16 @@
         <button type="submit" class="primary">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="index-dlg" class="settings" aria-labelledby="index-title">
+    <h2 id="index-title">Search index</h2>
+    <dl id="index-facts" class="facts"></dl>
+    <p id="index-msg" class="set-msg" role="status"></p>
+    <div class="set-actions">
+      <button type="button" id="index-close" class="ghost">Close</button>
+      <button type="button" id="index-new" class="primary" title="Index photos and videos taken since the newest indexed one">Fetch new photos</button>
+    </div>
   </dialog>
 
   <div id="viewer" class="viewer" hidden role="dialog" aria-modal="true" aria-label="Preview">

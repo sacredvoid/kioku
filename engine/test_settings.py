@@ -1,15 +1,18 @@
 """Settings round-trip, validation, the Claude agent queue, and the quiet access-log filter.  uv run test_settings.py"""
 import logging
+import os
 import tempfile
 import threading
 import time
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
 
-import projects
-import server
-import settings
+from fastapi.testclient import TestClient  # noqa: E402
+
+import projects  # noqa: E402
+import server  # noqa: E402
+import settings  # noqa: E402
 
 settings.FILE = Path(tempfile.mkdtemp()) / "settings.json"  # never touch the real data/settings.json
 settings._cur = None
@@ -121,4 +124,21 @@ finally:
     sqlite3.connect = orig
 assert busy not in core._wal
 holder.rollback()
+
+# index info + "fetch new photos": counts and span come from the db; newer=true starts from the newest item's day
+db = core.connect()
+for u, kind, created, err in [("i1", "image", "2026-11-05T10:00:00-05:00", None), ("v1", "video", "2015-11-02T09:00:00-05:00", None),
+                              ("p1", "poster", "2026-11-07T21:30:00-05:00", "bad file")]:
+    db.execute("insert into assets(uuid, kind, created, indexed_at, error) values (?,?,?,?,?)", (u, kind, created, 1.0, err))
+db.commit()
+info = c.get("/index/info").json()
+assert info["assets"] == 3 and info["kinds"] == {"image": 1, "video": 1, "poster": 1} and info["failed"] == 1, info
+assert info["newest"].startswith("2026-11-07") and info["oldest"].startswith("2015-11-02") and info["model"] == core.MODEL_ID, info
+started = []
+def fake_run(since):
+    started.append(since); server.lock.release()
+server.run_reindex = fake_run
+assert c.post("/reindex?newer=true").status_code == 202
+time.sleep(0.2)
+assert started == ["2026-11-07"], started
 print("settings checks passed")

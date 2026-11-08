@@ -1,5 +1,5 @@
 // Safelight: library, search, albums and video projects on top of your Photos library.
-import { api, errMsg, fmtDur, isVideo, thumb, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
+import { api, ApiError, errMsg, fmtDur, isVideo, thumb, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
 import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 
@@ -668,7 +668,7 @@ async function heartbeat() {
     dot.className = "engine ok";
     const failed = h.reindex.startsWith("failed");
     $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${h.reindex === "running" ? " · indexing" : failed ? " · indexing failed" : ""}`;
-    dot.title = failed ? h.reindex : "Search engine status";
+    dot.title = failed ? h.reindex : "Search index details";
     if (!ready) { ready = true; syncCollections(); go(view); }
     $<HTMLButtonElement>("settings-btn").disabled = false;
   } catch {
@@ -679,6 +679,54 @@ async function heartbeat() {
   setTimeout(heartbeat, ready ? 15000 : 1000);
 }
 heartbeat();
+
+// ---------- index details: click the "N indexed" label
+type IndexInfo = {
+  assets: number; kinds: Record<string, number>; newest: string | null; oldest: string | null; last_indexed: number | null;
+  failed: number; model: string; image_tokens: number; reindex: string;
+  last_run: { since: string | null; started: number; finished: number | null; added: number | null } | null;
+};
+const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "none");
+const at = (sec: number | null) => (sec ? new Date(sec * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never");
+let indexTimer = 0;
+async function showIndex() {
+  const dlg = $<HTMLDialogElement>("index-dlg");
+  if (!dlg.open) return;
+  const btn = $<HTMLButtonElement>("index-new");
+  const msg = $("index-msg");
+  try {
+    const i = await api<IndexInfo>("/index/info");
+    const k = i.kinds;
+    const rows: [string, string][] = [
+      ["Items", `${i.assets.toLocaleString()} (${(k.image ?? 0).toLocaleString()} photos, ${((k.video ?? 0) + (k.poster ?? 0)).toLocaleString()} videos)`],
+      ["Covers", `${day(i.oldest)} to ${day(i.newest)}`],
+      ["Last indexed", at(i.last_indexed)],
+      ["Model", `${i.model}, ${i.image_tokens} image tokens`],
+    ];
+    if (i.failed) rows.push(["Couldn't read", `${i.failed.toLocaleString()} items (skipped)`]);
+    const r = i.last_run;
+    if (r) rows.push(["Last fetch", r.finished ? `${at(r.finished)}, ${r.added ?? 0} new` : `running since ${at(r.started)}`]);
+    $("index-facts").replaceChildren(...rows.flatMap(([a, b]) => [el("dt", "", a), el("dd", "", b)]));
+    const running = i.reindex === "running";
+    btn.disabled = running;
+    btn.textContent = running ? "Fetching..." : "Fetch new photos";
+    msg.className = i.reindex.startsWith("failed") ? "set-msg error" : "set-msg";
+    msg.textContent = running ? `Indexing items since ${day(r?.since ?? null)}. You can close this.` : i.reindex.startsWith("failed") ? `Last fetch failed: ${i.reindex.slice(8)}` : "";
+    clearTimeout(indexTimer);
+    if (running) indexTimer = window.setTimeout(showIndex, 2000);
+  } catch (e) { msg.className = "set-msg error"; msg.textContent = `Couldn't load index details: ${errMsg(e)}`; }
+}
+dot.onclick = () => { if (!ready) return; $<HTMLDialogElement>("index-dlg").showModal(); showIndex(); };
+$("index-close").onclick = () => $<HTMLDialogElement>("index-dlg").close();
+$("index-new").onclick = async () => {
+  try {
+    await api("/reindex?newer=true", "POST");
+    showIndex();
+  } catch (e) {
+    const m = $("index-msg"); m.className = "set-msg error";
+    m.textContent = e instanceof ApiError && e.status === 409 ? "Already fetching." : `Couldn't start: ${errMsg(e)}`;
+  }
+};
 
 // ---------- settings: form built from the engine's schema, so new settings show up without app changes
 const LABELS: Record<string, [string, string]> = {

@@ -32,7 +32,7 @@ import settings
 log = logging.getLogger("safelight")
 LOG_FILE = core.DATA / "engine.log"
 # the app polls these every 1-2 s (and loads hundreds of thumbs); successful hits are noise in the access log
-QUIET = re.compile(r"^/(health|media/activity|collections/\d+/(ask|export)|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
+QUIET = re.compile(r"^/(health|index/info|media/activity|collections/\d+/(ask|export)|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
 
 
 class QuietPolls(logging.Filter):
@@ -61,7 +61,7 @@ def setup_logging():
     logging.getLogger("uvicorn.access").addFilter(QuietPolls())
 
 
-state = {"index": None, "reindex": "idle", "checked": 0.0, "stamp": None}
+state = {"index": None, "reindex": "idle", "checked": 0.0, "stamp": None, "last_run": None}
 lock = threading.Lock()
 RELOAD_EVERY = 30  # seconds; picks up items a running indexer has added
 THUMB_EXT = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
@@ -149,8 +149,20 @@ async def unhandled(request: Request, exc: Exception):
 
 @app.get("/health")
 def health():
-    idx = state["index"]
+    idx = fresh_index()
     return {"assets": len(idx.assets) if idx else 0, "reindex": state["reindex"]}
+
+
+@app.get("/index/info")
+def index_info():
+    """What's in the search index: counts by kind, date span, when it last changed, which model and image detail."""
+    db = core.connect()
+    kinds = dict(db.execute("select kind, count(*) from assets group by kind").fetchall())
+    newest, oldest, last = db.execute("select max(created), min(created), max(indexed_at) from assets").fetchone()
+    return {"assets": sum(kinds.values()), "kinds": kinds, "newest": newest, "oldest": oldest, "last_indexed": last,
+            "failed": db.execute("select count(*) from assets where error is not null").fetchone()[0],
+            "model": core.MODEL_ID, "image_tokens": core.IMAGE_TOKENS,
+            "reindex": state["reindex"], "last_run": state["last_run"]}
 
 
 @app.get("/search")
@@ -234,7 +246,13 @@ def run_reindex(since):
         if since:
             cmd += ["--since", since]
         log.info("reindex started (since %s)", since or "beginning")
+        # count only this run's date range, so a separate indexer running at the same time doesn't inflate "added"
+        count = lambda: core.connect().execute("select count(*) from assets where created >= ?", (since or "",)).fetchone()[0]
+        before = count()
+        run = state["last_run"] = {"since": since, "started": time.time(), "finished": None, "added": None}
         r = subprocess.run(cmd, capture_output=True, text=True)
+        run["finished"] = time.time()
+        run["added"] = count() - before
         state["reindex"] = "idle" if r.returncode == 0 else f"failed: {r.stderr.strip()[-300:]}"
         if r.returncode:
             log.error("reindex failed (exit %d): %s", r.returncode, r.stderr.strip()[-2000:])
@@ -247,8 +265,12 @@ def run_reindex(since):
 
 
 @app.post("/reindex", status_code=202)
-def reindex(since: date | None = None):
-    """Index new items only (already-indexed ones are skipped). Runs in the background."""
+def reindex(since: date | None = None, newer: bool = False):
+    """Index new items only (already-indexed ones are skipped). Runs in the background.
+    newer=true: only items from the newest indexed item's day onward (the "fetch new photos" button)."""
+    if newer:
+        newest = core.connect().execute("select max(created) from assets").fetchone()[0]
+        since = date.fromisoformat(newest[:10]) if newest else since
     if not lock.acquire(blocking=False):
         raise HTTPException(409, "reindex already running")
     state["reindex"] = "running"
