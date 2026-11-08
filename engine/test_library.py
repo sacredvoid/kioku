@@ -19,6 +19,7 @@ db.commit()
 
 app = FastAPI()
 app.include_router(library.router)
+app.add_exception_handler(library.RequestValidationError, library.validation_error)
 c = TestClient(app)
 
 
@@ -57,6 +58,8 @@ assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": 2, "t1": 5})
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": 6}).status_code == 422  # in after out
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t1": 99}).status_code == 422  # past the end
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": -1}).status_code == 422
+for bad in ('{"t0": NaN}', '{"t1": Infinity}', '{"pos": NaN}'):  # NaN used to pass ge=0 and then 500 on the reply
+    assert c.patch(f"/collections/{prj['id']}/items/{iid}", content=bad, headers={"content-type": "application/json"}).status_code == 422, bad
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"pos": 9}).json()["t1"] == 5  # other fields kept
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t1": None}).json() == {"item_id": iid, "t0": 2, "t1": None}
 

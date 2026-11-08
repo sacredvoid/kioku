@@ -76,6 +76,10 @@ assert f.filter(rec("GET", "/search?q=dog", 200))
 assert not f.filter(rec("GET", "/collections", 200)) and not f.filter(rec("GET", "/drafts", 200))  # sidebar polls, every 5 s
 assert f.filter(rec("GET", "/collections/2", 200)) and f.filter(rec("GET", "/drafts/2", 200))  # opening one is a real request
 
+# a NaN in a request is a 422 with loc and msg; FastAPI's default echoed the input and could not serialize it (500)
+r = c.patch("/collections/1/items/1", content='{"t0": NaN}', headers={"content-type": "application/json"})
+assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "t0"], r.text
+
 # unexpected exceptions come back as readable JSON, not a bare 500
 @server.app.get("/__boom")
 def boom():

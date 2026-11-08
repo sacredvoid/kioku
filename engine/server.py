@@ -18,6 +18,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -156,6 +157,7 @@ app.include_router(edit.router)
 app.include_router(render.router)
 app.include_router(captions.router)
 app.include_router(albums.router)
+app.add_exception_handler(RequestValidationError, library.validation_error)
 
 
 @app.exception_handler(Exception)
