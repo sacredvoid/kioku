@@ -1,4 +1,5 @@
 """Shared model, database and hybrid search for the Safelight engine."""
+import itertools
 import os
 import re
 import sqlite3
@@ -104,25 +105,23 @@ class Index:
         rows = db.execute("select uuid, vec, t0, t1, source from segments").fetchall()
         self.seg_uuid = [r[0] for r in rows]
         self.seg_span = [(r[2], r[3], r[4]) for r in rows]
+        ids = {}
+        self.seg_asset = np.array([ids.setdefault(u, len(ids)) for u in self.seg_uuid], np.int64)
         self.M = (np.frombuffer(b"".join(r[1] for r in rows), np.float32).reshape(len(rows), -1)
                   if rows else np.zeros((0, 768), np.float32))
         self.assets = {r[0]: r[1:] for r in db.execute("select uuid, kind, path, duration, meta from assets")}
         self.loaded_at = time.time()
 
     def vector_hits(self, query):
-        """Best segment score per asset, highest first. self.moment[uuid] = (t0, t1) of that segment
-        when it's a detected scene, so callers know *where* in a video the match is."""
-        self.moment = {}
+        """Best segment per asset, highest score first: {uuid: (score, segment index, rank)}.
+        Returned rather than stored on self: concurrent searches share this Index."""
         if not len(self.seg_uuid):
             return {}
         s = self.M @ embed_query(query)
-        best = {}
-        for k, (u, v) in enumerate(zip(self.seg_uuid, s.tolist())):
-            if v > best.get(u, -2):
-                best[u] = v
-                t0, t1, src = self.seg_span[k]
-                self.moment[u] = (t0, t1) if src == "scene" else None
-        return dict(sorted(best.items(), key=lambda kv: -kv[1]))
+        order = np.argsort(-s, kind="stable")
+        _, first = np.unique(self.seg_asset[order], return_index=True)  # first hit per asset = its best segment
+        segs = order[np.sort(first)]
+        return {self.seg_uuid[k]: (v, k, rank) for rank, (k, v) in enumerate(zip(segs.tolist(), s[segs].tolist()))}
 
     def keyword_hits(self, query):
         fq = fts_query(query)
@@ -140,23 +139,22 @@ class Index:
 
     def search(self, query, k=20, kind=None):
         vec, kw = self.vector_hits(query), self.keyword_hits(query)
-        top_vec = next(iter(vec.values()), 0)
-        floor = top_vec - self.FLOOR_MARGIN
-        vec_rank = {u: i for i, u in enumerate(vec)}
+        floor = next(iter(vec.values()), (0,))[0] - self.FLOOR_MARGIN
         kw_rank = {u: i for i, u in enumerate(kw)}
+        # weak visual matches with no keyword match are dropped instead of shown as junk; vec is sorted, so stop at the floor
+        strong = itertools.takewhile(lambda u: vec[u][0] >= floor, vec)
         out = []
-        for u in set(vec) | set(kw):
+        for u in dict.fromkeys([*strong, *kw]):
             if u not in self.assets:
                 continue
             akind, path, duration, meta = self.assets[u]
             if kind and not (akind == kind or (kind == "video" and akind == "poster")):
                 continue
-            if u not in kw and vec.get(u, -2) < floor:
-                continue  # weak visual match and no keyword match: drop it instead of showing junk
-            rrf = sum(1 / (self.RRF_K + r[u]) for r in (vec_rank, kw_rank) if u in r)
-            m = self.moment.get(u)
+            v, seg, vrank = vec.get(u, (0, None, None))
+            rrf = sum(1 / (self.RRF_K + r) for r in (vrank, kw_rank.get(u)) if r is not None)
+            t0, t1, src = self.seg_span[seg] if seg is not None else (None, None, None)
             out.append(dict(uuid=u, kind=akind, path=path, duration=duration, score=round(rrf * 1000, 2),
-                            visual=round(vec.get(u, 0), 3), keyword=u in kw, meta=meta,
-                            moment=dict(t0=m[0], t1=m[1]) if m else None))
+                            visual=round(v, 3), keyword=u in kw, meta=meta,
+                            moment=dict(t0=t0, t1=t1) if src == "scene" else None))
         out.sort(key=lambda h: -h["score"])
         return out[:k]

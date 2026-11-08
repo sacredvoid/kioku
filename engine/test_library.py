@@ -68,4 +68,21 @@ assert cols["Summer"]["count"] == 2 and cols["Summer"]["cover"] == "A"
 assert c.delete(f"/collections/{alb['id']}").status_code == 204
 assert core.connect().execute("select count(*) from collection_items where collection_id = ?", (alb["id"],)).fetchone()[0] == 0
 assert core.connect().execute("select count(*) from assets").fetchone()[0] == 3  # photos untouched
+# search: best segment per asset, scene moment, weak visual-only hits dropped, keyword hits kept
+import numpy as np  # noqa: E402
+e = np.eye(768, dtype=np.float32)
+db = core.connect()
+for u, t0, t1, src, v in [("A", None, None, "image", 0.95 * e[0]), ("B", 0, 4, "scene", 0.3 * e[0]),
+                          ("B", 4, 8, "scene", e[0]), ("C", None, None, "poster", e[1])]:
+    db.execute("insert into segments(uuid, t0, t1, source, vec) values (?,?,?,?,?)", (u, t0, t1, src, v.tobytes()))
+db.commit()
+core.embed_query = lambda text: e[0]
+idx = core.Index(db)
+hits = idx.search("zebra")  # no keyword match: vector only, C (score 0) is below the floor
+assert [h["uuid"] for h in hits] == ["B", "A"], hits
+assert hits[0]["moment"] == {"t0": 4, "t1": 8} and hits[0]["visual"] == 1.0 and hits[1]["moment"] is None
+assert [h["uuid"] for h in idx.search("zebra", kind="image")] == ["A"]
+c.put("/asset/C/tags", json={"tags": ["kite"]})
+hits = idx.search("kite")  # keyword match keeps C despite its weak picture score, and ranks it first
+assert [h["uuid"] for h in hits] == ["C", "B", "A"] and hits[0]["keyword"] and hits[0]["visual"] == 0, hits
 print("library checks passed")
