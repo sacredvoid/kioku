@@ -28,11 +28,15 @@ import library
 import projects
 import media
 import settings
+import albums
+import captions
+import edit
+import render
 
 log = logging.getLogger("safelight")
 LOG_FILE = core.DATA / "engine.log"
 # the app polls these every 1-2 s (and loads hundreds of thumbs); successful hits are noise in the access log
-QUIET = re.compile(r"^/(health|index/info|media/activity|collections/\d+/(ask|export)|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
+QUIET = re.compile(r"^/(health|index/info|media/activity|collections/\d+/(ask|export|render/(preview|final)|captions/job)|drafts/\d+/job|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
 
 
 class QuietPolls(logging.Filter):
@@ -138,6 +142,10 @@ app.include_router(library.router)
 app.include_router(projects.router)
 app.include_router(media.router)
 app.include_router(settings.router)
+app.include_router(edit.router)
+app.include_router(render.router)
+app.include_router(captions.router)
+app.include_router(albums.router)
 
 
 @app.exception_handler(Exception)
