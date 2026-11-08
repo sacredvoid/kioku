@@ -243,7 +243,11 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
 
   project.replaceChildren(brief, ask, askOut, meta, expOut, strip);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
-  api<Job>(`/collections/${c.id}/ask`).then((j) => { if (j.status === "running") pollJob(c.id, "ask", askOut, askBtn); }).catch(() => {});
+  askOut.id = "ask-out";
+  api<Job>(`/collections/${c.id}/ask`).then((j) => {
+    if (j.status === "running") pollJob(c.id, "ask", askOut, askBtn);
+    else if (j.status !== "idle") showLastReply(askOut, j); // finished while you were elsewhere, or started outside the app
+  }).catch(() => {});
   api<Job>(`/collections/${c.id}/export`).then((j) => { if (j.status !== "idle") pollJob(c.id, "export", expOut, exp); }).catch(() => {});
 }
 
@@ -382,10 +386,30 @@ function markdown(src: string): HTMLElement {
   return root;
 }
 
+/** A finished edit's reply, shown as history (no polling, no refresh). */
+function showLastReply(out: HTMLElement, j: Job) {
+  out.className = `ask-out ${j.status}`;
+  const when = j.started ? new Date(j.started * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+  const head = el("p", "muted", `Last edit${when ? ` (started ${when})` : ""}${j.model ? ` · ${j.model}` : ""}`);
+  out.replaceChildren(head, j.status === "failed" ? el("p", "", j.error || "Failed") : markdown(j.output || "Done"));
+}
+
+/** An edit started outside the app (Claude Code, MCP, curl) on the open project: pick it up and show it live. */
+async function watchExternalAsk() {
+  if (view.type !== "col" || project.hidden) return;
+  const out = document.getElementById("ask-out");
+  const btn = project.querySelector<HTMLButtonElement>("form.ask button");
+  if (!out || !btn || out.classList.contains("running")) return;
+  try {
+    const j = await api<Job>(`/collections/${view.id}/ask`);
+    if (j.status === "running" && out.isConnected && !out.classList.contains("running")) pollJob(view.id, "ask", out, btn);
+  } catch { /* heartbeat reports the engine being down */ }
+}
+
 function renderSteps(out: HTMLElement, j: Job) {
   const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
   const head = el("div", "steps-head");
-  head.append(el("span", "pulse-dot"), el("span", "", "Claude is editing"), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
+  head.append(el("span", "pulse-dot"), el("span", "", `Claude is editing${j.model ? ` · ${j.model}` : ""}`), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
   const list = el("ol", "steps");
   const steps = j.steps ?? [];
   steps.slice(-6).forEach((t, k, arr) => list.append(el("li", k === arr.length - 1 ? "now" : "", t)));
@@ -475,6 +499,7 @@ document.addEventListener("keydown", (e) => {
 // ---------- live refresh: pick up projects/albums changed elsewhere (Claude Code, the Ask box)
 let lastSig = "";
 async function syncCollections() {
+  watchExternalAsk();
   let cols: (Collection & { updated: number })[];
   try { cols = await api(`/collections`); } catch { return; }
   const sig = JSON.stringify(cols.map((c) => [c.id, c.name, c.count, c.cover, c.updated]));

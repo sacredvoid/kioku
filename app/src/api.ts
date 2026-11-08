@@ -26,7 +26,7 @@ export type Asset = {
 };
 
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
-  error?: string; path?: string; message?: string; steps?: string[]; note?: string };
+  error?: string; path?: string; message?: string; steps?: string[]; note?: string; model?: string };
 
 export type SettingField = { type?: string; minimum?: number; maximum?: number; enum?: (number | string)[]; description?: string; default?: number };
 export type Settings = Record<string, number | string>;
