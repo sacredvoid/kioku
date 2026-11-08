@@ -2,6 +2,7 @@
 import { API, api, ApiError, errMsg, fmtDur, isVideo, thumb, type Captions, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
 import { Grid } from "./grid";
 import { Viewer } from "./viewer";
+import * as review from "./review";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -24,7 +25,7 @@ document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) =
   try { localStorage.setItem("safelight.theme", r.value); } catch { /* applies for this session only */ }
 }));
 
-type View = { type: "lib"; kind: string } | { type: "col"; id: number };
+type View = { type: "lib"; kind: string } | { type: "col"; id: number } | { type: "draft"; id: number };
 let view: View = { type: "lib", kind: "" };
 let collections: Collection[] = [];
 let current: (Collection & { brief: string; items: any[] }) | null = null;
@@ -49,6 +50,8 @@ function toast(msg: string, error = false) {
 $("toast").onclick = () => ($("toast").hidden = true);
 /** Error toast with what was being attempted: "Couldn't save the trim: out point must be after in point". */
 const fail = (what: string) => (e: unknown) => toast(`Couldn't ${what}: ${errMsg(e)}`, true);
+review.init({ root: $("review"), toast, fail, openViewer: (items, i) => viewer.start(items, i), viewerOpen: () => viewer.open,
+  go: (v) => go(v), changed: () => loadCollections() });
 
 // ---------- sidebar
 async function loadCollections() {
@@ -72,8 +75,8 @@ async function loadCollections() {
 }
 
 function markNav() {
-  const key = view.type === "lib" ? `lib:${view.kind}` : `col:${view.id}`;
-  document.querySelectorAll<HTMLElement>(".nav-item").forEach((b) => b.classList.toggle("on", b.dataset.nav === key && !q.value.trim()));
+  const key = view.type === "lib" ? `lib:${view.kind}` : `${view.type}:${view.id}`;
+  document.querySelectorAll<HTMLElement>(".nav-item").forEach((b) => b.classList.toggle("on", (b.dataset.nav ?? b.dataset.draft) === key && !q.value.trim()));
 }
 
 document.querySelector(".side nav")!.addEventListener("click", (e) => {
@@ -122,11 +125,18 @@ async function go(v: View, search = q.value.trim()) {
   lastKey = key;
   empty.hidden = true;
   project.hidden = true;
+  review.hide();
   $("grid").style.display = ""; // a project view hides it; everything else shows it
   head.replaceChildren();
   markNav();
+  review.loadDrafts();
   try {
-    if (search) {
+    if (v.type === "draft") {
+      $("grid").style.display = "none";
+      grid.set([], { months: false, badges: false });
+      summary.textContent = "";
+      await review.show(v.id);
+    } else if (search) {
       summary.textContent = "Searching…";
       const kind = v.type === "lib" ? v.kind : "";
       const hits = await api<any[]>(`/search?q=${encodeURIComponent(search)}&k=300${kind ? `&kind=${kind}` : ""}`);
@@ -192,7 +202,8 @@ function renderHead(c: Collection) {
     go({ type: "lib", kind: "" });
   });
   const row = el("div", "head-row");
-  row.append(h, kind, el("span", "spacer"), del);
+  const refine = c.kind === "album" ? [Object.assign(el("button", "ghost", "Refine with search"), { type: "button", onclick: () => review.refine(c.id, head) })] : [];
+  row.append(h, kind, el("span", "spacer"), ...refine, del);
   head.append(row);
 }
 
@@ -683,6 +694,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); q.focus(); q.select(); }
+  if (view.type === "draft") return; // the review screen handles its own keys (review.ts)
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") { e.preventDefault(); grid.selectAll(); }
   if (e.key === "Escape") grid.clearSelection();
 });
@@ -691,6 +703,7 @@ document.addEventListener("keydown", (e) => {
 let lastSig = "";
 async function syncCollections() {
   watchExternalAsk();
+  review.loadDrafts();
   let cols: (Collection & { updated: number })[];
   try { cols = await api(`/collections`); } catch { return; }
   const sig = JSON.stringify(cols.map((c) => [c.id, c.name, c.count, c.cover, c.updated]));

@@ -1,0 +1,42 @@
+/* Smart album review screen and its sidebar bits. Uses the theme variables from styles.css. */
+.add-pair { display: inline-flex; gap: 2px }
+.add-pair .add span[aria-hidden] { font-size: 13px; line-height: 1 }
+.inline-ask { display: flex; gap: 6px; margin: 2px 0 6px; animation: rise .3s var(--ease) }
+.inline-ask input { flex: 1; min-width: 0; background: var(--surface-solid); border: 1px solid var(--accent); border-radius: 9px; padding: 6px 10px; outline: 0 }
+.inline-ask button { padding: 4px 10px }
+.view-head .inline-ask { max-width: 640px; margin-top: 10px }
+
+.review { display: flex; flex-direction: column; gap: 12px; padding-top: 10px }
+.review .r-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap }
+.review h1 { margin: 0; font: 640 36px/1.08 var(--font); letter-spacing: -.035em; outline: 0; border-radius: 10px; padding: 0 6px; margin-left: -6px; text-wrap: balance }
+.review h1:hover { background: var(--accent-soft) }
+.review h1:focus { background: var(--surface-solid); box-shadow: 0 0 0 1px var(--line), 0 0 0 4px var(--accent-soft) }
+.review .r-desc { margin: 0; color: var(--text-3); max-width: 80ch }
+.review .r-status { margin: 0; color: var(--text-2); font-weight: 560; min-height: 1.5em; display: flex; align-items: center; gap: 8px }
+.review .r-status .err { color: var(--danger) }
+.r-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.r-bar input { flex: 1; min-width: 220px; max-width: 520px; background: var(--surface-solid); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; outline: 0 }
+.r-bar input:focus { border-color: var(--accent) }
+.r-bar button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent) }
+
+.r-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px; padding-bottom: 80px }
+.r-wrap { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--surface-2) }
+.r-tile { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 8px }
+.r-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity .2s var(--ease), filter .2s var(--ease) }
+.r-tile:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px }
+.r-wrap.removed img { opacity: .3; filter: grayscale(1) }
+.r-wrap .x { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 50%; display: none; place-items: center;
+  background: var(--danger); color: #fff; font: 700 13px/1 var(--font) }
+.r-wrap.removed .x { display: grid }
+.r-wrap .new-dot { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--surface-solid) }
+.r-wrap .why { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; font-size: 11.5px; color: #fff; pointer-events: none;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .62)); opacity: 0; transition: opacity .15s var(--ease);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.r-wrap:hover .why, .r-wrap:focus-within .why, .r-grid.pin-why .why { opacity: 1 }
+.r-wrap .peek { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 0; display: grid; place-items: center;
+  background: var(--surface-solid); color: var(--text); font-size: 13px; opacity: 0; transition: opacity .15s var(--ease) }
+.r-wrap:hover .peek, .r-wrap:focus-within .peek { opacity: 1 }
+.r-wrap .new-dot + .peek { right: 22px }
+.r-wrap .dur { bottom: 22px }
+.r-empty { color: var(--text-2); padding: 40px 0; text-align: center }
+@media (prefers-reduced-motion: reduce) { .r-tile img, .r-wrap .why, .r-wrap .peek { transition: none } }
