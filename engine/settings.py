@@ -17,6 +17,10 @@ _lock = threading.Lock()
 
 class Settings(BaseModel):
     max_agents: int = Field(2, ge=1, le=8, description="Claude edits running at once; more wait in a queue")
+    new_cut_model: Literal["opus", "sonnet", "haiku"] = Field(
+        "opus", description="Claude model for a first cut of an empty project (the creative part)")
+    revise_model: Literal["opus", "sonnet", "haiku"] = Field(
+        "sonnet", description="Claude model for changes to an existing cut (tighten, swap, reorder)")
     ask_minutes: int = Field(30, ge=5, le=120, description="stop a Claude edit after this long")
     download_seconds: int = Field(180, ge=30, le=1800, description="give up on one iCloud video after this long")
     proxy_height: Literal[360, 540, 720] = Field(540, description="playable copy height; 360 uses about half the disk")

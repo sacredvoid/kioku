@@ -28,8 +28,8 @@ export type Asset = {
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
   error?: string; path?: string; message?: string; steps?: string[]; note?: string };
 
-export type SettingField = { type?: string; minimum?: number; maximum?: number; enum?: number[]; description?: string; default?: number };
-export type Settings = Record<string, number>;
+export type SettingField = { type?: string; minimum?: number; maximum?: number; enum?: (number | string)[]; description?: string; default?: number };
+export type Settings = Record<string, number | string>;
 
 /** Engine error: `status` 0 = engine not reachable. `message` is always readable by a person. */
 export class ApiError extends Error {

@@ -272,7 +272,11 @@ def do_ask(cid, prompt):
 
 
 def run_claude(exe, cid, col, prompt, job_state):
-    cmd = [exe, "-p", prompt, "--append-system-prompt",
+    # creative first cut gets the strong model; revisions to an existing cut use the cheaper one (Settings)
+    model = settings.get().revise_model if col["items"] else settings.get().new_cut_model
+    job_state["model"] = model
+    log.info("ask for collection %d using %s", cid, model)
+    cmd = [exe, "-p", prompt, "--model", model, "--append-system-prompt",
            SYSTEM.format(cid=cid, name=col["name"], brief=col["brief"], skill=SKILL.read_text().split("---", 2)[-1]),
            "--mcp-config", str(mcp_config()), "--strict-mcp-config",
            "--tools", "",  # no built-in tools: no shell, no file edits; only Safelight's own tools
