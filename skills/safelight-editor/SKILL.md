@@ -34,7 +34,7 @@ For every candidate video, call `analyze_clip(uuid)`. Call it for several candid
 - **motion**: very high means camera shake or whip pans. Good for energy, bad for calm edits.
 - Skip the first and last half-second of a clip if it looks like the phone being raised or lowered.
 
-Photos have no scenes. Use them as 2-3 s stills when they're the best image of a moment, or when there's no video of it.
+Photos have no scenes. Look at every candidate photo with `look_at([uuids])` (up to 6 per call) before using it. Use photos as 2-3 s stills when they're the best image of a moment, or when there's no video of it.
 
 ## 4. Build the cut
 

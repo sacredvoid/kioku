@@ -202,7 +202,10 @@ def mcp_config():
 SKILL = ENGINE.parent / "skills" / "safelight-editor" / "SKILL.md"
 SYSTEM = ("You are running inside the Safelight app. Use only the safelight tools. You are editing the EXISTING project "
           "with id {cid} named {name!r} (don't create a new one). Its brief: {brief!r}. Follow the editing workflow "
-          "below.\n\n{skill}")
+          "below.\n\nYour final message is shown in the app's project panel, above the clip list, which already "
+          "lists every shot. Keep it under 120 words: one sentence on the cut (shots, length, arc), then at most 4 short "
+          "bullets on what you left out or what the user should check, by shot number. No tables, no shot-by-shot "
+          "recap. The app has an Export button, so never ask the user to type 'export'.\n\n{skill}")
 
 
 class Ask(BaseModel):
@@ -213,6 +216,7 @@ STEP_LABELS = {
     "search_media": lambda i: f"Searching “{i.get('query', '')}”",
     "analyze_clip": lambda i: "Watching a clip: downloading if needed, finding scenes",
     "get_media": lambda i: "Reading a clip's details",
+    "look_at": lambda i: f"Looking at {len(i.get('uuids', []))} photo(s)",
     "add_to_collection": lambda i: f"Adding {len(i.get('uuids', []))} clip(s)",
     "set_clip_range": lambda i: f"Trimming a clip to {i.get('in_seconds', 0):.1f}–{i.get('out_seconds', 0):.1f}s",
     "move_clip": lambda i: "Reordering",

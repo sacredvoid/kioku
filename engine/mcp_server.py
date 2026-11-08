@@ -78,6 +78,22 @@ def get_media(uuid: str) -> dict:
     return call("GET", f"/asset/{uuid}")
 
 
+@server.tool(annotations=READ_ONLY)
+def look_at(uuids: list[str]) -> list:
+    """See photos (or a video's still frame) before using them: returns a small image of each, up to 6 per call.
+    Use it on every photo you consider for a cut, so you judge the picture, not just its labels."""
+    out: list = []
+    for u in uuids[:6]:
+        try:
+            with urllib.request.urlopen(f"{API}/thumb/{urllib.parse.quote(u)}", timeout=30) as r:
+                out += [{"uuid": u}, Image(data=r.read(), format="jpeg")]
+        except urllib.error.HTTPError as e:
+            out.append({"uuid": u, "error": f"no preview ({e.code})"})
+        except (urllib.error.URLError, TimeoutError):
+            out.append({"uuid": u, "error": "engine not reachable"})
+    return out
+
+
 @server.tool()
 def tag_media(uuid: str, add: list[str] = [], remove: list[str] = []) -> dict:  # noqa: B006
     """Add or remove the user's own tags on an item."""

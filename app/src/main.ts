@@ -324,7 +324,7 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
     // idle while we were watching a running job = the engine restarted and the job died with it
     if (j.status === "idle") out.textContent = `The ${kind === "ask" ? "edit" : "export"} stopped because the engine restarted. Clips placed so far are kept; run it again to continue.`;
     else if (j.status === "failed") out.textContent = j.error || "Failed, no reason given. Check data/engine.log.";
-    else if (kind === "ask") { out.textContent = j.output || "Done"; if (view.type === "col" && view.id === cid) refreshProjectSoon(); }
+    else if (kind === "ask") { out.replaceChildren(markdown(j.output || "Done")); if (view.type === "col" && view.id === cid) refreshProjectSoon(); }
     else if (j.status === "done") {
       out.replaceChildren(el("span", "", `Exported ${j.message}. `));
       const r = el("button", "link", "Show in Finder") as HTMLButtonElement;
@@ -335,6 +335,52 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
     return;
   }
 }
+/** Claude's reply as DOM: paragraphs, headings, lists, tables, **bold**, `code`.
+ * Built with textContent only (never innerHTML), so nothing in the reply can inject markup. */
+function markdown(src: string): HTMLElement {
+  const root = el("div", "md");
+  const inline = (text: string, into: HTMLElement) => {
+    for (const part of text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)) {
+      if (!part) continue;
+      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) into.append(el("strong", "", part.slice(2, -2)));
+      else if (part.startsWith("`") && part.endsWith("`") && part.length > 2) into.append(el("code", "", part.slice(1, -1)));
+      else into.append(document.createTextNode(part));
+    }
+    return into;
+  };
+  const cells = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  const lines = src.replace(/\r/g, "").split("\n");
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    const h = /^(#{1,4})\s+(.*)/.exec(line);
+    if (h) { root.append(inline(h[2], el("h4"))); i++; continue; }
+    if (line.trim().startsWith("|") && /^\s*\|?[\s:-]+(\|[\s:-]+)+\|?\s*$/.test(lines[i + 1] ?? "")) {
+      const table = el("table"), head = el("tr");
+      cells(line).forEach((c) => head.append(inline(c, el("th"))));
+      table.append(head);
+      for (i += 2; i < lines.length && lines[i].trim().startsWith("|"); i++) {
+        const tr = el("tr");
+        cells(lines[i]).forEach((c) => tr.append(inline(c, el("td"))));
+        table.append(tr);
+      }
+      root.append(table);
+      continue;
+    }
+    const li = /^\s*(?:[-*]|\d+\.)\s+/;
+    if (li.test(line)) {
+      const list = el(/^\s*\d+\./.test(line) ? "ol" : "ul");
+      for (; i < lines.length && li.test(lines[i]); i++) list.append(inline(lines[i].replace(li, ""), el("li")));
+      root.append(list);
+      continue;
+    }
+    const para: string[] = [];
+    for (; i < lines.length && lines[i].trim() && !li.test(lines[i]) && !lines[i].trim().startsWith("|") && !/^#{1,4}\s/.test(lines[i]); i++) para.push(lines[i].trim());
+    root.append(inline(para.join(" "), el("p")));
+  }
+  return root;
+}
+
 function renderSteps(out: HTMLElement, j: Job) {
   const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
   const head = el("div", "steps-head");

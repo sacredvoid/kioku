@@ -274,3 +274,16 @@ button.chip:hover { border-color: var(--paper-3); color: var(--paper) }
 .set-msg:empty { display: none }
 .set-msg.error { color: var(--danger); margin: 8px 0 0 }
 .set-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px }
+
+/* ---------- Claude's reply, rendered */
+.ask-out.done { white-space: normal }
+.md { display: flex; flex-direction: column; gap: 8px; line-height: 1.55 }
+.md p, .md ul, .md ol, .md h4 { margin: 0 }
+.md h4 { font-size: 13px; color: var(--paper) }
+.md ul, .md ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px }
+.md strong { color: var(--paper); font-weight: 600 }
+.md code { font: 12px var(--mono); background: var(--ink-3); padding: 1px 5px; border-radius: 4px }
+.md table { border-collapse: collapse; width: 100%; font-size: 12.5px }
+.md th { text-align: left; color: var(--paper-3); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .06em }
+.md th, .md td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line-soft); vertical-align: top }
+.md td:first-child { white-space: nowrap; color: var(--paper) }
