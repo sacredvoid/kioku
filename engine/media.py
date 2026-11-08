@@ -34,12 +34,12 @@ ACTIVE: dict[str, dict] = {}
 DONE = {"ok": 0, "failed": 0}
 
 
-def stage(uuid, name):
+def stage(uuid, name, label=None):
     import time as _t
     if name is None:
         ACTIVE.pop(uuid, None)
         return
-    cur = ACTIVE.setdefault(uuid, {"started": _t.time(), "label": label_for(uuid)})
+    cur = ACTIVE.setdefault(uuid, {"started": _t.time(), "label": label or label_for(uuid)})
     cur["stage"], cur["stage_started"] = name, _t.time()
 
 
@@ -94,19 +94,24 @@ def download_original(uuid, dest):
     raise RuntimeError("iCloud download failed: " + (out.splitlines()[-1] if out else "no file returned"))
 
 
+def local_original(uuid):
+    """The original on disk if Photos has it locally (not iCloud-only), else None."""
+    with core.connect() as c:
+        _, path, _, _ = video_row(c, uuid)
+    return Path(path) if path and Path(path).suffix.lower() in VIDEO_EXT and Path(path).is_file() else None
+
+
 def ensure_proxy(uuid):
     out = PROXIES / f"{uuid}.mp4"
     if out.is_file():
         return out
-    with core.connect() as c:
-        kind, path, _, local = video_row(c, uuid)
+    local = local_original(uuid)
     PROXIES.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="cs-orig-"))  # only this folder is ever deleted
     try:
-        local = path and Path(path).suffix.lower() in VIDEO_EXT and Path(path).is_file()
         if not local:
             stage(uuid, "downloading from iCloud")
-        src = Path(path) if local else download_original(uuid, tmp)
+        src = local or download_original(uuid, tmp)
         stage(uuid, "making a playable copy")
         part = out.with_suffix(".part.mp4")
         r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
@@ -200,13 +205,13 @@ def contact_sheet(frames, scenes, out):
 RUNNING = 0  # videos being downloaded/analyzed right now; guarded by settings.changed
 
 
-def video_slot(uuid):
+def video_slot(uuid, label=None):
     """Wait for one of Settings.max_agents video slots: parallel enough to overlap iCloud downloads,
     capped so a burst of requests doesn't start dozens of downloads at once."""
     global RUNNING
     with settings.changed:
         if RUNNING >= settings.get().max_agents:
-            stage(uuid, "waiting for a free slot")
+            stage(uuid, "waiting for a free slot", label)
         while RUNNING >= settings.get().max_agents:
             settings.changed.wait(2)
         RUNNING += 1
@@ -217,6 +222,31 @@ def release_video_slot():
     with settings.changed:
         RUNNING -= 1
         settings.changed.notify_all()
+
+
+def fetch(uuid, mode, tmp):
+    """A file ffmpeg can read for this video: mode "preview" = the proxy, "final" = the original (local, or
+    downloaded into tmp). Lock order is lock_for(uuid), then video_slot, then release, same as analyze;
+    call it before taking any render slot."""
+    with lock_for(uuid):
+        video_slot(uuid)
+        try:
+            if mode == "preview":
+                return ensure_proxy(uuid)
+            if mode != "final":
+                raise ValueError(f"mode must be preview or final, not {mode!r}")
+            src = local_original(uuid)
+            if src:
+                return src
+            stage(uuid, "downloading from iCloud")
+            import projects  # lazy: projects imports library/settings, keep media importable on its own
+            got = projects.originals([uuid], Path(tmp)).get(uuid)
+            if not got:
+                raise RuntimeError("iCloud download failed")
+            return got
+        finally:
+            release_video_slot()
+            stage(uuid, None)
 
 
 def analyze(uuid, embed=True):

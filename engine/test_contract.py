@@ -1,0 +1,36 @@
+"""media.fetch lock order + label plumbing; no downloads, no ffmpeg.  uv run test_contract.py"""
+import os
+import tempfile
+from pathlib import Path
+
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+
+import core  # noqa: E402
+import media  # noqa: E402
+import settings  # noqa: E402
+import timeline  # noqa: E402
+
+assert "data/index.db" not in str(core.DB_PATH)
+assert core.fts_query("photos of the beach") == '"beach"'
+timeline.Timeline(30, "9:16", 1080, (), 0, (), "h").duration == 0
+
+media.stage("k", "working", "Render: X")
+assert media.ACTIVE["k"]["label"] == "Render: X"
+media.stage("k", None)
+
+order, f = [], Path("/x/p.mp4")
+media.ensure_proxy = lambda u: order.append("proxy") or f
+media.local_original = lambda u: order.append("local") or None
+_vs, _rs = media.video_slot, media.release_video_slot
+media.video_slot = lambda k, label=None: order.append(("slot", media.lock_for(k).locked())) or _vs(k, label)
+media.release_video_slot = lambda: order.append("release") or _rs()
+assert media.fetch("u1", "preview", Path(tempfile.mkdtemp())) == f
+assert order == [("slot", True), "proxy", "release"], order  # lock held when the slot is taken
+assert not media.lock_for("u1").locked() and media.RUNNING == 0 and "u1" not in media.ACTIVE
+try:
+    media.fetch("u1", "bogus", Path("."))
+    raise SystemExit("bad mode accepted")
+except ValueError:
+    pass
+assert media.RUNNING == 0
+print("ok")

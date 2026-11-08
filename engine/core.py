@@ -105,7 +105,8 @@ def embed_query(text):
     return v
 
 
-STOP = {"a", "an", "the", "of", "in", "on", "at", "with", "and", "or", "to", "from", "my", "me", "for", "is", "some"}
+STOP = {"a", "an", "the", "of", "in", "on", "at", "with", "and", "or", "to", "from", "my", "me", "for", "is", "some",
+        "photo", "photos", "picture", "pictures", "image", "images", "video", "videos"}
 
 
 def fts_query(q):
