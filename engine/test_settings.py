@@ -85,4 +85,22 @@ assert c.get("/settings", headers={"Origin": "tauri://localhost"}).status_code =
 assert c.get("/settings", headers={"Origin": "http://localhost:1420"}).headers["access-control-allow-origin"] == "http://localhost:1420"
 assert TestClient(server.app, base_url="http://rebound.example:8765").get("/settings").status_code == 400
 assert TestClient(server.app, base_url="http://localhost:8765").get("/settings").status_code == 200
+# core.connect: WAL is switched on once per process; a busy db must not break connect()
+core.DB_PATH = Path(tempfile.mkdtemp()) / "w.db"
+core._wal.clear()
+assert core.connect(core.DB_PATH).execute("pragma journal_mode").fetchone()[0] == "wal" and core.DB_PATH in core._wal
+busy = Path(tempfile.mkdtemp()) / "b.db"
+holder = sqlite3.connect(busy)
+holder.execute("create table t(x)"); holder.commit()
+holder.execute("begin exclusive")
+orig = sqlite3.connect
+sqlite3.connect = lambda p, timeout=30: orig(p, timeout=0.1)
+try:
+    core.connect(busy)  # locked: logs and carries on... schema script also needs the lock, so only the pragma is checked
+except sqlite3.OperationalError:
+    pass
+finally:
+    sqlite3.connect = orig
+assert busy not in core._wal
+holder.rollback()
 print("settings checks passed")

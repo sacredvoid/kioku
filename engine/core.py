@@ -1,5 +1,6 @@
 """Shared model, database and hybrid search for the Safelight engine."""
 import itertools
+import logging
 import os
 import re
 import sqlite3
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+log = logging.getLogger("safelight")
 DATA = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = Path(os.environ.get("CS_DB") or DATA / "index.db")
 AUDIO_DIR = DATA / "audio"
@@ -44,9 +46,20 @@ create index if not exists collection_items_c on collection_items(collection_id,
 """
 
 
+_wal = set()  # db paths already switched to WAL by this process
+
+
 def connect(path=DB_PATH):
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, timeout=30)  # the indexer may be writing; wait instead of failing
+    if path not in _wal:
+        # WAL lets readers and the indexer's writes overlap. The switch is persistent but needs a brief exclusive
+        # lock, so if the db is busy just try again on a later connect; never fail the connection over it.
+        try:
+            db.execute("pragma journal_mode = wal")
+            _wal.add(path)
+        except sqlite3.OperationalError as e:
+            log.warning("could not enable WAL on %s yet: %s", path, e)
     db.execute("pragma foreign_keys = on")
     db.executescript(SCHEMA)
     return db
