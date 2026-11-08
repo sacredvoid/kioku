@@ -224,6 +224,10 @@ def update_item(cid: int, iid: int, body: ItemPatch):
             raise HTTPException(422, f"clip is only {dur:.1f}s long")
         c.execute("update collection_items set t0 = ?, t1 = ?, pos = coalesce(?, pos) where id = ?",
                   (t0, t1, body.pos, iid))
+        if body.pos is not None:
+            # midpoints halve the gap on every move and run out of float precision after ~50; keep positions 1..n
+            c.execute("update collection_items set pos = r from (select id, row_number() over (order by pos, id) r "
+                      "from collection_items where collection_id = ?) n where collection_items.id = n.id", (cid,))
         touch(c, cid)
         c.commit()
         return {"item_id": iid, "t0": t0, "t1": t1}
