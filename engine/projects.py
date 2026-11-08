@@ -222,7 +222,7 @@ SYSTEM = ("You are running inside the Safelight app. Use only the safelight tool
           "below.\n\nYour final message is shown in the app's project panel, above the clip list, which already "
           "lists every shot. Keep it under 120 words: one sentence on the cut (shots, length, arc), then at most 4 short "
           "bullets on what you left out or what the user should check, by shot number. No tables, no shot-by-shot "
-          "recap. The app has an Export button, so never ask the user to type 'export'.\n\n{skill}")
+          "recap. The app has Preview, Render video and Export buttons, so never ask the user to type 'export' or 'render'.\n\n{skill}")
 
 
 class Ask(BaseModel):
@@ -241,6 +241,13 @@ STEP_LABELS = {
     "set_brief": lambda i: "Writing the brief",
     "get_collection": lambda i: "Reviewing the cut",
     "export_project": lambda i: "Exporting the timeline",
+    "get_edit": lambda i: "Checking the edit",
+    "set_edit": lambda i: "Changing the edit settings",
+    "set_clip_fx": lambda i: "Changing a clip's look or speed",
+    "set_transition": lambda i: "Setting a transition",
+    "render_preview": lambda i: "Rendering a preview",
+    "render_final": lambda i: "Rendering the finished video",
+    "render_status": lambda i: "Checking the render",
 }
 
 

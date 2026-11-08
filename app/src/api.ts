@@ -26,7 +26,12 @@ export type Asset = {
 };
 
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
-  error?: string; path?: string; message?: string; steps?: string[]; note?: string; model?: string };
+  error?: string; path?: string; message?: string; steps?: string[]; note?: string; model?: string;
+  progress?: number; stage?: string; eta_seconds?: number; sheet?: string; srt?: string; edit_hash?: string;
+  warnings?: string[]; seconds?: number };
+
+export type Captions = { on: boolean; style: string; ready: number; pending: number; no_speech: number;
+  setup: { whisper: string | null; model: boolean; hint: string } };
 
 export type SettingField = { type?: string; minimum?: number; maximum?: number; enum?: (number | string)[]; description?: string; default?: number };
 export type Settings = Record<string, number | string>;

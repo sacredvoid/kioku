@@ -1,5 +1,5 @@
 // Safelight: library, search, albums and video projects on top of your Photos library.
-import { api, ApiError, errMsg, fmtDur, isVideo, thumb, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
+import { API, api, ApiError, errMsg, fmtDur, isVideo, thumb, type Captions, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
 import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 
@@ -257,6 +257,36 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     catch (e) { expOut.className = "ask-out failed"; expOut.textContent = `Couldn't start the export: ${errMsg(e)}`; }
   };
 
+  // render row: captions toggle, quick preview, finished video
+  const capLabel = el("label", "cap-toggle");
+  const capBox = document.createElement("input");
+  capBox.type = "checkbox";
+  capLabel.append(capBox, document.createTextNode(" Captions"));
+  const prevBtn = el("button", "", "Preview") as HTMLButtonElement;
+  const rendBtn = el("button", "primary", "Render video") as HTMLButtonElement;
+  prevBtn.type = rendBtn.type = "button";
+  prevBtn.disabled = rendBtn.disabled = !items.length;
+  const renderRow = el("div", "proj-meta render-row");
+  renderRow.append(capLabel, el("span", "spacer"), prevBtn, rendBtn);
+  const capOut = el("div", "ask-out"), prevOut = el("div", "ask-out"), finOut = el("div", "ask-out");
+  const startRender = (kind: "preview" | "final", out: HTMLElement, btn: HTMLButtonElement) => async () => {
+    try { await api(`/collections/${c.id}/render`, "POST", { mode: kind }); pollJob(c.id, kind, out, btn); }
+    catch (e) { out.className = "ask-out failed"; out.textContent = `Couldn't start the ${kind === "final" ? "render" : "preview"}: ${errMsg(e)}`; }
+  };
+  prevBtn.onclick = startRender("preview", prevOut, prevBtn);
+  rendBtn.onclick = startRender("final", finOut, rendBtn);
+  const syncCaptions = () => api<Captions>(`/collections/${c.id}/captions`).then((s) => { capBox.checked = s.on; }).catch(() => {});
+  capBox.onchange = async () => {
+    capBox.disabled = true;
+    try {
+      await api(`/collections/${c.id}/edit`, "PATCH", { captions: capBox.checked });
+      if (capBox.checked) pollJob(c.id, "captions", capOut, capBox);
+      else capOut.replaceChildren();
+    } catch (e) { capOut.className = "ask-out failed"; capOut.textContent = errMsg(e); }  // e.g. the whisper install hint
+    capBox.disabled = false;
+    syncCaptions();
+  };
+
   const strip = el("ol", "clips");
   items.forEach((it, i) => strip.append(clipRow(c.id, it, i, items)));
 
@@ -270,7 +300,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const claude = el("div", "claude");
   claude.append(askOut, runs);
 
-  project.replaceChildren(brief, ask, claude, meta, expOut, strip);
+  project.replaceChildren(brief, ask, claude, meta, expOut, renderRow, capOut, prevOut, finOut, strip);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
@@ -278,6 +308,10 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     loadRuns(c.id, runs, j);
   }).catch(() => loadRuns(c.id, runs));
   api<Job>(`/collections/${c.id}/export`).then((j) => { if (j.status !== "idle") pollJob(c.id, "export", expOut, exp); }).catch(() => {});
+  syncCaptions();
+  for (const [kind, out, btn] of [["preview", prevOut, prevBtn], ["final", finOut, rendBtn]] as const)
+    api<Job>(`/collections/${c.id}/render/${kind}`).then((j) => { if (j.status !== "idle") pollJob(c.id, kind, out, btn); }).catch(() => {});
+  api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollJob(c.id, "captions", capOut, capBox); }).catch(() => {});
 }
 
 const clipLen = (it: Item) => it.video ? ((it.t1 ?? it.dur) - (it.t0 ?? 0)) : (it.t1 != null ? it.t1 - (it.t0 ?? 0) : 3);
@@ -332,14 +366,42 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
 }
 const posOf = (it: any) => it.pos as number;
 
-async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, btn: HTMLButtonElement) {
+type PollKind = "ask" | "export" | "preview" | "final" | "captions";
+const KIND_WORD: Record<PollKind, string> = { ask: "edit", export: "export", preview: "preview", final: "render", captions: "transcription" };
+const pollUrl = (cid: number, kind: PollKind) =>
+  kind === "preview" || kind === "final" ? `/collections/${cid}/render/${kind}` : kind === "captions" ? `/collections/${cid}/captions/job` : `/collections/${cid}/${kind}`;
+
+/** Running render or transcription: stage text, a progress bar and (for renders) Cancel. Updated in place so Cancel stays clickable. */
+function renderProgress(out: HTMLElement, j: Job, cid: number, kind: PollKind) {
+  let bar = out.querySelector("progress");
+  if (!bar) {
+    bar = document.createElement("progress");
+    bar.max = 1;
+    const row = el("div", "prog-row");
+    row.append(el("span", "prog-text"), bar);
+    if (kind !== "captions") {
+      const cancel = el("button", "ghost", "Cancel") as HTMLButtonElement;
+      cancel.type = "button";
+      cancel.onclick = () => { cancel.disabled = true; api(`/collections/${cid}/render/${kind}/cancel`, "POST").catch(fail("cancel")); };
+      row.append(cancel);
+    }
+    out.replaceChildren(row);
+  }
+  const pct = Math.round((j.progress ?? 0) * 100);
+  bar.value = j.progress ?? 0;
+  const eta = j.eta_seconds ? ` · about ${fmtDur(j.eta_seconds)} left` : "";
+  out.querySelector(".prog-text")!.textContent = `${j.stage || "Starting…"} · ${pct}%${eta}`;
+  if (j.note && !out.querySelector("p.note")) out.append(el("p", "note", j.note));
+}
+
+async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean }) {
   btn.disabled = true;
   out.className = "ask-out running";
-  out.textContent = kind === "ask" ? "Claude is searching your library and editing…" : "Exporting: downloading originals from iCloud if needed…";
+  out.textContent = kind === "ask" ? "Claude is searching your library and editing…" : kind === "export" ? "Exporting: downloading originals from iCloud if needed…" : "Starting…";
   let misses = 0;
   for (;;) {
     let j: Job;
-    try { j = await api<Job>(`/collections/${cid}/${kind}`); misses = 0; }
+    try { j = await api<Job>(pollUrl(cid, kind)); misses = 0; }
     catch (e) {
       if (!out.isConnected) return;
       if (++misses >= 3) { out.className = "ask-out running"; out.textContent = `Lost contact with the engine, retrying… (${errMsg(e)})`; }
@@ -350,14 +412,15 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
     if (!out.isConnected) return;
     if (j.status === "running") {
       if (kind === "ask") renderSteps(out, j, cid);
-      await sleep(1500);
+      else if (kind !== "export") renderProgress(out, j, cid, kind);
+      await sleep(kind === "ask" || kind === "export" ? 1500 : 1000);
       continue;
     }
     btn.disabled = false;
     stepsSeen.delete(cid);
     out.className = `ask-out ${j.status === "idle" ? "failed" : j.status}`;
     // idle while we were watching a running job = the engine restarted and the job died with it
-    if (j.status === "idle") out.textContent = `The ${kind === "ask" ? "edit" : "export"} stopped because the engine restarted. Clips placed so far are kept; run it again to continue.`;
+    if (j.status === "idle") out.textContent = `The ${KIND_WORD[kind]} stopped because the engine restarted. Clips placed so far are kept; run it again to continue.`;
     else if (j.status === "failed") out.textContent = j.error || "Failed, no reason given. Check data/engine.log.";
     else if (kind === "ask") out.replaceChildren(); // the reply lands in the history line below
     // reload clips and history (the engine records the run right after the job finishes, hence the short delay)
@@ -368,10 +431,31 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
       r.type = "button";
       r.onclick = () => api(`/collections/${cid}/reveal`, "POST").catch(fail("open Finder"));
       out.append(r);
+    } else if (kind === "preview" && j.status === "done") {
+      const v = document.createElement("video");
+      v.controls = true;
+      v.className = "preview-video";
+      v.src = `${API}/collections/${cid}/render/preview/file?v=${encodeURIComponent(j.edit_hash ?? String(Date.now()))}`;
+      out.replaceChildren(v, ...renderNotes(j));
+    } else if (kind === "final" && j.status === "done") {
+      out.replaceChildren(el("span", "", `Rendered video, ${fmtDur(j.seconds ?? 0)}. `));
+      for (const [label, q] of [["Play", "?play=1"], ["Show in Finder", ""]]) {
+        const b = el("button", "link", label) as HTMLButtonElement;
+        b.type = "button";
+        b.onclick = () => api(`/collections/${cid}/render/final/reveal${q}`, "POST").catch(fail("open it"));
+        out.append(b, document.createTextNode("  "));
+      }
+      out.append(...renderNotes(j));
+    } else if (kind === "captions" && j.status === "done") {
+      out.replaceChildren(...renderNotes(j));
     }
     return;
   }
 }
+const renderNotes = (j: Job): HTMLElement[] => [
+  ...(j.srt ? [el("p", "muted", "Captions saved as a .srt next to the video.")] : []),
+  ...(j.warnings ?? []).map((w) => el("p", "muted", w))];
+
 /** Claude's reply as DOM: paragraphs, headings, lists, tables, **bold**, `code`.
  * Built with textContent only (never innerHTML), so nothing in the reply can inject markup. */
 function markdown(src: string): HTMLElement {

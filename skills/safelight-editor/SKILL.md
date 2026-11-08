@@ -44,9 +44,20 @@ Photos have no scenes. Look at every candidate photo with `look_at([uuids])` (up
 - Reorder with `move_clip` (positions are floats, so 2.5 goes between 2 and 3).
 - Check `get_collection` at the end. The total should land within ±15% of the target length, so trim or drop shots to fit.
 
-## 5. Finish
+## 5. Polish (only if the brief or the user asks for it; a plain cut needs none of this)
 
-- Export only if the user asked for it, or said "make the video": call `export_project`, then poll `export_status` until it's done, and give the path. It opens in DaVinci Resolve via File › Import › Timeline.
+- One `set_edit` call first: `aspect="9:16"` for a reel, story or "vertical"; one `look` for the whole edit at `look_strength` 0.6 to 0.8 unless the user wants it strong (names are in `get_edit`); `captions=true` only if the clips contain speech, never on a montage with music. Turning captions on starts a transcription: check `get_edit` `captions_status.pending` reaches 0 before rendering. If `set_edit` says whisper is missing, tell the user the install command it returns.
+- `set_clip_fx` only for a specific reason: a slow-mo moment with `speed` 0.5, a boring stretch at 1.5 to 2, a different `look` on one clip, `reframe_*` when the crop cuts off the subject.
+- `set_transition` sparingly: dissolve 0.4 to 0.6 s between scenes of different places, no transition inside one scene, never wipes on a calm edit. Transitions shorten the total, so recheck the length with `get_edit`.
+
+## 6. Check
+
+- `render_preview` (use `start` and `end` for one section), then `render_status(wait_seconds=60)` and look at the contact sheet. Fix what you see (cuts, crop, color, caption position) and repeat at most 3 times.
+- Never `render_final` unless the user asked for the finished video. Then tell them the path, and the .srt if captions are on.
+
+## 7. Finish
+
+- A finished video means `render_final` (poll `render_status(mode="final", wait_seconds=60)` until it is done). A timeline for DaVinci Resolve means `export_project`, then poll `export_status` and give the path (File › Import › Timeline). No preference: do neither and offer both in one line.
 - Reply with a short plain summary:
   - the project name
   - the clip count and total length
@@ -58,6 +69,7 @@ Don't paste uuids unless asked.
 
 ## Rules
 
+- Never describe ffmpeg or filters to the user. Tool errors list the allowed values: fix the argument instead of retrying the same one.
 - Never invent uuids or times. Only use what the tools returned.
 - Don't add, remove or retag photos the user didn't ask about. Editing a project is fine. Changing the library's tags is not, unless asked.
 - If iCloud downloads fail during `analyze_clip`, carry on using `search_media` labels and posters only, and tell the user that video previews need Photos access for the app running Safelight.
