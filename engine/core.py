@@ -15,7 +15,7 @@ DATA = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = Path(os.environ.get("CS_DB") or DATA / "index.db")
 AUDIO_DIR = DATA / "audio"
 MODEL_ID = "google/embeddinggemma-2"
-IMAGE_TOKENS = 560  # model default is 280; allowed 70/140/280/560/1120
+IMAGE_TOKENS = 280  # allowed 70/140/280/560/1120. 280 matched 560 on search quality at 2.7x the speed (notes/tokens-ab.md)
 
 SCHEMA = """
 create table if not exists assets(
