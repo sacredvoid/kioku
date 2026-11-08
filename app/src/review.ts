@@ -87,9 +87,14 @@ export const refine = (albumId: number, host: HTMLElement) =>
   askInline(host, "What should be added or changed? e.g. also the night photos", (text) => createDraft(text, albumId));
 
 // ---------- sidebar group
+let draftsSig = "";
 export async function loadDrafts() {
   let rows: DraftRow[];
   try { rows = await api<DraftRow[]>("/drafts"); } catch { return; } // keep the last list
+  // polled every 5 s: rebuilding identical buttons would steal keyboard focus from a draft in the sidebar
+  const sig = JSON.stringify([rows, !root.hidden && d?.id]);
+  if (sig === draftsSig) return;
+  draftsSig = sig;
   document.getElementById("drafts-group")!.hidden = !rows.length;
   document.getElementById("drafts")!.replaceChildren(...rows.map((r) => {
     const b = el("button", "nav-item col") as HTMLButtonElement;
