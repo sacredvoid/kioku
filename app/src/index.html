@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Safelight</title>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./review.css">
   <script type="module" src="./main.ts"></script>
 </head>
 <body>
@@ -18,8 +19,13 @@
         <button type="button" class="nav-item" data-nav="lib:video"><span class="ico ico-video" aria-hidden="true"></span>Videos</button>
       </div>
       <div class="group">
-        <div class="group-head"><h3>Albums</h3><button type="button" class="add" data-new="album" aria-label="New album" title="New album"><span class="ico ico-plus" aria-hidden="true"></span></button></div>
+        <div class="group-head"><h3>Albums</h3><span class="add-pair"><button type="button" id="smart-new" class="add" aria-label="Smart album: describe the photos you want" title="Smart album: describe the photos you want"><span aria-hidden="true">✦</span></button><button type="button" class="add" data-new="album" aria-label="New album" title="New album"><span class="ico ico-plus" aria-hidden="true"></span></button></span></div>
+        <div id="smart-slot"></div>
         <div id="albums" class="list"></div>
+      </div>
+      <div class="group" id="drafts-group" hidden>
+        <div class="group-head"><h3>Drafts</h3></div>
+        <div id="drafts" class="list"></div>
       </div>
       <div class="group">
         <div class="group-head"><h3>Projects</h3><button type="button" class="add" data-new="project" aria-label="New video project" title="New video project"><span class="ico ico-plus" aria-hidden="true"></span></button></div>
@@ -46,6 +52,7 @@
     <div id="head" class="view-head"></div>
     <p id="summary" class="summary" aria-live="polite"></p>
     <div id="project" class="project" hidden></div>
+    <div id="review" class="review" hidden></div>
     <div id="grid" class="grid"></div>
     <div id="empty" class="empty" hidden></div>
   </div>
