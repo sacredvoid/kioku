@@ -263,13 +263,20 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const meta = el("div", "proj-meta");
   meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), exp);
 
-  project.replaceChildren(brief, ask, askOut, meta, expOut, strip);
+  // Claude panel: live steps of a running edit, then one compact line that opens into every past edit
+  const runs = el("section", "runs");
+  runs.hidden = true;
+  runs.setAttribute("aria-label", "Claude's edits");
+  const claude = el("div", "claude");
+  claude.append(askOut, runs);
+
+  project.replaceChildren(brief, ask, claude, meta, expOut, strip);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
     if (j.status === "running") pollJob(c.id, "ask", askOut, askBtn);
-    else if (j.status !== "idle") showLastReply(askOut, j); // finished while you were elsewhere, or started outside the app
-  }).catch(() => {});
+    loadRuns(c.id, runs, j);
+  }).catch(() => loadRuns(c.id, runs));
   api<Job>(`/collections/${c.id}/export`).then((j) => { if (j.status !== "idle") pollJob(c.id, "export", expOut, exp); }).catch(() => {});
 }
 
@@ -342,17 +349,20 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
     // project view re-rendered (live refresh, navigation): its new render started its own poll, so stop this one
     if (!out.isConnected) return;
     if (j.status === "running") {
-      if (kind === "ask") renderSteps(out, j);
+      if (kind === "ask") renderSteps(out, j, cid);
       await sleep(1500);
       continue;
     }
     btn.disabled = false;
+    stepsSeen.delete(cid);
     out.className = `ask-out ${j.status === "idle" ? "failed" : j.status}`;
     // idle while we were watching a running job = the engine restarted and the job died with it
     if (j.status === "idle") out.textContent = `The ${kind === "ask" ? "edit" : "export"} stopped because the engine restarted. Clips placed so far are kept; run it again to continue.`;
     else if (j.status === "failed") out.textContent = j.error || "Failed, no reason given. Check data/engine.log.";
-    else if (kind === "ask") { out.replaceChildren(markdown(j.output || "Done")); if (view.type === "col" && view.id === cid) refreshProjectSoon(); }
-    else if (j.status === "done") {
+    else if (kind === "ask") out.replaceChildren(); // the reply lands in the history line below
+    // reload clips and history (the engine records the run right after the job finishes, hence the short delay)
+    if (kind === "ask" && j.status !== "idle" && view.type === "col" && view.id === cid) refreshProjectSoon();
+    else if (kind === "export" && j.status === "done") {
       out.replaceChildren(el("span", "", `Exported ${j.message}. `));
       const r = el("button", "link", "Show in Finder") as HTMLButtonElement;
       r.type = "button";
@@ -409,12 +419,80 @@ function markdown(src: string): HTMLElement {
   return root;
 }
 
-/** A finished edit's reply, shown as history (no polling, no refresh). */
-function showLastReply(out: HTMLElement, j: Job) {
-  out.className = `ask-out ${j.status}`;
-  const when = j.started ? new Date(j.started * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
-  const head = el("p", "muted", `Last edit${when ? ` (started ${when})` : ""}${j.model ? ` · ${j.model}` : ""}`);
-  out.replaceChildren(head, j.status === "failed" ? el("p", "", j.error || "Failed") : markdown(j.output || "Done"));
+// ---------- Claude history: every finished edit of a project, newest first
+type Run = { id: number; prompt: string; model?: string; status: string; steps?: string[]; output?: string; error?: string; started?: number; finished?: number };
+const runsOpen = new Set<number>(); // projects whose history is expanded; survives live re-renders
+
+async function loadRuns(cid: number, box: HTMLElement, j?: Job) {
+  let list: Run[] = [];
+  try { list = await api<Run[]>(`/collections/${cid}/ask/history?limit=500`); } catch { /* engine without history: fall back to the last job */ }
+  if (!box.isConnected) return;
+  list = list.filter((r) => r.status !== "running");
+  // an edit that finished before the engine kept history (or a moment before its row was written)
+  if (!list.length && j && (j.status === "done" || j.status === "failed"))
+    list = [{ id: 0, prompt: "", model: j.model, status: j.status, steps: j.steps, output: j.output, error: j.error, started: j.started }];
+  renderRuns(cid, box, list);
+}
+
+const when = (t?: number) => {
+  if (!t) return "";
+  const d = new Date(t * 1000);
+  const today = d.toDateString() === new Date().toDateString();
+  return d.toLocaleString(undefined, today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+/** First sentence of a markdown reply, for the collapsed line: skips headings and tables, drops markup. */
+function gist(md: string) {
+  const line = md.split("\n").map((l) => l.trim()).find((l) => l && !l.startsWith("#") && !l.startsWith("|")) ?? md;
+  const text = line.replace(/^[-*]\s+|^\d+\.\s+/, "").replace(/[*`_]/g, "").replace(/\s+/g, " ").trim();
+  return (/^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text).slice(0, 240);
+}
+
+function renderRuns(cid: number, box: HTMLElement, runs: Run[]) {
+  box.hidden = !runs.length;
+  if (!runs.length) { box.replaceChildren(); return; }
+  const last = runs[0];
+  let open = runsOpen.has(cid);
+  box.classList.toggle("open", open);
+  const bar = el("button", "runs-bar") as HTMLButtonElement;
+  bar.type = "button";
+  bar.setAttribute("aria-expanded", String(open));
+  bar.setAttribute("aria-controls", `runs-${cid}`);
+  bar.append(icon("spark"), el("span", "meta", [last.model, when(last.started)].filter(Boolean).join(" · ")),
+    el("span", "gist", last.status === "failed" ? `Failed: ${gist(last.error || "no reason given")}` : gist(last.output || "Done")),
+    el("span", "n", `${runs.length} run${runs.length === 1 ? "" : "s"}`), icon("chev"));
+  const list = el("ol", "runs-list");
+  list.id = `runs-${cid}`;
+  list.hidden = !open;
+  list.append(...runs.map(runItem));
+  bar.onclick = () => {
+    open = !open;
+    open ? runsOpen.add(cid) : runsOpen.delete(cid);
+    list.hidden = !open;
+    list.classList.toggle("pop", open); // animate only when you open it, not on live re-renders
+    box.classList.toggle("open", open);
+    bar.setAttribute("aria-expanded", String(open));
+  };
+  box.replaceChildren(bar, list);
+}
+
+function runItem(r: Run): HTMLElement {
+  const li = el("li", "run");
+  const head = el("div", "run-head");
+  const took = r.started && r.finished ? `took ${fmtDur(r.finished - r.started)}` : "";
+  head.append(el("p", "run-prompt", r.prompt ? `“${r.prompt}”` : "Edit"),
+    el("span", `status ${r.status}`, r.status === "done" ? "Done" : r.status === "failed" ? "Failed" : r.status),
+    el("span", "run-meta", [r.model, when(r.started), took].filter(Boolean).join(" · ")));
+  li.append(head);
+  if (r.status === "failed") li.append(el("p", "run-error", r.error || "Failed, no reason given. Check data/engine.log."));
+  if (r.output || r.status !== "failed") li.append(markdown(r.output || "Done"));
+  if (r.steps?.length) {
+    const d = document.createElement("details");
+    const ol = el("ol", "steps");
+    r.steps.forEach((t) => ol.append(el("li", "", t)));
+    d.append(el("summary", "", `${r.steps.length} step${r.steps.length === 1 ? "" : "s"}`), ol);
+    li.append(d);
+  }
+  return li;
 }
 
 /** An edit started outside the app (Claude Code, MCP, curl) on the open project: pick it up and show it live. */
@@ -429,13 +507,19 @@ async function watchExternalAsk() {
   } catch { /* heartbeat reports the engine being down */ }
 }
 
-function renderSteps(out: HTMLElement, j: Job) {
+const stepsSeen = new Map<number, number>(); // per project: steps already shown, so only new ones animate in
+function renderSteps(out: HTMLElement, j: Job, cid: number) {
   const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
   const head = el("div", "steps-head");
   head.append(el("span", "pulse-dot"), el("span", "", `Claude is editing${j.model ? ` · ${j.model}` : ""}`), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
   const list = el("ol", "steps");
   const steps = j.steps ?? [];
-  steps.slice(-6).forEach((t, k, arr) => list.append(el("li", k === arr.length - 1 ? "now" : "", t)));
+  const seen = stepsSeen.get(cid) ?? 0;
+  stepsSeen.set(cid, steps.length);
+  steps.slice(-6).forEach((t, k, arr) => {
+    const fresh = steps.length - arr.length + k >= seen;
+    list.append(el("li", `${k === arr.length - 1 ? "now" : ""}${fresh ? " new" : ""}`, t));
+  });
   if (!steps.length) list.append(el("li", "now", "Reading the brief…"));
   out.replaceChildren(head, list);
   if (j.note) out.append(el("p", "note", j.note));
