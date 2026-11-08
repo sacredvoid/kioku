@@ -58,6 +58,7 @@ export class Viewer {
   }
 
   close() {
+    this.video.onloadedmetadata = null;
     this.video.pause();
     this.video.removeAttribute("src");
     this.video.load();
@@ -86,7 +87,12 @@ export class Viewer {
 
   /** Videos: play the 540p copy if there is one, else offer to fetch it (download + scene detection). */
   private async showMedia(it: Item, i: number) {
+    // unload, not just pause: a still-loading video would otherwise start playing (hidden, with sound) when its
+    // metadata arrives after you've moved on to a photo
+    this.video.onloadedmetadata = null;
     this.video.pause();
+    this.video.removeAttribute("src");
+    this.video.load();
     this.video.hidden = true;
     this.loadBtn.hidden = true;
     this.img.hidden = false;
@@ -101,15 +107,14 @@ export class Viewer {
       if (this.i !== i) return;
       this.loadBtn.hidden = false;
       this.loadBtn.disabled = false;
+      this.loadBtn.firstChild!.textContent = "▶ Play video "; // not the last video's progress or error text
       this.loadBtn.onclick = async () => {
         this.loadBtn.disabled = true;
         this.loadBtn.firstChild!.textContent = "Fetching from iCloud and finding scenes… ";
         try {
-          const r = await api<{ scenes: Scene[] }>(`/media/${it.uuid}/analyze`, "POST");
+          await api(`/media/${it.uuid}/analyze`, "POST");
           if (this.i !== i) return;
-          this.scenes = r.scenes;
-          this.play(it);
-          this.show(i); // re-render info with scenes
+          this.show(i); // scenes exist now: re-render info and play
         } catch (e) {
           this.loadBtn.disabled = false;
           this.loadBtn.firstChild!.textContent = `Couldn't load: ${(e as Error).message} `;
@@ -127,7 +132,7 @@ export class Viewer {
     this.video.src = `${API}/media/${it.uuid}/proxy`;
     const t0 = it.t0 ?? 0;
     this.stopAt = it.item_id !== undefined && it.t1 != null ? it.t1 : null;
-    this.video.addEventListener("loadedmetadata", () => { this.video.currentTime = t0; this.video.play().catch(() => {}); }, { once: true });
+    this.video.onloadedmetadata = () => { this.video.currentTime = t0; this.video.play().catch(() => {}); };
   }
 
   private render(a: Asset, it: Item) {

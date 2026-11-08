@@ -431,11 +431,15 @@ async function syncCollections() {
   const before = new Map(collections.map((c) => [c.id, (c as Collection & { updated: number }).updated]));
   lastSig = sig;
   await loadCollections();
-  // reload the open collection if it changed, unless you're typing in it
+  // reload the open collection if it changed (or was deleted elsewhere: go() then says so), unless you're typing in it
   if (view.type === "col") {
     const now = cols.find((c) => c.id === (view as { id: number }).id);
     const typing = (document.activeElement as HTMLElement | null)?.matches("input, textarea, [contenteditable]");
-    if (now && before.get(now.id) !== now.updated && !typing && !viewer.open) go(view);
+    if ((!now || before.get(now.id) !== now.updated) && !typing && !viewer.open) {
+      const y = window.scrollY; // a live refresh (Claude adding clips) shouldn't jump you back to the top
+      await go(view);
+      window.scrollTo(0, y);
+    }
   }
 }
 setInterval(() => { if (ready && !document.hidden) syncCollections(); }, 5000);
@@ -496,6 +500,8 @@ heartbeat();
 // ---------- settings: form built from the engine's schema, so new settings show up without app changes
 const LABELS: Record<string, [string, string]> = {
   max_agents: ["Claude edits at once", ""],
+  new_cut_model: ["Model for a first cut", ""],
+  revise_model: ["Model for changes", ""],
   ask_minutes: ["Ask time limit", "min"],
   download_seconds: ["iCloud download timeout", "s per video"],
   proxy_height: ["Playable copy quality", "p"],
@@ -533,7 +539,7 @@ $("settings-btn").onclick = async () => {
   msg.className = "set-msg";
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const body = Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, Number(v)]));
+    const body = Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, cur.schema[k]?.type === "integer" || typeof cur.schema[k]?.enum?.[0] === "number" ? Number(v) : v]));
     try {
       await api("/settings", "PUT", body);
       dlg.close();

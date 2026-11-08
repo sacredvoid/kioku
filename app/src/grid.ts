@@ -41,8 +41,12 @@ export class Grid {
   }
 
   private layout() {
+    // always drop the old layout: a hidden grid (project view) must not keep rows that index the previous items
+    this.live.forEach((el) => el.remove());
+    this.live.clear();
+    this.rows = [];
     const W = this.el.clientWidth;
-    if (!W) return;
+    if (!W) return; // laid out again by the ResizeObserver once it's visible
     this.cols = Math.max(2, Math.floor((W + GAP) / (MIN_TILE + GAP)));
     this.size = (W - GAP * (this.cols - 1)) / this.cols;
     const rowH = this.size + GAP;
@@ -64,8 +68,6 @@ export class Grid {
       }
     }
     this.el.style.height = `${y}px`;
-    this.live.forEach((el) => el.remove());
-    this.live.clear();
     this.paint();
   }
 
