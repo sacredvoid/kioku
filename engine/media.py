@@ -51,6 +51,7 @@ def label_for(uuid):
     words = [w for w in (row[0] or "").split(" ; ") if w and w not in ("video", "photo")][:3]
     return f"{', '.join(words) or 'video'} · {int(row[1] or 0)}s"
 _locks_guard = threading.Lock()
+_gpu = threading.Lock()
 
 SCHEMA = """
 create table if not exists scenes(uuid text not null, idx integer not null, t0 real not null, t1 real not null,
@@ -252,8 +253,9 @@ def embed_frames(frames):
     ok = [im for im in ims if im is not None]
     if not ok:
         return [None] * len(frames)
-    vecs = iter(core.model().encode([{"image": im} for im in ok], batch_size=8, normalize_embeddings=True,
-                                    processing_kwargs={"image": {"max_soft_tokens": core.IMAGE_TOKENS}}))
+    with _gpu:  # parallel Claude edits analyze different videos at once: load the model once, one encode at a time
+        vecs = iter(core.model().encode([{"image": im} for im in ok], batch_size=8, normalize_embeddings=True,
+                                        processing_kwargs={"image": {"max_soft_tokens": core.IMAGE_TOKENS}}))
     return [next(vecs) if im is not None else None for im in ims]
 
 
