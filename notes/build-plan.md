@@ -51,7 +51,7 @@ Each merge is a plain `git merge --no-ff` of the branch into main after rebasing
 - Delete any stubs or `try: import` shims left in `test_render.py` and `test_captions.py`.
 - Run: `uv run test_library.py`, `test_settings.py`, `test_edit.py`, `test_render.py`, `test_captions.py`, `test_albums.py`; `cd app && npm run build`.
 - Boot a second engine on a spare port with a temp db (`CS_DB=/tmp/x.db uv run uvicorn server:app --port 8766`, never the iTerm one), create a project through curl, drive one preview render, one `PATCH /edit`, one draft round with `albums.plan` pointing at a fake; check `/media/activity` shows the render label.
-- `git grep -n "—"` over `notes/ skills/ engine/*.py app/src/` is empty.
+- `git grep -nP "\x{2014}"` (em dash) over `notes/ skills/ engine/*.py app/src/` is empty.
 - Update `HANDOFF.md` and `WORK.md` (new tests, new tools, what still needs the user).
 
 ## 5. Integrator checklist before calling it done
