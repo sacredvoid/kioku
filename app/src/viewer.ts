@@ -31,12 +31,20 @@ export class Viewer {
     $("prev").onclick = () => this.show(this.i - 1);
     $("next").onclick = () => this.show(this.i + 1);
     this.root.addEventListener("click", (e) => { if (e.target === this.root || e.target === $("stage")) this.close(); });
+    // capture phase: Esc closes the viewer from anywhere (caption, tag box, video controls)
     document.addEventListener("keydown", (e) => {
-      if (this.root.hidden || (e.target as HTMLElement).matches("input, textarea")) return;
-      if (e.key === "Escape") this.close();
+      if (this.root.hidden) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        (document.activeElement as HTMLElement | null)?.blur(); // saves a caption being edited
+        this.close();
+        return;
+      }
+      if ((e.target as HTMLElement).matches("input, textarea")) return;
       if (e.key === "ArrowLeft") this.show(this.i - 1);
       if (e.key === "ArrowRight") this.show(this.i + 1);
-    });
+    }, true);
   }
 
   get open() { return !this.root.hidden; }

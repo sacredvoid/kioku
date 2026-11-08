@@ -183,21 +183,70 @@ class Ask(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
 
 
+STEP_LABELS = {
+    "search_media": lambda i: f"Searching “{i.get('query', '')}”",
+    "analyze_clip": lambda i: "Watching a clip: downloading if needed, finding scenes",
+    "get_media": lambda i: "Reading a clip's details",
+    "add_to_collection": lambda i: f"Adding {len(i.get('uuids', []))} clip(s)",
+    "set_clip_range": lambda i: f"Trimming a clip to {i.get('in_seconds', 0):.1f}–{i.get('out_seconds', 0):.1f}s",
+    "move_clip": lambda i: "Reordering",
+    "remove_from_collection": lambda i: "Dropping a clip",
+    "set_brief": lambda i: "Writing the brief",
+    "get_collection": lambda i: "Reviewing the cut",
+    "export_project": lambda i: "Exporting the timeline",
+}
+
+
+def step_label(name, inp):
+    short = name.split("__")[-1]
+    if short in ("analyze_clip", "get_media") and (inp or {}).get("uuid"):
+        import media
+        what = "Watching" if short == "analyze_clip" else "Reading"
+        return f"{what}: {media.label_for(inp['uuid'])}"
+    try:
+        return STEP_LABELS.get(short, lambda i: short.replace("_", " ").capitalize())(inp or {})
+    except Exception:
+        return short
+
+
 def do_ask(cid, prompt):
     exe = claude_bin()
     if not exe:
         raise RuntimeError("Claude Code CLI not found (expected ~/.local/bin/claude)")
     col = library.get_collection(cid)
-    r = subprocess.run(
-        [exe, "-p", prompt, "--append-system-prompt",
-         SYSTEM.format(cid=cid, name=col["name"], brief=col["brief"], skill=SKILL.read_text().split("---", 2)[-1]),
-         "--mcp-config", str(mcp_config()), "--strict-mcp-config",
-         "--tools", "",  # no built-in tools: no shell, no file edits; only Safelight's own tools
-         "--allowedTools", "mcp__safelight", "--output-format", "text"],
-        capture_output=True, text=True, timeout=1800, cwd=str(ENGINE))
-    if r.returncode != 0:
-        raise RuntimeError((r.stderr or r.stdout).strip()[-800:] or f"claude exited {r.returncode}")
-    return {"output": r.stdout.strip()}
+    job_state = jobs[(cid, "ask")]
+    job_state["steps"] = []
+    cmd = [exe, "-p", prompt, "--append-system-prompt",
+           SYSTEM.format(cid=cid, name=col["name"], brief=col["brief"], skill=SKILL.read_text().split("---", 2)[-1]),
+           "--mcp-config", str(mcp_config()), "--strict-mcp-config",
+           "--tools", "",  # no built-in tools: no shell, no file edits; only Safelight's own tools
+           "--allowedTools", "mcp__safelight", "--output-format", "stream-json", "--verbose"]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(ENGINE))
+    timer = threading.Timer(1800, proc.kill)  # hard stop after 30 min
+    timer.start()
+    final, err = None, None
+    try:
+        for line in proc.stdout:  # one JSON event per line; surface tool calls as live steps
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if ev.get("type") == "assistant":
+                for block in ev.get("message", {}).get("content", []):
+                    if block.get("type") == "tool_use":
+                        job_state["steps"].append(step_label(block.get("name", ""), block.get("input")))
+                    elif block.get("type") == "text" and block.get("text", "").strip():
+                        job_state["note"] = block["text"].strip()[:300]
+            elif ev.get("type") == "result":
+                final = ev.get("result", "")
+                if ev.get("is_error"):
+                    err = final or "Claude reported an error"
+        proc.wait()
+    finally:
+        timer.cancel()
+    if err or proc.returncode != 0:
+        raise RuntimeError(err or proc.stderr.read().strip()[-800:] or f"claude exited {proc.returncode}")
+    return {"output": (final or "").strip()}
 
 
 @router.post("/collections/{cid}/ask", status_code=202)

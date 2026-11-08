@@ -26,7 +26,7 @@ export type Asset = {
 };
 
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
-  error?: string; path?: string; message?: string };
+  error?: string; path?: string; message?: string; steps?: string[]; note?: string };
 
 export async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const r = await fetch(API + path, {

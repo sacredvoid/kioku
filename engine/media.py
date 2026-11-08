@@ -24,8 +24,30 @@ router = APIRouter()
 PROXIES = core.DATA / "proxies"
 SHEETS = core.DATA / "sheets"
 VIDEO_EXT = {".mov", ".mp4", ".m4v"}
+DOWNLOAD_TIMEOUT = 180  # seconds per video
 MAX_SCENE = 8.0  # split longer scenes into even pieces so cuts can land inside long takes
 _locks: dict[str, threading.Lock] = {}
+# live work, for the app's progress panel: uuid -> {stage, started, label}; plus counters since engine start
+ACTIVE: dict[str, dict] = {}
+DONE = {"ok": 0, "failed": 0}
+
+
+def stage(uuid, name):
+    import time as _t
+    if name is None:
+        ACTIVE.pop(uuid, None)
+        return
+    cur = ACTIVE.setdefault(uuid, {"started": _t.time(), "label": label_for(uuid)})
+    cur["stage"], cur["stage_started"] = name, _t.time()
+
+
+def label_for(uuid):
+    with core.connect() as c:
+        row = c.execute("select meta, duration from assets where uuid = ?", (uuid,)).fetchone()
+    if not row:
+        return "video"
+    words = [w for w in (row[0] or "").split(" ; ") if w and w not in ("video", "photo")][:3]
+    return f"{', '.join(words) or 'video'} · {int(row[1] or 0)}s"
 _locks_guard = threading.Lock()
 
 SCHEMA = """
@@ -50,17 +72,21 @@ def video_row(c, uuid):
 
 
 def download_original(uuid, dest):
-    """iCloud original -> dest. Tries PhotoKit, then Photos' AppleScript export."""
+    """iCloud original -> dest via PhotoKit. (Photos' AppleScript export is not used: it hangs on iCloud items.)"""
     exe = str(Path(sys.executable).parent / "osxphotos")
-    base = [exe, "export", str(dest), "--uuid", uuid, "--download-missing", "--skip-edited", "--skip-live",
-            "--skip-raw", "--filename", "{uuid}", "--no-progress"]
-    for extra in (["--use-photokit"], []):
-        subprocess.run(base + extra, capture_output=True, text=True, timeout=600)
-        f = next((x for x in dest.iterdir() if x.stem == uuid and x.suffix.lower() in VIDEO_EXT), None)
-        if f:
-            return f
-    raise RuntimeError("couldn't download the original from iCloud. Check that Photos is signed in and that the "
-                       "app running Safelight has Photos access (System Settings > Privacy & Security > Photos).")
+    try:
+        r = subprocess.run([exe, "export", str(dest), "--uuid", uuid, "--download-missing", "--use-photokit",
+                            "--skip-edited", "--skip-live", "--skip-raw", "--filename", "{uuid}", "--no-progress"],
+                           capture_output=True, text=True, timeout=DOWNLOAD_TIMEOUT)
+        log = (r.stdout + r.stderr).strip()
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"iCloud download took over {DOWNLOAD_TIMEOUT // 60} min; skipped this video")
+    f = next((x for x in dest.iterdir() if x.stem == uuid and x.suffix.lower() in VIDEO_EXT), None)
+    if f:
+        return f
+    if "authorization" in log.lower():
+        raise RuntimeError("no Photos access for the app running the engine (System Settings > Privacy & Security > Photos)")
+    raise RuntimeError("iCloud download failed: " + (log.splitlines()[-1] if log else "no file returned"))
 
 
 def ensure_proxy(uuid):
@@ -72,7 +98,11 @@ def ensure_proxy(uuid):
     PROXIES.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="cs-orig-"))  # only this folder is ever deleted
     try:
-        src = Path(path) if (path and Path(path).suffix.lower() in VIDEO_EXT and Path(path).is_file()) else download_original(uuid, tmp)
+        local = path and Path(path).suffix.lower() in VIDEO_EXT and Path(path).is_file()
+        if not local:
+            stage(uuid, "downloading from iCloud")
+        src = Path(path) if local else download_original(uuid, tmp)
+        stage(uuid, "making a playable copy")
         part = out.with_suffix(".part.mp4")
         r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
                             "-vf", "scale=-2:'min(540,ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
@@ -172,13 +202,26 @@ def analyze(uuid, embed=True):
         sheet = SHEETS / f"{uuid}.jpg"
         if rows and sheet.is_file():
             return result(uuid, rows)
+        try:
+            return _analyze(uuid, embed, sheet)
+        except Exception:
+            DONE["failed"] += 1
+            raise
+        finally:
+            stage(uuid, None)
+
+
+def _analyze(uuid, embed, sheet):
         import cv2
+        stage(uuid, "starting")
         proxy = ensure_proxy(uuid)
+        stage(uuid, "finding scenes")
         scenes = detect_scenes(proxy)
         cap = cv2.VideoCapture(str(proxy))
         scored = [score_scene(cap, t0, t1) for t0, t1 in scenes]
         cap.release()
         contact_sheet([s[0] for s in scored], scenes, sheet)
+        stage(uuid, "understanding scenes")
         vecs = embed_frames([s[0] for s in scored]) if embed else [None] * len(scenes)
         with core.connect() as c:
             c.execute("delete from scenes where uuid = ?", (uuid,))
@@ -190,6 +233,7 @@ def analyze(uuid, embed=True):
                               (uuid, t0, t1, "scene", v.astype(np.float32).tobytes()))
             c.commit()
             rows = c.execute("select idx, t0, t1, sharp, motion from scenes where uuid = ? order by idx", (uuid,)).fetchall()
+        DONE["ok"] += 1
         return result(uuid, rows)
 
 
@@ -211,6 +255,16 @@ def result(uuid, rows):
 
 
 # ---------- routes
+
+@router.get("/media/activity")
+def activity():
+    """What the engine is fetching/analyzing right now, for the app's progress panel."""
+    import time as _t
+    now = _t.time()
+    return {"active": [{"uuid": u, "label": a.get("label"), "stage": a.get("stage"),
+                        "seconds": round(now - a["started"]), "stage_seconds": round(now - a.get("stage_started", now))}
+                       for u, a in list(ACTIVE.items())], **DONE}
+
 
 @router.post("/media/{uuid}/analyze")
 def analyze_route(uuid: str):

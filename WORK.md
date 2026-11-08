@@ -29,9 +29,20 @@ Status keys: [x] done · [~] in progress · [ ] todo
 - [x] Viewer plays videos (540p copy), "Play video" fetches from iCloud once, scene chips jump to scenes
 - [ ] End-to-end run on real iCloud videos (blocked: needs Photos access, see Waiting on you)
 
+## Session 2026-11-08 late additions
+
+- [x] Private repo sacredvoid/safelight (secret/PII scan clean; data/ ignored)
+- [x] Sidebar + open project auto-refresh every 5 s (projects made by Claude show up)
+- [x] Esc always closes the viewer (even from caption/tag box/video)
+- [x] iCloud download: PhotoKit only, 180 s cap, clear errors (AppleScript export hangs, removed)
+- [x] Ask Claude streams live steps (searches, clips watched, trims) with a timer
+- [x] Media activity panel in sidebar (per-video stage bar, done/skipped count) - needs engine restart
+- [ ] Halloween 2026 edit (project 2): verify result + export after restart
+
 ## Running in the background
 
-- Index Aug-Nov 2026 at 560 tokens (`uv run status.py --watch`)
+- Index Aug-Nov 2026 at 560 tokens, ~72% (`uv run status.py --watch`)
+- Engine runs in iTerm (Photos access); see HANDOFF.md
 
 ## Waiting on you
 

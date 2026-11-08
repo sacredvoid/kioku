@@ -291,7 +291,11 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
   for (;;) {
     let j: Job;
     try { j = await api<Job>(`/collections/${cid}/${kind}`); } catch { await sleep(2000); continue; }
-    if (j.status === "running") { await sleep(1500); continue; }
+    if (j.status === "running") {
+      if (kind === "ask") renderSteps(out, j);
+      await sleep(1500);
+      continue;
+    }
     btn.disabled = false;
     out.className = `ask-out ${j.status}`;
     if (j.status === "failed") out.textContent = j.error || "Failed";
@@ -306,6 +310,19 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
     return;
   }
 }
+function renderSteps(out: HTMLElement, j: Job) {
+  const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
+  const head = el("div", "steps-head");
+  head.append(el("span", "pulse-dot"), el("span", "", "Claude is editing"), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
+  const list = el("ol", "steps");
+  const steps = j.steps ?? [];
+  steps.slice(-6).forEach((t, k, arr) => list.append(el("li", k === arr.length - 1 ? "now" : "", t)));
+  if (!steps.length) list.append(el("li", "now", "Reading the brief…"));
+  out.replaceChildren(head, list);
+  if (j.note) out.append(el("p", "note", j.note));
+  if (steps.length > 6) out.append(el("p", "muted", `${steps.length} steps so far`));
+}
+
 let refreshT = 0;
 function refreshProjectSoon() {
   clearTimeout(refreshT);
@@ -381,6 +398,57 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") grid.clearSelection();
 });
 
+// ---------- live refresh: pick up projects/albums changed elsewhere (Claude Code, the Ask box)
+let lastSig = "";
+async function syncCollections() {
+  let cols: (Collection & { updated: number })[];
+  try { cols = await api(`/collections`); } catch { return; }
+  const sig = JSON.stringify(cols.map((c) => [c.id, c.name, c.count, c.cover, c.updated]));
+  if (sig === lastSig) return;
+  const before = new Map(collections.map((c) => [c.id, (c as Collection & { updated: number }).updated]));
+  lastSig = sig;
+  await loadCollections();
+  // reload the open collection if it changed, unless you're typing in it
+  if (view.type === "col") {
+    const now = cols.find((c) => c.id === (view as { id: number }).id);
+    const typing = (document.activeElement as HTMLElement | null)?.matches("input, textarea, [contenteditable]");
+    if (now && before.get(now.id) !== now.updated && !typing && !viewer.open) go(view);
+  }
+}
+setInterval(() => { if (ready && !document.hidden) syncCollections(); }, 5000);
+window.addEventListener("focus", () => ready && syncCollections());
+
+// ---------- media activity: videos being fetched from iCloud / analyzed
+type Activity = { active: { uuid: string; label: string; stage: string; seconds: number; stage_seconds: number }[]; ok: number; failed: number };
+const STAGES = ["downloading from iCloud", "making a playable copy", "finding scenes", "understanding scenes"];
+let actBase: { ok: number; failed: number } | null = null;
+async function pollActivity() {
+  const box = $("activity");
+  try {
+    const a = await api<Activity>("/media/activity");
+    if (!a.active.length) { box.hidden = true; actBase = null; return; }
+    actBase ??= { ok: a.ok, failed: a.failed };
+    const done = a.ok - actBase.ok, failed = a.failed - actBase.failed;
+    const head = el("div", "act-head");
+    head.append(el("span", "pulse-dot"), el("span", "", `Fetching ${a.active.length} video${a.active.length > 1 ? "s" : ""}`),
+      el("span", "spacer"), el("span", "muted", `${done} done${failed ? ` · ${failed} skipped` : ""}`));
+    const rows = a.active.slice(0, 4).map((x) => {
+      const r = el("div", "act-row");
+      const k = Math.max(0, STAGES.indexOf(x.stage));
+      const bar = el("div", "act-bar");
+      const fill = el("span", x.stage === STAGES[0] ? "indet" : "");
+      fill.style.width = `${((k + 1) / STAGES.length) * 100}%`;
+      bar.append(fill);
+      r.append(el("div", "act-label", x.label), bar, el("div", "act-stage", `${x.stage} · ${x.stage_seconds}s`));
+      return r;
+    });
+    box.replaceChildren(head, ...rows);
+    if (a.active.length > 4) box.append(el("p", "muted", `+${a.active.length - 4} more`));
+    box.hidden = false;
+  } catch { box.hidden = true; }
+}
+setInterval(() => { if (ready && !document.hidden) pollActivity(); }, 1500);
+
 // ---------- engine status
 const dot = $("engine");
 let ready = false;
@@ -389,7 +457,7 @@ async function heartbeat() {
     const h = await api<{ assets: number; reindex: string }>("/health");
     dot.className = "engine ok";
     $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${h.reindex === "running" ? " · indexing" : ""}`;
-    if (!ready) { ready = true; loadCollections(); go(view); }
+    if (!ready) { ready = true; syncCollections(); go(view); }
   } catch {
     dot.className = "engine wait";
     $("engine-text").textContent = ready ? "Engine offline" : "Starting engine";
