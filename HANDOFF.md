@@ -44,9 +44,18 @@ A local Mac app for the user's Photos library (58,396 items; 54k iCloud-only):
 - Disk: the index is about 5.3 KB per item (about 310 MB for everything). Thumbs are 41 KB each, made on view. Proxies are about 4.4 MB per minute, made on play or analyze; all 3,551 video minutes would be about 15.6 GB. Option offered: 360p proxies.
 - Photos is never written to. Albums and projects are pointers. Only a project *export* copies originals, to `~/Movies/Safelight/<project>/`.
 
+## Since the first handoff (night of 2026-11-08)
+
+- Logging: `data/engine.log` (rotated). Successful polling requests are filtered out of the access log.
+- `settings.py` + `data/settings.json`, edited from the ⚙ dialog. `max_agents` caps both Claude Ask jobs and parallel video analysis. `new_cut_model` (opus) for empty projects, `revise_model` (sonnet) otherwise.
+- Engine refuses foreign web origins (403) and non-localhost Host headers (audit, 003fbb4).
+- MCP read-only tools carry `readOnlyHint` so Claude Code runs them in parallel.
+- Deferred fixes are GitHub issues #1 to #5 on sacredvoid/safelight (also listed in WORK.md). Close them from commits with `Fixes #N`.
+- Tests: `uv run test_library.py`, `test_media.py`, `test_settings.py` (settings, queues, log filter, origin checks).
+
 ## Next up (in order)
 
-1. Restart the engine in iTerm to load the activity panel and better step labels, then re-run the Halloween edit and check its result and export.
+1. When the Fall 2026 edit (project 3) finishes, restart the engine in iTerm to load everything above. Then check that a new Ask analyzes several videos at once (sidebar activity panel).
 2. Ask the user for 3 searches that came out wrong, then A/B 280 vs 560 tokens.
 3. Full-library index overnight (photos and posters first, then `--videos` in batches).
 4. Neural Engine spike (offered, not started): pass if cosine > 0.99 and speed > 1.3×.

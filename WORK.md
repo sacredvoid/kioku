@@ -37,7 +37,26 @@ Status keys: [x] done · [~] in progress · [ ] todo
 - [x] iCloud download: PhotoKit only, 180 s cap, clear errors (AppleScript export hangs, removed)
 - [x] Ask Claude streams live steps (searches, clips watched, trims) with a timer
 - [x] Media activity panel in sidebar (per-video stage bar, done/skipped count) - needs engine restart
-- [ ] Halloween 2026 edit (project 2): verify result + export after restart
+- [x] Halloween 2026 edit (project 2): 12 shots, 30.2 s; user approved. Export not run yet
+
+## Session 2026-11-08 night: reliability, settings, audit
+
+- [x] Engine logging: terminal + data/engine.log (rotated), polling noise hidden (88cdc23)
+- [x] Readable errors everywhere: JSON 500s, error toasts, job lost on restart, lost-contact state (88cdc23, de2c2ba)
+- [x] Settings dialog (⚙): max agents, Opus first cut / Sonnet revisions, Ask limit, iCloud timeout, proxy height (88cdc23, 7c3ce9d)
+- [x] Fable audit: 8 fixes (search race, CSRF/DNS rebinding, trims clear, timeline 2.4x, grid/viewer bugs) (2903d54..8f362d6)
+- [x] Parallel video watching capped by max agents; MCP read-only tools run in parallel (89fe33f)
+- [x] Ask placeholder describes the project; empty Ask + brief = make it from the brief (89fe33f)
+- [~] Fall 2026 edit (project 3), started on the old engine, one video at a time
+- [ ] Restart engine to load all of the above (after Fall finishes)
+
+## Open issues (deferred from the audit, tracked on GitHub)
+
+- [ ] #1 WAL for index.db (do after the indexer stops)
+- [ ] #2 Index reload blocks a search every 30 s while indexing
+- [ ] #3 Thumbs generated for tiles scrolled past
+- [ ] #4 Reorder float midpoints run out after ~50 moves (bug)
+- [ ] #5 29.97 fps exports onto a 30 fps timeline (bug)
 
 ## Running in the background
 
@@ -46,11 +65,11 @@ Status keys: [x] done · [~] in progress · [ ] todo
 
 ## Waiting on you
 
-- Turn on iTerm in System Settings > Privacy & Security > Photos, then run the engine from iTerm (iCloud video downloads; AppleScript fallback times out)
 - 3 searches that returned wrong results
 
 ## Decisions log
 
 - 2026-11-08 App shell: Tauri (Otto's setup). Name: Safelight.
 - 2026-11-08 Photos library is never written to. Tags, captions, albums live in data/index.db.
+- 2026-11-08 Models: Opus for a project's first cut (creative), Sonnet for revisions; user is on Max 5x. One cap (max agents) limits both Claude edits and parallel video downloads.
 - 2026-11-08 Albums/projects store pointers only. Only a project *export* copies originals (editors need real files).
