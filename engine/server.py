@@ -28,7 +28,10 @@ import library
 import projects
 import media
 import settings
-import albums
+# `uv run server.py` loads this file as __main__; register it as `server` too, so a lazy `import server`
+# (albums.search) gets this running instance and its loaded index, not a second empty copy.
+sys.modules.setdefault("server", sys.modules[__name__])
+import albums  # noqa: E402
 import captions
 import edit
 import render
