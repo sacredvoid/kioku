@@ -253,3 +253,24 @@ button.chip:hover { border-color: var(--paper-3); color: var(--paper) }
 .act-bar span { display: block; height: 100%; border-radius: 4px; background: var(--safe); box-shadow: var(--safe-glow); transition: width .5s var(--ease) }
 .act-bar span.indet { background: linear-gradient(90deg, transparent, var(--safe), transparent); background-size: 200% 100%; animation: sweep 1.2s linear infinite; box-shadow: none }
 .act-stage { font: 10.5px var(--mono); color: var(--paper-3) }
+
+/* ---------- errors, settings */
+.toast.error { border-color: rgba(255,107,107,.5); color: var(--paper); cursor: pointer; max-width: min(620px, 90vw) }
+.toast.error::before { content: "⚠ "; color: var(--danger) }
+.engine-row { display: flex; align-items: center; border-top: 1px solid var(--line-soft) }
+.engine-row .engine { flex: 1; border-top: 0; min-width: 0 }
+.gear { font-size: 14px }
+.gear:disabled { opacity: .35; cursor: default }
+.settings { background: var(--ink-1); color: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; width: min(520px, 92vw);
+  box-shadow: 0 20px 60px rgba(0,0,0,.6) }
+.settings::backdrop { background: rgba(0,0,0,.55) }
+.settings h2 { margin: 0 0 14px; font-size: 16px }
+.set-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-top: 1px solid var(--line-soft) }
+.set-name { color: var(--paper) }
+.set-ctl { display: flex; align-items: center; gap: 6px; grid-row: span 2 }
+.set-ctl input, .set-ctl select { width: 84px; background: var(--ink-3); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; color: var(--paper) }
+.set-ctl input:invalid { border-color: var(--danger) }
+.set-help { color: var(--paper-3); font-size: 11.5px }
+.set-msg:empty { display: none }
+.set-msg.error { color: var(--danger); margin: 8px 0 0 }
+.set-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px }

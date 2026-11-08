@@ -22,7 +22,7 @@ export class Viewer {
   private info = $("info");
   private allTags: string[] = [];
 
-  constructor(private onSearch: (q: string) => void, private onChange: () => void) {
+  constructor(private onSearch: (q: string) => void, private onChange: () => void, private onError: (msg: string) => void) {
     $("close").onclick = () => this.close();
     // when opened from a project clip, play just its in..out range
     this.video.addEventListener("timeupdate", () => {
@@ -168,7 +168,7 @@ export class Viewer {
     cap.addEventListener("blur", async () => {
       if (cap.value.trim() === a.caption) return;
       try { a.caption = (await api<{ caption: string }>(`/asset/${a.uuid}/caption`, "PUT", { caption: cap.value })).caption; flash(cap); }
-      catch (e) { flash(cap, (e as Error).message); }
+      catch (e) { flash(cap, (e as Error).message); this.onError(`Couldn't save the caption: ${(e as Error).message}`); }
     });
     frag.append(section("Caption", cap));
 
@@ -208,7 +208,7 @@ export class Viewer {
         draw();
         input.focus();
         this.onChange();
-      } catch (e) { flash(input, (e as Error).message); }
+      } catch (e) { flash(input, (e as Error).message); this.onError(`Couldn't save tags: ${(e as Error).message}`); }
     };
     draw();
     frag.append(section("Your tags", tagBox, list));

@@ -28,19 +28,42 @@ export type Asset = {
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
   error?: string; path?: string; message?: string; steps?: string[]; note?: string };
 
+export type SettingField = { type?: string; minimum?: number; maximum?: number; enum?: number[]; description?: string; default?: number };
+export type Settings = Record<string, number>;
+
+/** Engine error: `status` 0 = engine not reachable. `message` is always readable by a person. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly path: string) { super(message); }
+}
+
 export async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const r = await fetch(API + path, {
-    method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let r: Response;
+  try {
+    r = await fetch(API + path, {
+      method,
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (e) {
+    // fetch only throws when there's no response at all: engine stopped, restarting, or still loading
+    throw new ApiError("The engine isn't responding. If you restarted it, give it a few seconds.", 0, path);
+  }
   if (!r.ok) {
-    let msg = `${r.status}`;
-    try { const j = await r.json(); msg = typeof j.detail === "string" ? j.detail : j.detail?.[0]?.msg ?? msg; } catch { /* not json */ }
-    throw new Error(msg);
+    let msg = r.statusText || `HTTP ${r.status}`;
+    try {
+      const j = await r.json();
+      // FastAPI: detail is a string, or a list of validation errors [{loc, msg}]
+      if (typeof j.detail === "string") msg = j.detail;
+      else if (Array.isArray(j.detail) && j.detail[0]) msg = `${j.detail[0].loc?.slice(-1)[0] ?? "input"}: ${j.detail[0].msg}`;
+    } catch { /* not json */ }
+    if (r.status >= 500) console.error(`[engine] ${method} ${path} -> ${r.status}: ${msg}`);
+    else console.warn(`[engine] ${method} ${path} -> ${r.status}: ${msg}`);
+    throw new ApiError(msg, r.status, path);
   }
   return r.status === 204 ? (undefined as T) : r.json();
 }
+
+export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export const thumb = (uuid: string) => `${API}/thumb/${uuid}`;
 export const full = (uuid: string) => `${API}/full/${uuid}`;

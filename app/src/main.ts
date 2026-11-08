@@ -1,5 +1,5 @@
 // Safelight: library, search, albums and video projects on top of your Photos library.
-import { api, fmtDur, isVideo, thumb, type Collection, type Item, type Job } from "./api";
+import { api, errMsg, fmtDur, isVideo, thumb, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
 import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 
@@ -20,21 +20,27 @@ let seq = 0;
 const q = $<HTMLInputElement>("q");
 const summary = $("summary"), empty = $("empty"), head = $("head"), project = $("project");
 const grid = new Grid($("grid"), (i) => viewer.start(grid.items, i), () => updateSelbar());
-const viewer = new Viewer((text) => { q.value = text; go({ type: "lib", kind: "" }, text); }, () => {});
+const viewer = new Viewer((text) => { q.value = text; go({ type: "lib", kind: "" }, text); }, () => {}, (m) => toast(m, true));
 
-// ---------- toast
+// ---------- toast: info fades fast; errors stay longer, read out right away, click to dismiss
 let toastT = 0;
-function toast(msg: string) {
+function toast(msg: string, error = false) {
   const t = $("toast");
   t.textContent = msg;
+  t.classList.toggle("error", error);
+  t.setAttribute("role", error ? "alert" : "status");
   t.hidden = false;
   clearTimeout(toastT);
-  toastT = window.setTimeout(() => (t.hidden = true), 2600);
+  toastT = window.setTimeout(() => (t.hidden = true), error ? 8000 : 2600);
 }
+$("toast").onclick = () => ($("toast").hidden = true);
+/** Error toast with what was being attempted: "Couldn't save the trim: out point must be after in point". */
+const fail = (what: string) => (e: unknown) => toast(`Couldn't ${what}: ${errMsg(e)}`, true);
 
 // ---------- sidebar
 async function loadCollections() {
-  try { collections = await api<Collection[]>("/collections"); } catch { collections = []; }
+  // keep the last good list on failure: an empty sidebar would look like your albums were deleted
+  try { collections = await api<Collection[]>("/collections"); } catch (e) { console.warn("collections:", errMsg(e)); return; }
   for (const kind of ["album", "project"] as const) {
     const box = $(kind === "album" ? "albums" : "projects");
     const list = collections.filter((c) => c.kind === kind);
@@ -84,7 +90,7 @@ function newCollection(kind: "album" | "project", box: Element, then?: (c: Colle
       const c = await api<Collection>("/collections", "POST", { name, kind });
       await loadCollections();
       then ? then(c) : go({ type: "col", id: c.id });
-    } catch (e) { toast(`Couldn't create: ${(e as Error).message}`); }
+    } catch (e) { fail(`create the ${kind}`)(e); }
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
   input.addEventListener("blur", () => finish(true));
@@ -128,17 +134,21 @@ async function go(v: View, search = q.value.trim()) {
       if (!items.length && c.kind === "album") showEmpty("Empty album. Go to All, select photos (⌘-click), then Add to album.");
     }
   } catch (e) {
-    if (my === seq) offline(e);
+    if (my === seq) showError(e);
   }
   updateSelbar();
 }
 
 function showEmpty(msg: string) { empty.textContent = msg; empty.hidden = false; }
-function offline(e: unknown) {
+function showError(e: unknown) {
   console.error(e);
   grid.set([], { months: false, badges: false });
   summary.textContent = "";
-  showEmpty("Can't reach the search engine. It may still be loading; this retries on its own.");
+  const status = (e as { status?: number }).status;
+  if (status === 404 && view.type === "col") { showEmpty("That album or project no longer exists."); loadCollections(); return; }
+  showEmpty(status === 0 ? "Can't reach the engine. It may still be loading; this view reloads when it's back."
+                         : `Something went wrong: ${errMsg(e)}`);
+  if (status === 0) ready = false; // heartbeat flips it back and reloads this view
 }
 
 function renderHead(c: Collection) {
@@ -151,7 +161,7 @@ function renderHead(c: Collection) {
     const name = h.textContent!.trim();
     if (!name || name === c.name) { h.textContent = c.name; return; }
     try { await api(`/collections/${c.id}`, "PATCH", { name }); c.name = name; loadCollections(); }
-    catch (e) { h.textContent = c.name; toast((e as Error).message); }
+    catch (e) { h.textContent = c.name; fail("rename")(e); }
   });
   const kind = el("span", `kind-pill ${c.kind}`, c.kind === "album" ? "Album" : "Video project");
   const del = el("button", "ghost danger", "Delete") as HTMLButtonElement;
@@ -174,7 +184,7 @@ function confirmInline(btn: HTMLButtonElement, msg: string, action: () => Promis
   box.append(el("span", "", msg), yes, no);
   btn.replaceWith(box);
   no.onclick = () => box.replaceWith(btn);
-  yes.onclick = () => action().catch((e) => { toast((e as Error).message); box.replaceWith(btn); });
+  yes.onclick = () => action().catch((e) => { fail("delete")(e); box.replaceWith(btn); });
 }
 
 // ---------- project view: clip list with in/out, brief, ask Claude, export
@@ -189,7 +199,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   brief.placeholder = "Brief: what should this video feel like? Length, pace, music, who it's for…";
   brief.value = c.brief;
   brief.addEventListener("blur", () => {
-    if (brief.value !== c.brief) api(`/collections/${c.id}`, "PATCH", { brief: brief.value }).then(() => { c.brief = brief.value; toast("Brief saved"); }).catch((e) => toast(e.message));
+    if (brief.value !== c.brief) api(`/collections/${c.id}`, "PATCH", { brief: brief.value }).then(() => { c.brief = brief.value; toast("Brief saved"); }).catch(fail("save the brief"));
   });
 
   const ask = el("form", "ask") as HTMLFormElement;
@@ -209,7 +219,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
       await api(`/collections/${c.id}/ask`, "POST", { prompt });
       askIn.value = "";
       pollJob(c.id, "ask", askOut, askBtn);
-    } catch (err) { askOut.textContent = (err as Error).message; }
+    } catch (err) { askOut.className = "ask-out failed"; askOut.textContent = `Couldn't start: ${errMsg(err)}`; }
   });
 
   const exp = el("button", "", "Export for Resolve") as HTMLButtonElement;
@@ -218,7 +228,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const expOut = el("div", "ask-out");
   exp.onclick = async () => {
     try { await api(`/collections/${c.id}/export`, "POST"); pollJob(c.id, "export", expOut, exp); }
-    catch (e) { expOut.textContent = (e as Error).message; }
+    catch (e) { expOut.className = "ask-out failed"; expOut.textContent = `Couldn't start the export: ${errMsg(e)}`; }
   };
 
   const strip = el("ol", "clips");
@@ -257,7 +267,7 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
         const r = await api<{ t0: number; t1: number }>(`/collections/${cid}/items/${it.item_id}`, "PATCH", { [key]: n.value === "" ? null : Number(n.value) });
         it.t0 = r.t0; it.t1 = r.t1;
         toast("Trim saved");
-      } catch (e) { toast((e as Error).message); n.value = it[key] != null ? String(it[key]) : ""; }
+      } catch (e) { fail("save the trim")(e); n.value = it[key] != null ? String(it[key]) : ""; }
     });
     w.append(n);
     return w;
@@ -274,11 +284,11 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
     // swap positions by giving this clip a position just past its neighbour
     const pos = to < i ? (items[to - 1] ? ((posOf(items[to - 1]) + posOf(other)) / 2) : posOf(other) - 1)
                        : (items[to + 1] ? ((posOf(other) + posOf(items[to + 1])) / 2) : posOf(other) + 1);
-    await api(`/collections/${cid}/items/${it.item_id}`, "PATCH", { pos }).catch((e) => toast(e.message));
+    await api(`/collections/${cid}/items/${it.item_id}`, "PATCH", { pos }).catch(fail("move the clip"));
     go(view);
   };
   actions.append(btn("↑", "Move earlier", move(i - 1)), btn("↓", "Move later", move(i + 1)),
-    btn("✕", "Remove from project", async () => { await api(`/collections/${cid}/items/${it.item_id}`, "DELETE").catch((e) => toast(e.message)); go(view); loadCollections(); }));
+    btn("✕", "Remove from project", async () => { await api(`/collections/${cid}/items/${it.item_id}`, "DELETE").catch(fail("remove the clip")); go(view); loadCollections(); }));
   li.append(el("span", "clip-n", String(i + 1)), img, info, range, actions);
   return li;
 }
@@ -288,9 +298,16 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
   btn.disabled = true;
   out.className = "ask-out running";
   out.textContent = kind === "ask" ? "Claude is searching your library and editing…" : "Exporting: downloading originals from iCloud if needed…";
+  let misses = 0;
   for (;;) {
     let j: Job;
-    try { j = await api<Job>(`/collections/${cid}/${kind}`); } catch { await sleep(2000); continue; }
+    try { j = await api<Job>(`/collections/${cid}/${kind}`); misses = 0; }
+    catch (e) {
+      if (!out.isConnected) return;
+      if (++misses >= 3) { out.className = "ask-out running"; out.textContent = `Lost contact with the engine, retrying… (${errMsg(e)})`; }
+      await sleep(2000);
+      continue;
+    }
     // project view re-rendered (live refresh, navigation): its new render started its own poll, so stop this one
     if (!out.isConnected) return;
     if (j.status === "running") {
@@ -299,14 +316,16 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
       continue;
     }
     btn.disabled = false;
-    out.className = `ask-out ${j.status}`;
-    if (j.status === "failed") out.textContent = j.error || "Failed";
+    out.className = `ask-out ${j.status === "idle" ? "failed" : j.status}`;
+    // idle while we were watching a running job = the engine restarted and the job died with it
+    if (j.status === "idle") out.textContent = `The ${kind === "ask" ? "edit" : "export"} stopped because the engine restarted. Clips placed so far are kept; run it again to continue.`;
+    else if (j.status === "failed") out.textContent = j.error || "Failed, no reason given. Check data/engine.log.";
     else if (kind === "ask") { out.textContent = j.output || "Done"; if (view.type === "col" && view.id === cid) refreshProjectSoon(); }
     else if (j.status === "done") {
       out.replaceChildren(el("span", "", `Exported ${j.message}. `));
       const r = el("button", "link", "Show in Finder") as HTMLButtonElement;
       r.type = "button";
-      r.onclick = () => api(`/collections/${cid}/reveal`, "POST").catch((e) => toast(e.message));
+      r.onclick = () => api(`/collections/${cid}/reveal`, "POST").catch(fail("open Finder"));
       out.append(r);
     }
     return;
@@ -351,8 +370,10 @@ $("sel-add-project").onclick = () => openMenu("project");
 $("sel-remove").onclick = async () => {
   if (view.type !== "col" || !current) return;
   const ids = current.items.filter((it) => grid.selected.has(it.uuid)).map((it) => it.item_id);
-  await Promise.all(ids.map((id) => api(`/collections/${current!.id}/items/${id}`, "DELETE"))).catch((e) => toast(e.message));
-  toast(`Removed ${ids.length}. Your photos stay in your library.`);
+  const res = await Promise.allSettled(ids.map((id) => api(`/collections/${current!.id}/items/${id}`, "DELETE")));
+  const bad = res.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (bad.length) toast(`Removed ${ids.length - bad.length} of ${ids.length}. ${bad.length} failed: ${errMsg(bad[0].reason)}`, true);
+  else toast(`Removed ${ids.length}. Your photos stay in your library.`);
   await loadCollections();
   go(view);
 };
@@ -380,7 +401,7 @@ async function addSelected(c: Collection) {
     toast(`Added ${r.added} to “${c.name}”${r.skipped ? ` (${r.skipped} already there)` : ""}`);
     grid.clearSelection();
     loadCollections();
-  } catch (e) { toast((e as Error).message); }
+  } catch (e) { fail(`add to “${c.name}”`)(e); }
 }
 
 // ---------- search box and keys
@@ -458,12 +479,67 @@ async function heartbeat() {
   try {
     const h = await api<{ assets: number; reindex: string }>("/health");
     dot.className = "engine ok";
-    $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${h.reindex === "running" ? " · indexing" : ""}`;
+    const failed = h.reindex.startsWith("failed");
+    $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${h.reindex === "running" ? " · indexing" : failed ? " · indexing failed" : ""}`;
+    dot.title = failed ? h.reindex : "Search engine status";
     if (!ready) { ready = true; syncCollections(); go(view); }
+    $<HTMLButtonElement>("settings-btn").disabled = false;
   } catch {
     dot.className = "engine wait";
-    $("engine-text").textContent = ready ? "Engine offline" : "Starting engine";
+    $("engine-text").textContent = ready ? "Engine offline, retrying" : "Starting engine";
+    if (ready) { ready = false; console.warn("engine went offline"); }
   }
   setTimeout(heartbeat, ready ? 15000 : 1000);
 }
 heartbeat();
+
+// ---------- settings: form built from the engine's schema, so new settings show up without app changes
+const LABELS: Record<string, [string, string]> = {
+  max_agents: ["Claude edits at once", ""],
+  ask_minutes: ["Ask time limit", "min"],
+  download_seconds: ["iCloud download timeout", "s per video"],
+  proxy_height: ["Playable copy quality", "p"],
+};
+$("settings-btn").onclick = async () => {
+  const dlg = $<HTMLDialogElement>("settings");
+  const form = $<HTMLFormElement>("settings-form");
+  const msg = $("settings-msg");
+  let cur: { values: Settings; schema: Record<string, SettingField> };
+  try { cur = await api("/settings"); } catch (e) { return fail("load settings")(e); }
+  const fields = Object.entries(cur.schema).map(([key, f]) => {
+    const [label, unit] = LABELS[key] ?? [key.replace(/_/g, " "), ""];
+    const row = el("label", "set-row");
+    let input: HTMLInputElement | HTMLSelectElement;
+    if (f.enum) {
+      input = document.createElement("select");
+      f.enum.forEach((v) => { const o = document.createElement("option"); o.value = String(v); o.textContent = `${v}${unit}`; input.append(o); });
+    } else {
+      input = document.createElement("input");
+      input.type = "number"; input.step = "1"; input.required = true;
+      if (f.minimum != null) input.min = String(f.minimum);
+      if (f.maximum != null) input.max = String(f.maximum);
+    }
+    input.name = key;
+    input.value = String(cur.values[key]);
+    const name = el("span", "set-name", label);
+    const ctl = el("span", "set-ctl");
+    ctl.append(input);
+    if (unit && !f.enum) ctl.append(el("span", "muted", unit));
+    row.append(name, ctl, el("span", "set-help", `${f.description ?? ""}${f.minimum != null ? ` (${f.minimum} to ${f.maximum})` : ""}`));
+    return row;
+  });
+  $("settings-fields").replaceChildren(...fields);
+  msg.textContent = "";
+  msg.className = "set-msg";
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, Number(v)]));
+    try {
+      await api("/settings", "PUT", body);
+      dlg.close();
+      toast("Settings saved. They apply to the next edit or download.");
+    } catch (err) { msg.className = "set-msg error"; msg.textContent = `Not saved: ${errMsg(err)}`; }
+  };
+  dlg.showModal();
+};
+$("settings-cancel").onclick = () => $<HTMLDialogElement>("settings").close();
