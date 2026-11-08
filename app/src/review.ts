@@ -68,7 +68,7 @@ function askInline(host: HTMLElement, placeholder: string, submit: (text: string
   form.onsubmit = async (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    if (text.length < 3) { deps.toast("Describe the photos in a few words.", true); return; }
+    if (text.length < 3) { hint(input, "Describe the photos in a few words."); return; }
     go.disabled = true;
     try { await submit(text); form.remove(); } catch (err) { deps.fail("start the search")(err); go.disabled = false; }
   };
@@ -320,10 +320,17 @@ function openViewer(uuid: string) {
 }
 
 // ---------- search again, save, discard
+/** Input problems show on the input itself (native bubble), not as an app toast. Cleared on the next keystroke. */
+function hint(input: HTMLInputElement, msg: string) {
+  input.setCustomValidity(msg);
+  input.reportValidity();
+  input.focus();
+  input.addEventListener("input", () => input.setCustomValidity(""), { once: true });
+}
 async function searchAgain() {
   if (!d || ui.input.disabled) return;
   const prompt = ui.input.value.trim();
-  if (prompt.length < 3) { deps.toast("Say what to look for, in a few words.", true); return; }
+  if (prompt.length < 3) { hint(ui.input, "Say what to look for, in a few words."); return; }
   try {
     await api(`/drafts/${d.id}/search`, "POST", { prompt });
     ui.input.value = "";
