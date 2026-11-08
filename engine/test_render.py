@@ -229,8 +229,8 @@ assert r["sheet"] and open(r["sheet"], "rb").read(3) == b"\xff\xd8\xff"
 assert_clean()
 
 # cache: identical render runs zero segments; one speed change runs one; transitions and captions run zero; window runs zero
-r, ran = go(1)
-assert ran == 0 and r["cached"] == 5
+r, ran = go(1)  # unchanged edit: the saved preview is handed back without running ffmpeg at all
+assert ran == 0 and r["rendered"] == 0 and "reused" in r["message"] and render.saved_preview(1)["path"] == r["path"], r
 PLAN[2] = mk([FIVE[0], FIVE[1], FIVE[2], ("D", "video", 0, 2, 4, None), FIVE[4]])
 assert go(2)[1] == 1 or go(2)[1] == 0
 PLAN[3] = mk([FIVE[0], ("B", "video", 0, 1, 1, ("wipeleft", 12)), FIVE[2], FIVE[3], FIVE[4]])
@@ -257,6 +257,7 @@ fake.ensure_transcripts = lambda uuids, on_progress=None, errors=None: {u: [] fo
 fake.map_cues = lambda tl, tr: [types.SimpleNamespace(t0=0.5, t1=1.5, text="a", ), types.SimpleNamespace(t0=1.8, t1=2.8, text="b")]
 fake.build = lambda tl, style, dims, cues, workdir, window: types.SimpleNamespace(cues=cues, list_file=cd / "cues.txt")
 fake.write_srt = lambda cues, path, shift=0.0: Path(path).write_text(f"srt shift {shift}")
+fake.cached = lambda uuid: None
 sys.modules["captions"] = fake
 PLAN[5] = mk([("G", "video", 0, 6, 1, None)])
 CAPS[5] = True
@@ -400,6 +401,7 @@ PLAN[11] = mk([("A", "video", 1.2, 1.6, 1, None)])
 db.execute("insert into collections(id, name, kind, created, updated) values (10,'P10','project',1.0,1.0),(11,'P11','project',1.0,1.0)")
 db.commit()
 go(11)  # its segment is cached now, so the second render goes straight for the render slot (a fetch also takes a slot)
+(render.RENDERS / "11" / "preview.json").unlink()  # force a real render (not a reused preview) to test the slot
 render.run_ffmpeg = slow
 ts = [threading.Thread(target=go, args=(c,)) for c in (10, 11)]
 ts[0].start(); time.sleep(0.15); ts[1].start()
@@ -463,4 +465,8 @@ except RuntimeError as e:
     assert "limited to 200" in str(e)
 assert_clean()
 assert "data/index.db" not in str(core.DB_PATH)
+# saved preview survives an engine restart (job state gone) and says when the edit changed since
+projects.jobs.pop((1, "preview"), None)
+j = c.get("/collections/1/render/preview").json()
+assert j["status"] == "done" and j.get("saved") and j["path"] == render.saved_preview(1)["path"], j
 print("render checks passed")

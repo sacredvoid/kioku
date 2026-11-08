@@ -27,7 +27,7 @@ export type Asset = {
 
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
   error?: string; path?: string; message?: string; steps?: string[]; note?: string; model?: string;
-  progress?: number; stage?: string; eta_seconds?: number; sheet?: string; srt?: string; edit_hash?: string;
+  progress?: number; stage?: string; eta_seconds?: number; sheet?: string; srt?: string; edit_hash?: string; stale?: boolean;
   warnings?: string[]; seconds?: number };
 
 export type Captions = { on: boolean; style: string; ready: number; pending: number; no_speech: number;

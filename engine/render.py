@@ -429,6 +429,24 @@ def _timeout(seconds):
 
 # ---------- the job
 
+def preview_key(tl, spec, win):
+    """What a preview depends on: the edit, the window, and (captions on) the cached transcripts it would draw."""
+    import captions
+    words = ""
+    if spec["captions"]["on"]:
+        words = json.dumps([captions.cached(u) for u in sorted({s.uuid for s in tl.segs})], default=str)
+    return hashlib.sha1(f"{tl.edit_hash}|{win}|{words}".encode()).hexdigest()
+
+
+def saved_preview(cid):
+    """The last finished preview of this project (survives engine restarts), or None."""
+    try:
+        meta = json.loads((RENDERS / str(cid) / "preview.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return meta if Path(meta.get("path", "")).is_file() else None
+
+
 def render(cid, mode, start=None, end=None, codec="hevc"):
     """Job target for projects.start_job(cid, mode, render.render, start, end, codec). Returns the result dict."""
     global SEG_RUNS, _active
@@ -455,6 +473,11 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         if not 0 <= sf < ef:
             raise RuntimeError("the preview range is outside the edit")
         win = (sf, ef) if (sf, ef) != (0, tl.total_frames) else None
+    if mode == "preview":  # nothing changed since the last preview: hand it back instead of re-rendering
+        key = preview_key(tl, spec, win)
+        meta = saved_preview(cid)
+        if meta and meta.get("key") == key:
+            return {**meta, "rendered": 0, "message": "Unchanged since the last preview, so it was reused"}
     jkey = (cid, mode)
     cancel = CANCEL[jkey] = threading.Event()
     state = projects.jobs.setdefault(jkey, {})
@@ -627,10 +650,14 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         sheet = _sheet(target, sel, win, fps, rdir / f"{mode}-sheet.jpg")
         prog.state["progress"] = 1.0
         _gc_cache()
-        return {"path": str(target), "folder": str(target.parent), "seconds": round(out_s, 2),
+        result = {"path": str(target), "folder": str(target.parent), "seconds": round(out_s, 2),
                 "srt": str(srt) if srt else None, "sheet": str(sheet) if sheet else None, "edit_hash": tl.edit_hash,
                 "rendered": len(todo), "cached": hits, "warnings": warnings,
                 "message": f"{out_s:.0f}s, {len(todo)} clips rendered, {hits} reused"}
+        if mode == "preview":
+            result["key"] = key
+            (rdir / "preview.json").write_text(json.dumps(result))
+        return result
     finally:
         for p in parts:
             p.unlink(missing_ok=True)
@@ -688,7 +715,13 @@ def render_route(cid: int, body: RenderBody):
 
 @router.get("/collections/{cid}/render/{mode}")
 def render_status(cid: int, mode: Mode):
-    return projects.job(cid, mode)
+    j = projects.job(cid, mode)
+    if j.get("status") == "idle" and mode == "preview" and (meta := saved_preview(cid)):
+        # after an engine restart: show the saved preview, flagged if the edit changed since
+        import edit
+        tl, _ = edit.snapshot(cid)
+        return {**meta, "status": "done", "saved": True, "stale": meta.get("edit_hash") != tl.edit_hash}
+    return j
 
 
 @router.post("/collections/{cid}/render/{mode}/cancel", status_code=204)

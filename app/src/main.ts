@@ -447,7 +447,9 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
       v.controls = true;
       v.className = "preview-video";
       v.src = `${API}/collections/${cid}/render/preview/file?v=${encodeURIComponent(j.edit_hash ?? String(Date.now()))}`;
-      out.replaceChildren(v, ...renderNotes(j));
+      const notes = renderNotes(j);
+      if (j.stale) notes.unshift(el("p", "muted", "The edit changed since this preview. Press Preview to update it."));
+      out.replaceChildren(v, ...notes);
     } else if (kind === "final" && j.status === "done") {
       out.replaceChildren(el("span", "", `Rendered video, ${fmtDur(j.seconds ?? 0)}. `));
       for (const [label, q] of [["Play", "?play=1"], ["Show in Finder", ""]]) {
