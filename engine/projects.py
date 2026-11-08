@@ -54,11 +54,18 @@ def start_job(cid, kind, target, *args):
             msg = str(e) if isinstance(e, RuntimeError) else f"Unexpected error ({type(e).__name__}): {e}"
             jobs[(cid, kind)].update(status="failed", error=msg[:1000])
     threading.Thread(target=run, daemon=True).start()
-    return jobs[(cid, kind)]
+    return job(cid, kind)
 
 
 def job(cid, kind):
-    return jobs.get((cid, kind), {"status": "idle"})
+    """A snapshot: the job thread keeps changing the live dict, and serializing it mid-change can fail."""
+    j = jobs.get((cid, kind))
+    if not j:
+        return {"status": "idle"}
+    snap = dict(j)
+    if "steps" in snap:
+        snap["steps"] = list(snap["steps"])
+    return snap
 
 
 # ---------- export
@@ -299,6 +306,9 @@ def run_claude(exe, cid, col, prompt, job_state):
         stderr = errf.read().strip()
     finally:
         timer.cancel()
+        if proc.poll() is None:  # we bailed out early: don't leave claude running with nobody reading its output
+            proc.kill()
+            proc.wait()
         errf.close()
     if stderr:
         log.info("claude stderr for collection %d: %s", cid, stderr[-2000:])

@@ -214,8 +214,9 @@ def update_item(cid: int, iid: int, body: ItemPatch):
                         "where i.id = ? and i.collection_id = ?", (iid, cid)).fetchone()
         if not row:
             raise HTTPException(404, "no such item")
-        t0 = body.t0 if body.t0 is not None else row[0]
-        t1 = body.t1 if body.t1 is not None else row[1]
+        # an explicit null clears the trim (back to the clip's start/end); a missing field keeps it
+        t0 = body.t0 if "t0" in body.model_fields_set else row[0]
+        t1 = body.t1 if "t1" in body.model_fields_set else row[1]
         dur = row[2] or 0
         if t0 is not None and t1 is not None and t1 <= t0:
             raise HTTPException(422, "out point must be after in point")

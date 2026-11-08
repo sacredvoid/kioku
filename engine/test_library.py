@@ -57,6 +57,8 @@ assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": 2, "t1": 5})
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": 6}).status_code == 422  # in after out
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t1": 99}).status_code == 422  # past the end
 assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t0": -1}).status_code == 422
+assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"pos": 9}).json()["t1"] == 5  # other fields kept
+assert c.patch(f"/collections/{prj['id']}/items/{iid}", json={"t1": None}).json() == {"item_id": iid, "t0": 2, "t1": None}
 
 # asset detail lists its collections
 a = c.get("/asset/B").json()

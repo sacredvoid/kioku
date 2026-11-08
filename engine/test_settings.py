@@ -40,6 +40,13 @@ assert not t.is_alive() and "note" not in b and projects.RUNNING_AGENTS == 1
 projects.release_slot()
 assert projects.RUNNING_AGENTS == 0
 
+# job status is a snapshot, so serializing it can't race the job thread mutating the live dict
+projects.jobs[(9, "ask")] = {"status": "running", "steps": ["a"]}
+snap = projects.job(9, "ask")
+snap["steps"].append("b"); snap["note"] = "x"
+assert projects.jobs[(9, "ask")] == {"status": "running", "steps": ["a"]}
+assert projects.job(8, "ask") == {"status": "idle"}
+
 # access log: successful polls hidden, failures and real requests kept
 f = server.QuietPolls()
 rec = lambda m, p, s: logging.LogRecord("uvicorn.access", 20, "", 0, '%s - "%s %s HTTP/%s" %d', ("1", m, p, "1.1", s), None)
