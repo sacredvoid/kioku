@@ -118,7 +118,8 @@ async def app_origin_only(request: Request, call_next):
 
 # DNS rebinding: a web page whose domain resolves to 127.0.0.1 would otherwise read your library same-origin
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
-app.add_middleware(GZipMiddleware, minimum_size=1024)  # timeline JSON compresses ~5x
+# level 1: on localhost the bytes are nearly free; level 9 spent ~110 ms squeezing the 3.5 MB timeline
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=1)
 app.include_router(library.router)
 app.include_router(projects.router)
 app.include_router(media.router)
@@ -167,8 +168,9 @@ def timeline(kind: str | None = None):
     rows = core.connect().execute(
         f"select uuid, kind, duration, created from assets where kind in ({','.join('?' * len(kinds))}) "
         "order by created desc", kinds).fetchall()
-    return {"uuid": [r[0] for r in rows], "video": [r[1] != "image" for r in rows],
-            "dur": [round(r[2] or 0) for r in rows], "created": [(r[3] or "")[:10] for r in rows]}
+    # JSONResponse directly: FastAPI's jsonable_encoder walks every element (~60 ms for 58k items)
+    return JSONResponse({"uuid": [r[0] for r in rows], "video": [r[1] != "image" for r in rows],
+                         "dur": [round(r[2] or 0) for r in rows], "created": [(r[3] or "")[:10] for r in rows]})
 
 
 def preview_path(uuid):
