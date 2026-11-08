@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from datetime import date
 from pathlib import Path
 
@@ -82,8 +82,14 @@ def stamp(db):
 
 
 def load():
-    db = core.connect()
-    state["index"], state["stamp"], state["checked"] = core.Index(db), stamp(db), time.time()
+    with closing(core.connect()) as db:
+        state["index"], state["stamp"], state["checked"] = core.Index(db), stamp(db), time.time()
+
+
+def one(sql, args=()):
+    """Run one query on a fresh connection and close it (the server leaked connections until it ran out of files)."""
+    with closing(core.connect()) as db:
+        return db.execute(sql, args).fetchall()
 
 
 rebuilding = threading.Lock()  # held while a background reload runs: at most one at a time
@@ -91,8 +97,9 @@ rebuilding = threading.Lock()  # held while a background reload runs: at most on
 
 def reload_if_changed():
     try:
-        db = core.connect()
-        if stamp(db) != state["stamp"]:
+        with closing(core.connect()) as db:
+            changed = stamp(db) != state["stamp"]
+        if changed:
             load()
     except Exception:
         log.exception("index reload failed; keeping the old index")
@@ -167,11 +174,10 @@ def health():
 @app.get("/index/info")
 def index_info():
     """What's in the search index: counts by kind, date span, when it last changed, which model and image detail."""
-    db = core.connect()
-    kinds = dict(db.execute("select kind, count(*) from assets group by kind").fetchall())
-    newest, oldest, last = db.execute("select max(created), min(created), max(indexed_at) from assets").fetchone()
+    kinds = dict(one("select kind, count(*) from assets group by kind"))
+    newest, oldest, last = one("select max(created), min(created), max(indexed_at) from assets")[0]
     return {"assets": sum(kinds.values()), "kinds": kinds, "newest": newest, "oldest": oldest, "last_indexed": last,
-            "failed": db.execute("select count(*) from assets where error is not null").fetchone()[0],
+            "failed": one("select count(*) from assets where error is not null")[0][0],
             "model": core.MODEL_ID, "image_tokens": core.IMAGE_TOKENS,
             "reindex": state["reindex"], "last_run": state["last_run"]}
 
@@ -190,9 +196,9 @@ def recent(offset: int = Query(0, ge=0), limit: int = Query(120, ge=1, le=500), 
     if kind and kind not in KINDS:
         raise HTTPException(422, f"kind must be one of {sorted(KINDS)}")
     kinds = {"image": ("image",), "video": ("video", "poster")}.get(kind, ("image", "video", "poster"))
-    rows = core.connect().execute(
+    rows = one(
         f"select uuid, kind, path, duration, meta, created from assets where kind in ({','.join('?' * len(kinds))}) "
-        "order by created desc limit ? offset ?", (*kinds, limit, offset)).fetchall()
+        "order by created desc limit ? offset ?", (*kinds, limit, offset))
     return [dict(zip(("uuid", "kind", "path", "duration", "meta", "created"), r)) for r in rows]
 
 
@@ -202,9 +208,9 @@ def timeline(kind: str | None = None):
     if kind and kind not in KINDS:
         raise HTTPException(422, f"kind must be one of {sorted(KINDS)}")
     kinds = {"image": ("image",), "video": ("video", "poster")}.get(kind, ("image", "video", "poster"))
-    rows = core.connect().execute(
+    rows = one(
         f"select uuid, kind, duration, created from assets where kind in ({','.join('?' * len(kinds))}) "
-        "order by created desc", kinds).fetchall()
+        "order by created desc", kinds)
     # JSONResponse directly: FastAPI's jsonable_encoder walks every element (~60 ms for 58k items)
     return JSONResponse({"uuid": [r[0] for r in rows], "video": [r[1] != "image" for r in rows],
                          "dur": [round(r[2] or 0) for r in rows], "created": [(r[3] or "")[:10] for r in rows]})
@@ -212,7 +218,7 @@ def timeline(kind: str | None = None):
 
 def preview_path(uuid):
     """Local preview for an indexed item. Only paths stored in the index are ever served."""
-    row = core.connect().execute("select path from assets where uuid = ?", (uuid,)).fetchone()
+    row = next(iter(one("select path from assets where uuid = ?", (uuid,))), None)
     if not row or not row[0] or Path(row[0]).suffix.lower() not in THUMB_EXT or not Path(row[0]).is_file():
         raise HTTPException(404, "no local preview")
     return Path(row[0])
@@ -258,7 +264,7 @@ def run_reindex(since):
             cmd += ["--since", since]
         log.info("reindex started (since %s)", since or "beginning")
         # count only this run's date range, so a separate indexer running at the same time doesn't inflate "added"
-        count = lambda: core.connect().execute("select count(*) from assets where created >= ?", (since or "",)).fetchone()[0]
+        count = lambda: one("select count(*) from assets where created >= ?", (since or "",))[0][0]
         before = count()
         run = state["last_run"] = {"since": since, "started": time.time(), "finished": None, "added": None}
         r = subprocess.run(cmd, capture_output=True, text=True)
@@ -280,7 +286,7 @@ def reindex(since: date | None = None, newer: bool = False):
     """Index new items only (already-indexed ones are skipped). Runs in the background.
     newer=true: only items from the newest indexed item's day onward (the "fetch new photos" button)."""
     if newer:
-        newest = core.connect().execute("select max(created) from assets").fetchone()[0]
+        newest = one("select max(created) from assets")[0][0]
         since = date.fromisoformat(newest[:10]) if newest else since
     if not lock.acquire(blocking=False):
         raise HTTPException(409, "reindex already running")

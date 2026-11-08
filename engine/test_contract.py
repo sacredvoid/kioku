@@ -34,3 +34,14 @@ except ValueError:
     pass
 assert media.RUNNING == 0
 print("ok")
+
+# connections from core.connect() close when their `with` block ends (they used to leak until the engine ran out of files)
+import sqlite3 as _sq  # noqa: E402
+with core.connect() as _c:
+    _c.execute("select 1")
+try:
+    _c.execute("select 1")
+    raise AssertionError("connection still open after with-block")
+except _sq.ProgrammingError:
+    pass
+print("connection close ok")

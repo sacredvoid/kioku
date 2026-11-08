@@ -56,9 +56,19 @@ create index if not exists ask_runs_c on ask_runs(collection_id, started);
 _wal = set()  # db paths already switched to WAL by this process
 
 
+class Conn(sqlite3.Connection):
+    """`with core.connect() as c:` commits (or rolls back) AND closes. Plain sqlite3 only commits, which left
+    connections open until garbage collection and ran the engine out of file handles."""
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            self.close()
+
+
 def connect(path=DB_PATH):
     path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=30)  # the indexer may be writing; wait instead of failing
+    db = sqlite3.connect(path, timeout=30, factory=Conn)  # the indexer may be writing; wait instead of failing
     if path not in _wal:
         # WAL lets readers and the indexer's writes overlap. The switch is persistent but needs a brief exclusive
         # lock, so if the db is busy just try again on a later connect; never fail the connection over it.

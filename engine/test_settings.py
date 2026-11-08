@@ -115,7 +115,7 @@ holder = sqlite3.connect(busy)
 holder.execute("create table t(x)"); holder.commit()
 holder.execute("begin exclusive")
 orig = sqlite3.connect
-sqlite3.connect = lambda p, timeout=30: orig(p, timeout=0.1)
+sqlite3.connect = lambda p, timeout=30, **kw: orig(p, timeout=0.1, **kw)
 try:
     core.connect(busy)  # locked: logs and carries on... schema script also needs the lock, so only the pragma is checked
 except sqlite3.OperationalError:
