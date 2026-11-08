@@ -20,6 +20,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 import core
@@ -99,9 +100,24 @@ async def lifespan(_app):
 
 app = FastAPI(title="Safelight engine", lifespan=lifespan)
 # The Tauri webview (dev server and bundled app) calls this API directly.
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:1420", "tauri://localhost",
-                                                   "http://tauri.localhost"],
+ORIGINS = {"http://localhost:1420", "tauri://localhost", "http://tauri.localhost"}
+app.add_middleware(CORSMiddleware, allow_origins=sorted(ORIGINS),
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"])
+
+
+@app.middleware("http")
+async def app_origin_only(request: Request, call_next):
+    """CORS only hides responses; a web page you visit can still *send* a simple POST here (start an Ask or an
+    export). Browsers mark such requests with Origin, so refuse any origin that isn't the app. curl and the MCP
+    server send no Origin and pass."""
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in ORIGINS:
+        return JSONResponse(status_code=403, content={"detail": f"origin {origin} not allowed"})
+    return await call_next(request)
+
+
+# DNS rebinding: a web page whose domain resolves to 127.0.0.1 would otherwise read your library same-origin
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 app.add_middleware(GZipMiddleware, minimum_size=1024)  # timeline JSON compresses ~5x
 app.include_router(library.router)
 app.include_router(projects.router)

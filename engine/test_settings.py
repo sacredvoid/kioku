@@ -13,7 +13,8 @@ import settings
 
 settings.FILE = Path(tempfile.mkdtemp()) / "settings.json"  # never touch the real data/settings.json
 settings._cur = None
-c = TestClient(server.app)  # no `with`: skips lifespan, so no model load
+API = "http://127.0.0.1:8765"
+c = TestClient(server.app, base_url=API)  # no `with`: skips lifespan, so no model load
 
 assert c.get("/settings").json()["values"]["max_agents"] == 2
 assert c.put("/settings", json={"max_agents": 0, "ask_minutes": 30, "download_seconds": 180, "proxy_height": 540}).status_code == 422
@@ -60,6 +61,14 @@ assert f.filter(rec("GET", "/search?q=dog", 200))
 @server.app.get("/__boom")
 def boom():
     raise ValueError("kaboom")
-r = TestClient(server.app, raise_server_exceptions=False).get("/__boom")
+r = TestClient(server.app, base_url=API, raise_server_exceptions=False).get("/__boom")
 assert r.status_code == 500 and "kaboom" in r.json()["detail"], r.text
+
+# only the app's own origins and localhost Host names get through (CSRF from web pages, DNS rebinding)
+assert c.get("/settings", headers={"Origin": "https://evil.example"}).status_code == 403
+assert c.post("/reindex", headers={"Origin": "null"}).status_code == 403
+assert c.get("/settings", headers={"Origin": "tauri://localhost"}).status_code == 200
+assert c.get("/settings", headers={"Origin": "http://localhost:1420"}).headers["access-control-allow-origin"] == "http://localhost:1420"
+assert TestClient(server.app, base_url="http://rebound.example:8765").get("/settings").status_code == 400
+assert TestClient(server.app, base_url="http://localhost:8765").get("/settings").status_code == 200
 print("settings checks passed")
