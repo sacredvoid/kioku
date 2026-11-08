@@ -369,8 +369,9 @@ function markdown(src: string): HTMLElement {
     }
     const li = /^\s*(?:[-*]|\d+\.)\s+/;
     if (li.test(line)) {
-      const list = el(/^\s*\d+\./.test(line) ? "ol" : "ul");
-      for (; i < lines.length && li.test(lines[i]); i++) list.append(inline(lines[i].replace(li, ""), el("li")));
+      const ordered = /^\s*\d+\./.test(line);
+      const list = el(ordered ? "ol" : "ul");
+      for (; i < lines.length && li.test(lines[i]) && /^\s*\d+\./.test(lines[i]) === ordered; i++) list.append(inline(lines[i].replace(li, ""), el("li")));
       root.append(list);
       continue;
     }
