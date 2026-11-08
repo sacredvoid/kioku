@@ -15,7 +15,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import core
@@ -53,8 +53,22 @@ def start_job(cid, kind, target, *args):
                       exc_info=not isinstance(e, RuntimeError))
             msg = str(e) if isinstance(e, RuntimeError) else f"Unexpected error ({type(e).__name__}): {e}"
             jobs[(cid, kind)].update(status="failed", error=msg[:1000])
+        if kind == "ask":
+            save_run(cid, args[0], job(cid, kind))
     threading.Thread(target=run, daemon=True).start()
     return job(cid, kind)
+
+
+def save_run(cid, prompt, j):
+    """Keep a finished Claude edit in ask_runs. Never let history break the job itself."""
+    try:
+        with library.conn() as c:
+            c.execute("insert into ask_runs(collection_id, prompt, model, status, steps, output, error, started, finished) "
+                      "values (?,?,?,?,?,?,?,?,?)", (cid, prompt, j.get("model"), j["status"], json.dumps(j.get("steps", [])),
+                                                    j.get("output"), j.get("error"), j.get("started"), time.time()))
+            c.commit()
+    except Exception:
+        log.exception("could not save ask history for collection %d", cid)
 
 
 def job(cid, kind):
@@ -341,3 +355,14 @@ def ask(cid: int, body: Ask):
 @router.get("/collections/{cid}/ask")
 def ask_status(cid: int):
     return job(cid, "ask")
+
+
+@router.get("/collections/{cid}/ask/history")
+def ask_history(cid: int, limit: int = Query(50, ge=1, le=500)):
+    """Every finished Claude edit of this project, newest first."""
+    with library.conn() as c:
+        library.require_collection(c, cid)
+        rows = c.execute("select id, prompt, model, status, steps, output, error, started, finished from ask_runs "
+                         "where collection_id = ? order by started desc limit ?", (cid, limit)).fetchall()
+    return [dict(zip(("id", "prompt", "model", "status", "steps", "output", "error", "started", "finished"), r),
+                 steps=json.loads(r[4])) for r in rows]

@@ -97,4 +97,15 @@ assert [h["uuid"] for h in idx.search("zebra", kind="image")] == ["A"]
 c.put("/asset/C/tags", json={"tags": ["kite"]})
 hits = idx.search("kite")  # keyword match keeps C despite its weak picture score, and ranks it first
 assert [h["uuid"] for h in hits] == ["C", "B", "A"] and hits[0]["keyword"] and hits[0]["visual"] == 0, hits
+# Ask history: every finished edit is kept, newest first, and goes away with its project
+import projects  # noqa: E402
+app.include_router(projects.router)
+h = c.post("/collections", json={"name": "History", "kind": "project"}).json()["id"]
+projects.save_run(h, "make it", {"status": "done", "model": "opus", "steps": ["a", "b"], "output": "ok", "started": 1.0})
+projects.save_run(h, "shorter", {"status": "failed", "model": "sonnet", "error": "boom", "started": 2.0})
+runs = c.get(f"/collections/{h}/ask/history").json()
+assert [r["prompt"] for r in runs] == ["shorter", "make it"] and runs[1]["steps"] == ["a", "b"] and runs[0]["error"] == "boom", runs
+assert c.get("/collections/99999/ask/history").status_code == 404
+c.delete(f"/collections/{h}")
+assert core.connect().execute("select count(*) from ask_runs where collection_id = ?", (h,)).fetchone()[0] == 0
 print("library checks passed")

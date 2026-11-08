@@ -43,6 +43,13 @@ create table if not exists collection_items(
   id integer primary key, collection_id integer not null references collections(id) on delete cascade,
   uuid text not null, pos real not null, t0 real, t1 real);
 create index if not exists collection_items_c on collection_items(collection_id, pos);
+
+-- Every Claude edit of a project, kept so the app can show the full history (steps are a JSON list).
+create table if not exists ask_runs(
+  id integer primary key, collection_id integer not null references collections(id) on delete cascade,
+  prompt text not null, model text, status text not null, steps text not null default '[]',
+  output text, error text, started real, finished real);
+create index if not exists ask_runs_c on ask_runs(collection_id, started);
 """
 
 
