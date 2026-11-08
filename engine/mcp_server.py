@@ -225,7 +225,7 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
                       warmth=warmth, look_strength=look_strength, reframe_mode=reframe_mode, reframe_pos=reframe_pos,
                       reframe_from=reframe_from, reframe_to=reframe_to)
     if look is not None:
-        body["look"] = None if look.lower() == "none" else look
+        body["look"] = look.lower() if look.lower() == "none" else look  # engine: "none" = no look on this clip
     if not body:
         return {"error": "Nothing to change: pass at least one effect."}
     return call("PATCH", f"/collections/{collection_id}/edit/clips/{item_id}", body)
