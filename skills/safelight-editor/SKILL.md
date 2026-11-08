@@ -28,7 +28,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 ## 3. Look before you cut
 
-For every candidate video, call `analyze_clip(uuid)`. Look at the contact sheet image. Each frame is one scene, labelled `#idx start-end s`. For each scene, note:
+For every candidate video, call `analyze_clip(uuid)`. Call it for several candidates in the same turn (parallel tool calls), about 3 to 6 at a time: downloads run in parallel, so this is much faster than one by one. Look at the contact sheet image. Each frame is one scene, labelled `#idx start-end s`. For each scene, note:
 - **What happens** in it (judge from the frame, not from the labels alone).
 - **sharpness**: under about 40 is usually blurry or dark. Avoid it unless it's the only shot of a key moment.
 - **motion**: very high means camera shake or whip pans. Good for energy, bad for calm edits.

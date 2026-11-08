@@ -9,11 +9,18 @@ import urllib.parse
 import urllib.request
 
 from mcp.server.mcpserver import Image, MCPServer
+from mcp.types import ToolAnnotations
 
 API = "http://127.0.0.1:8765"
 server = MCPServer("safelight", instructions=(
     "Search and organize the user's Photos library and build video projects. Albums and projects hold "
     "pointers to Photos items (uuid), never copies. Times are in seconds."))
+
+
+# Read-only tools never change the library or a project, so Claude Code may run several at once.
+# (analyze_clip fills the engine's cache, which is invisible to the user.) The engine caps real parallel work
+# at Settings > max agents.
+READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 
 def call(method, path, body=None, timeout=120):
@@ -39,7 +46,7 @@ def slim(h):
     return out
 
 
-@server.tool()
+@server.tool(annotations=READ_ONLY)
 def search_media(query: str, kind: str = "", limit: int = 20) -> list[dict]:
     """Search photos and videos by description, people, place or label. kind: "", "image" or "video"."""
     q = urllib.parse.urlencode({"q": query, "k": max(1, min(limit, 100)), **({"kind": kind} if kind else {})})
@@ -47,12 +54,13 @@ def search_media(query: str, kind: str = "", limit: int = 20) -> list[dict]:
     return [slim(h) for h in res] if isinstance(res, list) else [res]
 
 
-@server.tool()
+@server.tool(annotations=READ_ONLY)
 def analyze_clip(uuid: str) -> list:
     """Understand a video before cutting it: detects scenes (shot boundaries; long takes split into <=8s pieces),
     scores each scene's sharpness (higher = crisper; under ~40 is usually blurry) and motion (higher = more
     movement or camera shake), and returns a contact sheet image with one labelled frame per scene (#idx, start-end s).
     First call per video downloads it from iCloud and takes 10-60 s; later calls are instant.
+    Analyze several candidates at once (parallel tool calls in one turn): the engine downloads them in parallel.
     Cut on scene boundaries: use a scene's t0/t1 (or a sub-range of it) with set_clip_range."""
     # an iCloud download alone may take up to Settings > iCloud download timeout (180 s by default)
     res = call("POST", f"/media/{uuid}/analyze", timeout=600)
@@ -64,7 +72,7 @@ def analyze_clip(uuid: str) -> list:
     return [{"uuid": uuid, "scenes": res["scenes"]}, Image(data=sheet, format="jpeg")]
 
 
-@server.tool()
+@server.tool(annotations=READ_ONLY)
 def get_media(uuid: str) -> dict:
     """Details for one item: date, place, labels, your tags and caption, collections it's in."""
     return call("GET", f"/asset/{uuid}")
@@ -80,7 +88,7 @@ def tag_media(uuid: str, add: list[str] = [], remove: list[str] = []) -> dict:  
     return call("PUT", f"/asset/{uuid}/tags", {"tags": tags})
 
 
-@server.tool()
+@server.tool(annotations=READ_ONLY)
 def list_collections(kind: str = "") -> list[dict]:
     """Albums and video projects. kind: "", "album" or "project"."""
     return call("GET", "/collections" + (f"?kind={kind}" if kind else ""))
@@ -92,7 +100,7 @@ def create_collection(name: str, kind: str = "project") -> dict:
     return call("POST", "/collections", {"name": name, "kind": kind})
 
 
-@server.tool()
+@server.tool(annotations=READ_ONLY)
 def get_collection(collection_id: int) -> dict:
     """A collection with its items in order (item_id, uuid, in/out seconds, labels)."""
     col = call("GET", f"/collections/{collection_id}")
@@ -140,7 +148,7 @@ def export_project(collection_id: int) -> dict:
     return call("POST", f"/collections/{collection_id}/export")
 
 
-@server.tool()
+@server.tool(annotations=READ_ONLY)
 def export_status(collection_id: int) -> dict:
     """Status of the last export: running, done (with file path) or failed."""
     return call("GET", f"/collections/{collection_id}/export")

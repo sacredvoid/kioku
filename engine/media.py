@@ -197,6 +197,28 @@ def contact_sheet(frames, scenes, out):
     return out
 
 
+RUNNING = 0  # videos being downloaded/analyzed right now; guarded by settings.changed
+
+
+def video_slot(uuid):
+    """Wait for one of Settings.max_agents video slots: parallel enough to overlap iCloud downloads,
+    capped so a burst of requests doesn't start dozens of downloads at once."""
+    global RUNNING
+    with settings.changed:
+        if RUNNING >= settings.get().max_agents:
+            stage(uuid, "waiting for a free slot")
+        while RUNNING >= settings.get().max_agents:
+            settings.changed.wait(2)
+        RUNNING += 1
+
+
+def release_video_slot():
+    global RUNNING
+    with settings.changed:
+        RUNNING -= 1
+        settings.changed.notify_all()
+
+
 def analyze(uuid, embed=True):
     """Cached: returns scenes for a video, building proxy / scenes / sheet / scene vectors on first call."""
     with lock_for(uuid):
@@ -207,6 +229,7 @@ def analyze(uuid, embed=True):
         sheet = SHEETS / f"{uuid}.jpg"
         if rows and sheet.is_file():
             return result(uuid, rows)
+        video_slot(uuid)
         try:
             return _analyze(uuid, embed, sheet)
         except Exception as e:
@@ -215,6 +238,7 @@ def analyze(uuid, embed=True):
             log.error("analyze %s failed: %s", uuid, e, exc_info=not isinstance(e, RuntimeError))
             raise
         finally:
+            release_video_slot()
             stage(uuid, None)
 
 

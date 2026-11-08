@@ -41,6 +41,20 @@ assert not t.is_alive() and "note" not in b and projects.RUNNING_AGENTS == 1
 projects.release_slot()
 assert projects.RUNNING_AGENTS == 0
 
+# videos share the same cap: with max_agents=1 a second analyze waits ("waiting for a free slot")
+import media
+settings._cur = settings.Settings(max_agents=1)
+media.video_slot("A")
+t = threading.Thread(target=media.video_slot, args=("B",))
+t.start()
+time.sleep(0.3)
+assert t.is_alive() and media.ACTIVE["B"]["stage"] == "waiting for a free slot"
+media.release_video_slot()
+t.join(3)
+assert not t.is_alive() and media.RUNNING == 1
+media.release_video_slot(); media.ACTIVE.clear()
+assert media.RUNNING == 0
+
 # job status is a snapshot, so serializing it can't race the job thread mutating the live dict
 projects.jobs[(9, "ask")] = {"status": "running", "steps": ["a"]}
 snap = projects.job(9, "ask")

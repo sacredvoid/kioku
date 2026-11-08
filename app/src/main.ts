@@ -205,7 +205,10 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const ask = el("form", "ask") as HTMLFormElement;
   const askIn = document.createElement("input");
   askIn.id = "ask";
-  askIn.placeholder = items.length ? "Ask Claude: “tighten to 30 seconds”, “add more beach shots”" : "Ask Claude: “make a 45s recap of our Japan trip”";
+  // describe what to type for THIS project instead of a made-up example
+  askIn.placeholder = items.length
+    ? "Ask for a change: shorter, slower, swap a shot, more of something"
+    : c.brief.trim() ? `Ask Claude to cut “${c.name}” from the brief, or add direction` : `Describe “${c.name}”: length, mood, which moments`;
   askIn.maxLength = 4000;
   const askBtn = el("button", "primary", "Ask Claude") as HTMLButtonElement;
   askBtn.type = "submit";
@@ -213,7 +216,8 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   ask.append(el("span", "spark", "✦"), askIn, askBtn);
   ask.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const prompt = askIn.value.trim();
+    // empty box + a brief on an empty project = "just make it"
+    const prompt = askIn.value.trim() || (!items.length && c.brief.trim() ? "Make the video described in the brief." : "");
     if (!prompt) return;
     try {
       await api(`/collections/${c.id}/ask`, "POST", { prompt });
@@ -499,7 +503,7 @@ heartbeat();
 
 // ---------- settings: form built from the engine's schema, so new settings show up without app changes
 const LABELS: Record<string, [string, string]> = {
-  max_agents: ["Claude edits at once", ""],
+  max_agents: ["Claude edits and videos at once", ""],
   new_cut_model: ["Model for a first cut", ""],
   revise_model: ["Model for changes", ""],
   ask_minutes: ["Ask time limit", "min"],
