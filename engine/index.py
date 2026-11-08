@@ -47,9 +47,9 @@ def meta_text(p):
     return " ; ".join(x for x in parts if x)
 
 
-def from_photos(since=None):
+def from_photos(since=None, until=None):
     import osxphotos
-    for p in osxphotos.PhotosDB().photos(images=True, movies=True, from_date=since):
+    for p in osxphotos.PhotosDB().photos(images=True, movies=True, from_date=since, to_date=until):
         derivs = p.path_derivatives or []
         created = p.date.isoformat() if p.date else None
         if p.ismovie and p.path:
@@ -214,18 +214,23 @@ def main():
     ap.add_argument("--folder")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--since", type=lambda d: datetime.fromisoformat(d).astimezone(), help="YYYY-MM-DD")
+    ap.add_argument("--until", type=lambda d: datetime.fromisoformat(d).astimezone(), help="YYYY-MM-DD, exclusive")
+    ap.add_argument("--tokens", type=int, choices=(70, 140, 280, 560, 1120), help="image tokens (default core.IMAGE_TOKENS)")
     ap.add_argument("--videos", action="store_true", help="download + embed iCloud-only videos")
     ap.add_argument("--rebuild-meta", action="store_true")
     a = ap.parse_args()
 
+    if a.tokens:
+        core.IMAGE_TOKENS = a.tokens  # read at encode time by encode() and media.embed_frames
     db = core.connect()
     if a.rebuild_meta:
         return rebuild_meta(db)
     done = {r[0] for r in db.execute("select uuid from assets")}
-    todo = [it for it in (from_folder(a.folder) if a.folder else from_photos(a.since)) if it[0] not in done]
+    todo = [it for it in (from_folder(a.folder) if a.folder else from_photos(a.since, a.until)) if it[0] not in done]
     if a.limit:
         todo = todo[: a.limit]
-    print(f"{len(done)} already indexed, {len(todo)} new")
+    span = f", {a.since:%Y-%m-%d} to {a.until:%Y-%m-%d}" if a.since and a.until else ""
+    print(f"{len(done)} already indexed, {len(todo)} new ({core.IMAGE_TOKENS} tokens{span})")
     # for status.py: what this run is working through
     (core.DATA / "progress.json").write_text(json.dumps({"total": len(todo), "started": time.time()}))
     core.model()  # load before timing
