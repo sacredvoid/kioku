@@ -291,6 +291,8 @@ async function pollJob(cid: number, kind: "ask" | "export", out: HTMLElement, bt
   for (;;) {
     let j: Job;
     try { j = await api<Job>(`/collections/${cid}/${kind}`); } catch { await sleep(2000); continue; }
+    // project view re-rendered (live refresh, navigation): its new render started its own poll, so stop this one
+    if (!out.isConnected) return;
     if (j.status === "running") {
       if (kind === "ask") renderSteps(out, j);
       await sleep(1500);

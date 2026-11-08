@@ -4,10 +4,12 @@ Export is the one place originals get copied: editors need real files. They go t
 ~/Movies/Safelight/<project>/media, downloaded from iCloud if needed. Albums never copy.
 """
 import json
+import logging
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import Counter
@@ -18,8 +20,10 @@ from pydantic import BaseModel, Field
 
 import core
 import library
+import settings
 
 router = APIRouter()
+log = logging.getLogger("safelight.jobs")
 EXPORTS = Path.home() / "Movies" / "Safelight"
 ENGINE = Path(__file__).resolve().parent
 STILL_SECONDS = 3.0
@@ -38,10 +42,17 @@ def start_job(cid, kind, target, *args):
         jobs[(cid, kind)] = {"status": "running", "started": time.time()}
 
     def run():
+        t = time.time()
+        log.info("%s started for collection %d", kind, cid)
         try:
             jobs[(cid, kind)].update(status="done", **target(cid, *args))
+            log.info("%s done for collection %d in %.0fs", kind, cid, time.time() - t)
         except Exception as e:  # report, don't crash the server
-            jobs[(cid, kind)].update(status="failed", error=f"{type(e).__name__}: {e}"[:1000])
+            # RuntimeError carries a message meant for the user; anything else is a bug: keep the traceback
+            log.error("%s failed for collection %d after %.0fs: %s", kind, cid, time.time() - t, e,
+                      exc_info=not isinstance(e, RuntimeError))
+            msg = str(e) if isinstance(e, RuntimeError) else f"Unexpected error ({type(e).__name__}): {e}"
+            jobs[(cid, kind)].update(status="failed", error=msg[:1000])
     threading.Thread(target=run, daemon=True).start()
     return jobs[(cid, kind)]
 
@@ -63,12 +74,15 @@ def originals(uuids, dest):
         r = subprocess.run([str(Path(sys.executable).parent / "osxphotos"), "export", str(dest),
                             "--uuid-from-file", str(ufile), "--download-missing", "--use-photokit",
                             "--skip-edited", "--skip-live", "--skip-raw", "--filename", "{uuid}", "--no-progress"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, timeout=settings.get().download_seconds * len(need))
         ufile.unlink(missing_ok=True)
         if "authorization" in (r.stdout + r.stderr).lower():
             raise RuntimeError("No Photos access for the process running the engine. Grant it in System Settings > "
                                "Privacy & Security > Photos (the app or terminal that started Safelight).")
         have = {f.stem: f for f in dest.iterdir() if f.is_file() and not f.name.startswith(".")}
+        if any(u not in have for u in need):
+            log.warning("export: %d of %d downloads missing; osxphotos said: %s", sum(u not in have for u in need),
+                        len(need), (r.stdout + r.stderr).strip()[-2000:])
     return have
 
 
@@ -110,7 +124,11 @@ def do_export(cid):
     if not col["items"]:
         raise RuntimeError("project has no clips")
     out = EXPORTS / slug(col["name"])
-    files = originals([i["uuid"] for i in col["items"]], out / "media")
+    try:
+        files = originals([i["uuid"] for i in col["items"]], out / "media")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("iCloud downloads timed out. Try again (finished files are kept), or raise the "
+                           "iCloud download timeout in Settings.")
     clips, missing = [], []
     for it in col["items"]:
         f = files.get(it["uuid"])
@@ -130,7 +148,8 @@ def do_export(cid):
     otio.adapters.write_to_file(tl, str(xml.with_suffix(".otio")))
     total = sum(c[4] for c in clips)
     return {"path": str(xml), "folder": str(out), "clips": len(clips), "missing": missing,
-            "seconds": round(total, 1), "message": f"{len(clips)} clips, {total:.0f}s at {rate} fps"}
+            "seconds": round(total, 1), "message": f"{len(clips)} clips, {total:.0f}s at {rate} fps"
+            + (f" ({len(missing)} couldn't be downloaded from iCloud and were left out)" if missing else "")}
 
 
 @router.post("/collections/{cid}/export", status_code=202)
@@ -209,6 +228,28 @@ def step_label(name, inp):
         return short
 
 
+RUNNING_AGENTS = 0  # guarded by settings.changed
+
+
+def agent_slot(job_state):
+    """Wait for a free Claude slot (Settings: max agents). Re-checks when settings change."""
+    global RUNNING_AGENTS
+    with settings.changed:
+        while RUNNING_AGENTS >= settings.get().max_agents:
+            job_state["note"] = (f"Waiting for a free Claude slot: {RUNNING_AGENTS} edit(s) running, "
+                                 f"limit {settings.get().max_agents} (Settings).")
+            settings.changed.wait(2)
+        RUNNING_AGENTS += 1
+        job_state.pop("note", None)
+
+
+def release_slot():
+    global RUNNING_AGENTS
+    with settings.changed:
+        RUNNING_AGENTS -= 1
+        settings.changed.notify_all()
+
+
 def do_ask(cid, prompt):
     exe = claude_bin()
     if not exe:
@@ -216,13 +257,25 @@ def do_ask(cid, prompt):
     col = library.get_collection(cid)
     job_state = jobs[(cid, "ask")]
     job_state["steps"] = []
+    agent_slot(job_state)
+    try:
+        return run_claude(exe, cid, col, prompt, job_state)
+    finally:
+        release_slot()
+
+
+def run_claude(exe, cid, col, prompt, job_state):
     cmd = [exe, "-p", prompt, "--append-system-prompt",
            SYSTEM.format(cid=cid, name=col["name"], brief=col["brief"], skill=SKILL.read_text().split("---", 2)[-1]),
            "--mcp-config", str(mcp_config()), "--strict-mcp-config",
            "--tools", "",  # no built-in tools: no shell, no file edits; only Safelight's own tools
            "--allowedTools", "mcp__safelight", "--output-format", "stream-json", "--verbose"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(ENGINE))
-    timer = threading.Timer(1800, proc.kill)  # hard stop after 30 min
+    # stderr goes to a file: an undrained PIPE fills up (~64 KB) and blocks claude forever
+    errf = tempfile.TemporaryFile(mode="w+")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, text=True, cwd=str(ENGINE))
+    minutes = settings.get().ask_minutes
+    timed_out = threading.Event()
+    timer = threading.Timer(minutes * 60, lambda: (timed_out.set(), proc.kill()))
     timer.start()
     final, err = None, None
     try:
@@ -242,10 +295,18 @@ def do_ask(cid, prompt):
                 if ev.get("is_error"):
                     err = final or "Claude reported an error"
         proc.wait()
+        errf.seek(0)
+        stderr = errf.read().strip()
     finally:
         timer.cancel()
+        errf.close()
+    if stderr:
+        log.info("claude stderr for collection %d: %s", cid, stderr[-2000:])
+    if timed_out.is_set():
+        raise RuntimeError(f"Stopped after {minutes} min (Settings > Ask time limit). "
+                           f"Clips placed so far are kept; {len(job_state['steps'])} steps ran.")
     if err or proc.returncode != 0:
-        raise RuntimeError(err or proc.stderr.read().strip()[-800:] or f"claude exited {proc.returncode}")
+        raise RuntimeError(err or stderr[-800:] or f"Claude exited with code {proc.returncode}")
     return {"output": (final or "").strip()}
 
 

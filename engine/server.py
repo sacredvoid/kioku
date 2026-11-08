@@ -5,6 +5,9 @@
   curl "127.0.0.1:8765/recent?limit=50"
   curl -X POST "127.0.0.1:8765/reindex?since=2026-11-01"
 """
+import logging
+import logging.handlers
+import re
 import subprocess
 import sys
 import threading
@@ -14,15 +17,48 @@ from datetime import date
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 import core
 import library
 import projects
 import media
+import settings
+
+log = logging.getLogger("safelight")
+LOG_FILE = core.DATA / "engine.log"
+# the app polls these every 1-2 s (and loads hundreds of thumbs); successful hits are noise in the access log
+QUIET = re.compile(r"^/(health|media/activity|collections/\d+/(ask|export)|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes))$")
+
+
+class QuietPolls(logging.Filter):
+    def filter(self, rec):
+        try:
+            _, method, path, _, status = rec.args
+            return not (method == "GET" and int(status) < 400 and QUIET.match(path.split("?")[0]))
+        except (TypeError, ValueError):
+            return True
+
+
+def setup_logging():
+    """Engine log to the terminal and to data/engine.log (1 MB x 3, rotated)."""
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
+    core.DATA.mkdir(parents=True, exist_ok=True)
+    fh = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3)
+    sh = logging.StreamHandler()
+    for h in (fh, sh):
+        h.setFormatter(fmt)
+    root = logging.getLogger("safelight")
+    root.setLevel(logging.INFO)
+    root.handlers[:] = [fh, sh]
+    root.propagate = False
+    for name in ("uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).addHandler(fh)
+    logging.getLogger("uvicorn.access").addFilter(QuietPolls())
+
 
 state = {"index": None, "reindex": "idle", "checked": 0.0, "stamp": None}
 lock = threading.Lock()
@@ -53,8 +89,11 @@ def fresh_index():
 
 @asynccontextmanager
 async def lifespan(_app):
+    setup_logging()  # after uvicorn has configured its own loggers
+    log.info("engine starting; log file %s", LOG_FILE)
     core.query_model()  # CPU text model only; the GPU model lives in the indexer process
     load()
+    log.info("ready: %d items indexed", len(state["index"].assets))
     yield
 
 
@@ -67,6 +106,14 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)  # timeline JSON compresse
 app.include_router(library.router)
 app.include_router(projects.router)
 app.include_router(media.router)
+app.include_router(settings.router)
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception):
+    """Any bug or unexpected failure: log the traceback, give the app a readable JSON message instead of a bare 500."""
+    log.exception("%s %s failed", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": f"Engine error ({type(exc).__name__}): {exc}"[:500]})
 
 
 @app.get("/health")
@@ -154,9 +201,15 @@ def run_reindex(since):
         cmd = [sys.executable, str(Path(__file__).parent / "index.py")]
         if since:
             cmd += ["--since", since]
+        log.info("reindex started (since %s)", since or "beginning")
         r = subprocess.run(cmd, capture_output=True, text=True)
         state["reindex"] = "idle" if r.returncode == 0 else f"failed: {r.stderr.strip()[-300:]}"
+        if r.returncode:
+            log.error("reindex failed (exit %d): %s", r.returncode, r.stderr.strip()[-2000:])
         load()
+    except Exception as e:
+        state["reindex"] = f"failed: {e}"
+        log.exception("reindex crashed")
     finally:
         lock.release()
 

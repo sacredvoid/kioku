@@ -2,11 +2,12 @@
 
 Per clip, once (cached):
   1. get the original (local file, or downloaded from iCloud to a temp folder)
-  2. make a 540p proxy in data/proxies (~1-2 MB/min) + speech audio; delete the temp original
+  2. make a 360/540/720p proxy (settings.proxy_height) in data/proxies (~1-2 MB/min) + speech audio; delete the temp original
   3. detect scenes (PySceneDetect, adaptive content detector) on the proxy
   4. per scene: sharpness + motion scores, middle frame embedded so search lands on the right moment
   5. contact sheet image (one frame per scene, labelled) that Claude can look at
 """
+import logging
 import shutil
 import subprocess
 import sys
@@ -19,12 +20,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 import core
+import settings
 
 router = APIRouter()
+log = logging.getLogger("safelight.media")
 PROXIES = core.DATA / "proxies"
 SHEETS = core.DATA / "sheets"
 VIDEO_EXT = {".mov", ".mp4", ".m4v"}
-DOWNLOAD_TIMEOUT = 180  # seconds per video
 MAX_SCENE = 8.0  # split longer scenes into even pieces so cuts can land inside long takes
 _locks: dict[str, threading.Lock] = {}
 # live work, for the app's progress panel: uuid -> {stage, started, label}; plus counters since engine start
@@ -74,19 +76,21 @@ def video_row(c, uuid):
 def download_original(uuid, dest):
     """iCloud original -> dest via PhotoKit. (Photos' AppleScript export is not used: it hangs on iCloud items.)"""
     exe = str(Path(sys.executable).parent / "osxphotos")
+    limit = settings.get().download_seconds
     try:
         r = subprocess.run([exe, "export", str(dest), "--uuid", uuid, "--download-missing", "--use-photokit",
                             "--skip-edited", "--skip-live", "--skip-raw", "--filename", "{uuid}", "--no-progress"],
-                           capture_output=True, text=True, timeout=DOWNLOAD_TIMEOUT)
-        log = (r.stdout + r.stderr).strip()
+                           capture_output=True, text=True, timeout=limit)
+        out = (r.stdout + r.stderr).strip()
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"iCloud download took over {DOWNLOAD_TIMEOUT // 60} min; skipped this video")
+        raise RuntimeError(f"iCloud download took over {limit} s (Settings > iCloud download timeout); skipped this video")
     f = next((x for x in dest.iterdir() if x.stem == uuid and x.suffix.lower() in VIDEO_EXT), None)
     if f:
         return f
-    if "authorization" in log.lower():
+    log.warning("download %s returned no file (exit %s): %s", uuid, r.returncode, out[-2000:])
+    if "authorization" in out.lower():
         raise RuntimeError("no Photos access for the app running the engine (System Settings > Privacy & Security > Photos)")
-    raise RuntimeError("iCloud download failed: " + (log.splitlines()[-1] if log else "no file returned"))
+    raise RuntimeError("iCloud download failed: " + (out.splitlines()[-1] if out else "no file returned"))
 
 
 def ensure_proxy(uuid):
@@ -105,7 +109,7 @@ def ensure_proxy(uuid):
         stage(uuid, "making a playable copy")
         part = out.with_suffix(".part.mp4")
         r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
-                            "-vf", "scale=-2:'min(540,ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
+                            "-vf", f"scale=-2:'min({settings.get().proxy_height},ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
                             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(part)],
                            capture_output=True, text=True)
         if r.returncode != 0:
@@ -204,8 +208,10 @@ def analyze(uuid, embed=True):
             return result(uuid, rows)
         try:
             return _analyze(uuid, embed, sheet)
-        except Exception:
+        except Exception as e:
             DONE["failed"] += 1
+            # RuntimeError = expected failure with a readable message; anything else is a bug, keep the traceback
+            log.error("analyze %s failed: %s", uuid, e, exc_info=not isinstance(e, RuntimeError))
             raise
         finally:
             stage(uuid, None)
@@ -213,6 +219,7 @@ def analyze(uuid, embed=True):
 
 def _analyze(uuid, embed, sheet):
         import cv2
+        log.info("analyzing %s (%s)", uuid, label_for(uuid))
         stage(uuid, "starting")
         proxy = ensure_proxy(uuid)
         stage(uuid, "finding scenes")
@@ -234,6 +241,7 @@ def _analyze(uuid, embed, sheet):
             c.commit()
             rows = c.execute("select idx, t0, t1, sharp, motion from scenes where uuid = ? order by idx", (uuid,)).fetchall()
         DONE["ok"] += 1
+        log.info("analyzed %s: %d scenes", uuid, len(rows))
         return result(uuid, rows)
 
 
