@@ -11,7 +11,7 @@ Status words: **live** = on main and running in the installed app; **built** = c
 | 3 | Move index out of the repo to ~/Kioku, owner-only | main 1bd8ca1 |
 | 4 | Encrypt the index, keep the key safe | main 1bd8ca1: SQLCipher, key in login Keychain (Sam saved a copy) |
 
-## Built on feat/theme-art (not merged, not in the installed app yet)
+## Merged to main 2026-11-09 (9938eac), in the DMG; live once Sam installs it
 | # | Request / bug | Commit | Verified |
 |---|---|---|---|
 | 5 | Buttons/icons invisible (play, prev/next, Add clips, nav) | f91766b: CSP img-src lacked data: | cause confirmed; not yet seen in the installed app |
@@ -26,14 +26,14 @@ Status words: **live** = on main and running in the installed app; **built** = c
 ## Open bugs
 | # | Bug | Known so far |
 |---|---|---|
-| 13 | Clip previews broken ("?" in player, blank tiles) | Cause: macOS blocked Photos library reads after reinstalling the ad-hoc signed app. Thumbs load again after restart (200). Recurs on every rebuild until signing is stable (see 18). |
-| 14 | Engine hung (no response, 2026-11-09 14:24) | Deadlock inside bundled SQLite 3.51.1 (SQLCipher): one thread closing a WAL connection, one opening, both waiting on SQLite's file-lock mutex. Restarted 14:5x. Root cause not fixed. |
-| 15 | Render/download status sits at the bottom of the project page; must scroll to see it | open |
-| 16 | "Downloading originals: 0 of 10 · 0%" did not move | likely 13 and/or 14; retest after both |
+| 13 | Clip previews broken ("?" in player, blank tiles) | FIXED: macOS blocked Photos reads after reinstalling an ad-hoc signed app; Sam granted Full Disk Access; 8168a14 signs every build with a stable local identity so the grant survives rebuilds (one last grant needed for the first signed build). |
+| 14 | Engine hung (no response, 2026-11-09 14:24) | Deadlock inside bundled SQLite 3.51.1 (SQLCipher): one thread closing a WAL connection, one opening, both waiting on SQLite's file-lock mutex. FIXED 189431b: pooled connections, so nothing opens or closes at runtime (1.17M checkouts on 16 connections, no stall). Engine picks it up on next app launch. |
+| 15 | Render/download status sits at the bottom of the project page; must scroll to see it | FIXED 9938eac: status stack above the player, scrolls into view on start (WebKit checked) |
+| 16 | "Downloading originals: 0 of 10 · 0%" did not move | likely 13 and/or 14 (both fixed); retest after installing |
 
 ## Waiting on Sam
 | # | Decision | Ask |
 |---|---|---|
-| 17 | Free internet audio (Claude adds it, Sam browses/plays in app) | plan done (Openverse); license default: "CC0 + CC-BY" or "include NC too" |
-| 18 | Stable code signing so macOS permissions survive rebuilds | "sign it" (creates a local signing cert in Keychain) |
+| 17 | Free internet audio (Claude adds it, Sam browses/plays in app), music first, plus Sam's own ~/Music files | IN PROGRESS: kioku-audio agent on feat/audio; default CC0 + CC-BY (setting to allow NC) |
+| 18 | Stable code signing so macOS permissions survive rebuilds | DONE 8168a14: "Kioku Local Signing" cert in login Keychain |
 | 19 | Delete old plaintext kioku/data/ (1.4 GB) | "delete old data" |
