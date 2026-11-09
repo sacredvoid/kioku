@@ -36,6 +36,7 @@ Status words: **live** = on main and running in the installed app; **built** = c
 |---|---|---|
 | 20 | App attaches to a frozen leftover engine (port open, no answer) | open: check /health, offer restart |
 | 21 | How to chop an audio track | built 3faee96: Cut start/end here (I/O), End with video; in the 15:25 DMG; not checked in the installed app |
+| 22 | Renders fail: "No Photos access for the process running the engine" (x10) | built 64aebf1: app asks macOS for Photos access at launch; error said once; in the 15:32 DMG; not checked in the installed app |
 
 ## Waiting on Sam
 | # | Decision | Ask |
