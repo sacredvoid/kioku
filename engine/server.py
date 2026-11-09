@@ -36,6 +36,7 @@ sys.modules.setdefault("server", sys.modules[__name__])
 import albums  # noqa: E402
 import captions
 import edit
+import sounds
 import render
 
 log = logging.getLogger("kioku")
@@ -159,6 +160,7 @@ app.include_router(edit.router)
 app.include_router(render.router)
 app.include_router(captions.router)
 app.include_router(albums.router)
+app.include_router(sounds.router)
 app.add_exception_handler(RequestValidationError, library.validation_error)
 
 

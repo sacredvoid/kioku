@@ -821,7 +821,9 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         sheet = _sheet(target, sel, win, fps, rdir / f"{mode}-sheet.jpg")
         prog.state["progress"] = 1.0
         _gc_cache()
-        result = {"path": str(target), "folder": str(target.parent), "seconds": round(out_s, 2),
+        import sounds  # late: sounds imports edit, which the render job already uses
+        credit = sounds.write_credits(cid, target.parent, f"{target.stem}-credits") if mode == "final" else None
+        result = {"path": str(target), "folder": str(target.parent), "seconds": round(out_s, 2), "credits": credit,
                 "srt": str(srt) if srt else None, "sheet": str(sheet) if sheet else None, "edit_hash": tl.edit_hash,
                 "rendered": len(todo), "cached": hits, "warnings": warnings,
                 "message": f"{out_s:.0f}s, {len(todo)} clips rendered, {hits} reused"}
