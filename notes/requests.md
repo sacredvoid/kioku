@@ -37,6 +37,11 @@ Status words: **live** = on main and running in the installed app; **built** = c
 | 20 | App attaches to a frozen leftover engine (port open, no answer) | open: check /health, offer restart |
 | 21 | How to chop an audio track | built 3faee96: Cut start/end here (I/O), End with video; in the 15:25 DMG; not checked in the installed app |
 | 22 | Renders fail: "No Photos access for the process running the engine" (x10) | built 64aebf1: app asks macOS for Photos access at launch; error said once; in the 15:32 DMG; not checked in the installed app |
+| 23 | Photos prompt never appeared | built 65a6a81: Photos entitlement (hardened runtime denied silently); ships in v0.2.1 |
+| 24 | Library: year / month filters | built 923199b on feat/date-filters: selects with counts, browse + search; engine /dates, search date= |
+| 25 | "What should we remember today?" heading | built 923199b: "Find a moment, or make a video" (Sam can change the wording) |
+| 26 | Window buttons sit oddly with the navbar | built bfba62c: traffic lights centred in the 56px bar; not seen in the installed app |
+| 27 | Ask page: sections not clearly separated | in progress: kioku-askpage agent on feat/date-filters |
 
 ## Waiting on Sam
 | # | Decision | Ask |
