@@ -4,6 +4,7 @@ import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 import * as review from "./review";
 import { timeline } from "./timeline";
+import { initArt } from "./art";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -14,20 +15,22 @@ const el = (tag: string, cls = "", text = "") => {
 };
 const icon = (name: string) => { const s = el("span", `ico ico-${name}`); s.setAttribute("aria-hidden", "true"); return s; };
 
-// ---------- theme: a per-device preference. No saved theme = follow the system (mist light, dusk dark)
-const THEMES = ["mist", "peach", "mint", "dusk"];
+// ---------- appearance: light / dark / follow the system (per device), plus the background art that sets the accent
+const THEMES = ["light", "dark"];
 function applyTheme(t: string) {
   if (THEMES.includes(t)) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
 }
 try { applyTheme(localStorage.getItem("kioku.theme") ?? ""); } catch { /* storage blocked: follow the system */ }
+initArt();
 document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
   applyTheme(r.value);
   try { localStorage.setItem("kioku.theme", r.value); } catch { /* applies for this session only */ }
 }));
 
-type View = { type: "lib"; kind: string } | { type: "col"; id: number } | { type: "draft"; id: number };
-let view: View = { type: "lib", kind: "" };
+type Page = "projects" | "albums" | "review" | "history";
+type View = { type: "ask" } | { type: "page"; page: Page } | { type: "lib"; kind: string } | { type: "col"; id: number } | { type: "draft"; id: number };
+let view: View = { type: "ask" };
 let collections: Collection[] = [];
 let current: (Collection & { brief: string; items: any[] }) | null = null;
 let seq = 0;
@@ -70,20 +73,35 @@ async function loadCollections() {
       b.append(cover, el("span", "name", c.name), el("span", "count", String(c.count)));
       return b;
     }));
-    if (!list.length) box.append(el("p", "hint", kind === "album" ? "Select photos, then Add to album." : "Make a video with + or ask Claude."));
+    if (!list.length) box.append(el("p", "hint", kind === "album" ? "No albums yet. Select photos in Library, then Add to album." : "No projects yet. Ask Kioku to make one, or press New project."));
   }
+  $("n-projects").textContent = String(collections.filter((c) => c.kind === "project").length || "");
+  if (view.type === "ask") renderBoard();
   markNav();
 }
 
+/** Which top-bar tab the current view belongs to. */
+function tabOf(v: View): string {
+  if (v.type === "page") return v.page;
+  if (v.type === "col") return collections.find((c) => c.id === v.id)?.kind === "album" ? "albums" : "projects";
+  return { ask: "ask", lib: "library", draft: "review" }[v.type];
+}
 function markNav() {
-  const key = view.type === "lib" ? `lib:${view.kind}` : `${view.type}:${view.id}`;
-  document.querySelectorAll<HTMLElement>(".nav-item").forEach((b) => b.classList.toggle("on", (b.dataset.nav ?? b.dataset.draft) === key && !q.value.trim()));
+  const tab = tabOf(view);
+  document.querySelectorAll<HTMLElement>(".k-nav [data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll<HTMLElement>(".k-seg [data-kind]").forEach((b) => b.classList.toggle("on", view.type === "lib" && b.dataset.kind === view.kind));
 }
 
-document.querySelector(".side nav")!.addEventListener("click", (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>("[data-nav], [data-new]");
+document.addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>("[data-nav], [data-new], [data-tab], .k-seg [data-kind]");
   if (!b) return;
-  if (b.dataset.new) return newCollection(b.dataset.new as "album" | "project", b.closest(".group")!.querySelector(".list")!);
+  if (b.dataset.new) return newCollection(b.dataset.new as "album" | "project", $(b.dataset.new === "album" ? "albums" : "projects"));
+  if (b.dataset.kind != null) return go({ type: "lib", kind: b.dataset.kind });
+  if (b.dataset.tab) {
+    const t = b.dataset.tab;
+    if (t !== "library") q.value = "";
+    return go(t === "ask" ? { type: "ask" } : t === "library" ? { type: "lib", kind: "" } : { type: "page", page: t as Page });
+  }
   const [t, v] = b.dataset.nav!.split(":");
   q.value = "";
   go(t === "lib" ? { type: "lib", kind: v } : { type: "col", id: Number(v) });
@@ -119,7 +137,7 @@ async function go(v: View, search = q.value.trim()) {
   view = v;
   const my = ++seq;
   // content settles in on navigation only; a live refresh of the same view must not replay it
-  const key = `${v.type}:${v.type === "lib" ? v.kind : v.id}:${search}`;
+  const key = `${v.type}:${v.type === "lib" ? v.kind : v.type === "page" ? v.page : v.type === "ask" ? "" : v.id}:${search}`;
   const main = document.querySelector<HTMLElement>(".main")!;
   main.classList.remove("enter");
   if (key !== lastKey) { void main.offsetWidth; main.classList.add("enter"); }
@@ -128,10 +146,24 @@ async function go(v: View, search = q.value.trim()) {
   empty.hidden = true;
   project.hidden = true;
   review.hide();
+  // ask and the list pages own the screen; library, collections and drafts use the grid area below
+  const own = v.type === "ask" ? "ask" : v.type === "page" ? v.page : "";
+  for (const s of ["ask", "projects", "albums", "review", "history"]) $(`${s}-view`).hidden = s !== own;
+  $("libbar").hidden = v.type !== "lib";
+  main.classList.toggle("narrow", !!own);
+  for (const id of ["head", "summary", "grid"]) $(id).hidden = !!own;
   $("grid").style.display = ""; // a project view hides it; everything else shows it
   head.replaceChildren();
   markNav();
   review.loadDrafts();
+  if (own) {
+    grid.set([], { months: false, badges: false });
+    summary.textContent = "";
+    if (v.type === "ask") renderBoard();
+    if (own === "history") renderHistory();
+    updateSelbar();
+    return;
+  }
   try {
     if (v.type === "draft") {
       $("grid").style.display = "none";
@@ -141,6 +173,7 @@ async function go(v: View, search = q.value.trim()) {
     } else if (search) {
       summary.textContent = "Searching…";
       const kind = v.type === "lib" ? v.kind : "";
+      head.append(el("h1", "", "Search"));
       const hits = await api<any[]>(`/search?q=${encodeURIComponent(search)}&k=300${kind ? `&kind=${kind}` : ""}`);
       if (my !== seq) return;
       grid.set(hits.map((h) => ({ ...h, video: isVideo(h.kind), dur: h.duration || 0, created: h.created || "" })), { months: false, badges: true });
@@ -154,7 +187,7 @@ async function go(v: View, search = q.value.trim()) {
       head.append(el("h1", "", { "": "Library", image: "Photos", video: "Videos" }[v.kind] ?? "Library"));
       summary.textContent = `${grid.items.length.toLocaleString()} items`;
       if (!grid.items.length) showEmpty("Nothing indexed yet. Run the indexer, then reopen Kioku.");
-    } else {
+    } else if (v.type === "col") {
       const c = await api<Collection & { brief: string; items: any[] }>(`/collections/${v.id}`);
       if (my !== seq) return;
       current = c;
@@ -201,7 +234,7 @@ function renderHead(c: Collection) {
   del.onclick = () => confirmInline(del, `Delete “${c.name}”? Your photos stay.`, async () => {
     await api(`/collections/${c.id}`, "DELETE");
     await loadCollections();
-    go({ type: "lib", kind: "" });
+    go({ type: "page", page: c.kind === "album" ? "albums" : "projects" });
   });
   const row = el("div", "head-row");
   const refine = c.kind === "album" ? [Object.assign(el("button", "ghost", "Refine with search"), { type: "button", onclick: () => review.refine(c.id, head) })] : [];
@@ -769,6 +802,10 @@ async function addSelected(c: Collection) {
 }
 
 // ---------- search box and keys
+function focusSearch() {
+  if (view.type !== "lib") go({ type: "lib", kind: "" });
+  q.focus(); q.select();
+}
 let timer = 0;
 q.addEventListener("input", () => { clearTimeout(timer); timer = window.setTimeout(() => go(view.type === "lib" ? view : { type: "lib", kind: "" }), 250); });
 q.addEventListener("keydown", (e) => {
@@ -777,10 +814,10 @@ q.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (viewer.open || (e.target as HTMLElement).matches("input, textarea, [contenteditable]")) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !viewer.open) { e.preventDefault(); q.focus(); q.select(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !viewer.open) { e.preventDefault(); focusSearch(); }
     return;
   }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); q.focus(); q.select(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); focusSearch(); }
   if (view.type === "draft") return; // the review screen handles its own keys (review.ts)
   if (view.type === "col" && timeline.mounted(view.id) && timeline.handleKey(e)) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") { e.preventDefault(); grid.selectAll(); }
@@ -971,3 +1008,147 @@ $("settings-btn").onclick = async () => {
   dlg.showModal();
 };
 $("settings-cancel").onclick = () => $<HTMLDialogElement>("settings").close();
+
+// ---------- Ask: the landing page. "make / cut / recap ..." starts a new Claude edit; anything else is a library search.
+const MAKE = /^\s*(?:please\s+)?(?:make|cut|create|edit|recap|build|assemble|compile|stitch|put together|turn)\b/i;
+const SUGGEST = ["Make a 30 second reel of last weekend", "Recap this month, warm and upbeat", "Find sunsets from the car", "Find dinners with friends"];
+
+/** A short project name from the prompt: "Make a 30 s reel of Halloween, punchy" becomes "Halloween". */
+function nameFrom(prompt: string) {
+  const rest = prompt.replace(MAKE, "")
+    .replace(/^\s*(?:me\s+)?(?:a|an|the|my)?\s*(?:\d+\s*(?:seconds|second|secs|sec|s|minutes|minute|min)\b(?:\s*long)?\s*)?(?:reel|video|montage|recap|edit|cut|movie|clip|short)?\s*(?:of|from|about|for)?\s*/i, "")
+    .split(/[,.;!?]/)[0].trim();
+  const name = rest || prompt.trim();
+  return (name[0].toUpperCase() + name.slice(1)).slice(0, 60);
+}
+
+async function askKioku(text: string) {
+  text = text.trim();
+  if (!text) return;
+  if (!MAKE.test(text)) { q.value = text; go({ type: "lib", kind: "" }, text); return; }
+  const btn = document.querySelector<HTMLButtonElement>("#ask-form button")!;
+  btn.disabled = true;
+  try {
+    const c = await api<Collection>("/collections", "POST", { name: nameFrom(text), kind: "project" });
+    await api(`/collections/${c.id}`, "PATCH", { brief: text });
+    await api(`/collections/${c.id}/ask`, "POST", { prompt: text });
+    $<HTMLInputElement>("ask-q").value = "";
+    await loadCollections();
+    go({ type: "col", id: c.id });  // the project view picks up the running edit and shows its steps live
+  } catch (e) { fail("start the edit")(e); }
+  finally { btn.disabled = false; }
+}
+$("ask-form").addEventListener("submit", (e) => { e.preventDefault(); askKioku($<HTMLInputElement>("ask-q").value); });
+$("ask-sugg").replaceChildren(...SUGGEST.map((t) => {
+  const b = el("button", "", t) as HTMLButtonElement;
+  b.type = "button";
+  b.onclick = () => askKioku(t);
+  return b;
+}));
+
+type RunWith = Run & { cid: number; project: string };
+/** Recent Claude edits across projects, newest first, plus which projects have one running now. */
+async function recentRuns(perProject: number, projects = collections.filter((c) => c.kind === "project").slice(0, 8)) {
+  const [hist, jobs] = await Promise.all([
+    Promise.all(projects.map((c) => api<Run[]>(`/collections/${c.id}/ask/history?limit=${perProject}`).then((rs) => rs.map((r) => ({ ...r, cid: c.id, project: c.name }))).catch(() => [] as RunWith[]))),
+    Promise.all(projects.map((c) => api<Job>(`/collections/${c.id}/ask`).then((j) => ({ c, j })).catch(() => null))),
+  ]);
+  const runs = hist.flat().filter((r) => r.status !== "running").sort((a, b) => (b.started ?? 0) - (a.started ?? 0));
+  const running = jobs.filter((x): x is { c: Collection; j: Job } => !!x && x.j.status === "running");
+  return { runs, running };
+}
+
+let boardSeq = 0, boardT = 0;
+async function renderBoard() {
+  const my = ++boardSeq;
+  clearTimeout(boardT);
+  const projects = collections.filter((c) => c.kind === "project");
+  const row = (onclick: () => void, ...kids: (Node | string)[]) => {
+    const li = el("li"), b = el("button") as HTMLButtonElement;
+    b.type = "button"; b.onclick = onclick; b.append(...kids);
+    li.append(b);
+    return li;
+  };
+  $("board-projects").replaceChildren(...projects.slice(0, 5).map((c) => {
+    const t = el("i", "k-thumb");
+    if (c.cover) t.style.backgroundImage = `url(${thumb(c.cover)})`;
+    return row(() => go({ type: "col", id: c.id }), t, el("strong", "", c.name), el("span", "", `${c.count} clip${c.count === 1 ? "" : "s"}`));
+  }));
+  if (!projects.length) $("board-projects").append(el("li", "empty-row", "No projects yet. Ask for one above."));
+
+  const [{ runs, running }, info, drafts] = await Promise.all([
+    recentRuns(3).catch(() => ({ runs: [] as RunWith[], running: [] as { c: Collection; j: Job }[] })),
+    api<IndexInfo>("/index/info").catch(() => null),
+    api<{ id: number; name: string; kept: number; running: boolean }[]>("/drafts").catch(() => []),
+  ]);
+  if (my !== boardSeq || view.type !== "ask") return;
+
+  // live: an edit running now, otherwise the last reply
+  const live = $("ask-live");
+  const r0 = runs[0];
+  if (running.length) {
+    const { c, j } = running[0];
+    const ko = el("div", "k-ko");
+    const link = el("button", "link", "Watch it") as HTMLButtonElement;
+    link.type = "button"; link.onclick = () => go({ type: "col", id: c.id });
+    const steps = el("ol", "steps");
+    (j.steps ?? []).slice(-3).forEach((t) => steps.append(el("li", "", t)));
+    const lead = el("div", "steps-head");
+    lead.append(el("span", "pulse-dot"), el("span", "", `Claude is editing ${c.name}`), el("span", "spacer"), link);
+    ko.append(lead, steps);
+    live.replaceChildren(ko);
+    boardT = window.setTimeout(() => view.type === "ask" && renderBoard(), 3000);
+  } else if (r0) {
+    const me = el("div", "k-me", r0.prompt || "Edit");
+    const ko = el("div", "k-ko");
+    const link = el("button", "link", `Open ${r0.project}`) as HTMLButtonElement;
+    link.type = "button"; link.onclick = () => go({ type: "col", id: r0.cid });
+    const p = el("p", "", r0.status === "failed" ? `Failed: ${gist(r0.error || "no reason given")} ` : `${gist(r0.output || "Done")} `);
+    p.append(link);
+    ko.append(el("span", "who", [r0.model, when(r0.started)].filter(Boolean).join(" · ") || "Kioku"), p);
+    live.replaceChildren(me, ko);
+  } else live.replaceChildren();
+
+  $("board-asks").replaceChildren(...runs.slice(0, 5).map((r) =>
+    row(() => go({ type: "col", id: r.cid }), el("strong", "", r.prompt || "Edit"), el("span", "", `${r.project} · ${when(r.started)}`))));
+  if (!runs.length) $("board-asks").append(el("li", "empty-row", "Your asks show up here."));
+
+  const fact = (title: string, big: string, text: string, onclick: () => void) => {
+    const b = el("button", "k-fact") as HTMLButtonElement;
+    b.type = "button"; b.onclick = onclick;
+    b.append(el("h2", "k-h2", title), ...(big ? [el("b", "", big)] : []), el("p", "", text));
+    return b;
+  };
+  const facts: HTMLElement[] = [];
+  if (info) {
+    const k = info.kinds;
+    facts.push(fact("Library", info.assets.toLocaleString(), `${(k.image ?? 0).toLocaleString()} photos, ${((k.video ?? 0) + (k.poster ?? 0)).toLocaleString()} videos`, () => go({ type: "lib", kind: "" })));
+  }
+  const kept = drafts.reduce((s, d) => s + d.kept, 0);
+  facts.push(fact("To review", drafts.length ? kept.toLocaleString() : "", drafts.length ? `Picks across ${drafts.length} smart album draft${drafts.length === 1 ? "" : "s"}` : "No smart album drafts waiting", () => go({ type: "page", page: "review" })));
+  if (info) facts.push(fact("Index", "", `${day(info.oldest)} to ${day(info.newest)}${info.reindex === "running" ? ". Fetching new photos now." : `. Last indexed ${at(info.last_indexed)}.`}`, () => dot.click()));
+  $("board-facts").replaceChildren(...facts);
+}
+
+async function renderHistory() {
+  const box = $("history");
+  box.replaceChildren(el("li", "hint", "Loading…"));
+  const projects = collections.filter((c) => c.kind === "project");
+  const { runs } = await recentRuns(50, projects).catch(() => ({ runs: [] as RunWith[] }));
+  if (view.type !== "page" || view.page !== "history") return;
+  box.replaceChildren(...runs.map((r) => {
+    const li = runItem(r);
+    const link = el("button", "run-proj", r.project) as HTMLButtonElement;
+    link.type = "button"; link.onclick = () => go({ type: "col", id: r.cid });
+    li.querySelector(".run-head")!.append(link);
+    return li;
+  }));
+  if (!runs.length) box.append(el("li", "hint", "No Claude edits yet. Ask for a video and every run shows up here."));
+}
+
+// Review tab: count drafts and show the empty hint (review.ts fills #drafts)
+new MutationObserver(() => {
+  const n = $("drafts").children.length;
+  $("n-review").textContent = n ? String(n) : "";
+  $("drafts-empty").hidden = n > 0;
+}).observe($("drafts"), { childList: true });

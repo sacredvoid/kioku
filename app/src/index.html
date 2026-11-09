@@ -11,46 +11,99 @@
   <script type="module" src="./main.ts"></script>
 </head>
 <body>
-  <aside class="side">
-    <div class="side-drag" data-tauri-drag-region></div>
-    <div class="brand"><span class="lamp" aria-hidden="true"></span>Kioku</div>
-    <nav aria-label="Library">
-      <div class="group">
-        <button type="button" class="nav-item" data-nav="lib:"><span class="ico ico-all" aria-hidden="true"></span>All</button>
-        <button type="button" class="nav-item" data-nav="lib:image"><span class="ico ico-photo" aria-hidden="true"></span>Photos</button>
-        <button type="button" class="nav-item" data-nav="lib:video"><span class="ico ico-video" aria-hidden="true"></span>Videos</button>
-      </div>
-      <div class="group">
-        <div class="group-head"><h3>Albums</h3><span class="add-pair"><button type="button" id="smart-new" class="add" aria-label="Smart album: describe the photos you want" title="Smart album: describe the photos you want"><span aria-hidden="true">✦</span></button><button type="button" class="add" data-new="album" aria-label="New album" title="New album"><span class="ico ico-plus" aria-hidden="true"></span></button></span></div>
-        <div id="smart-slot"></div>
-        <div id="albums" class="list"></div>
-      </div>
-      <div class="group" id="drafts-group" hidden>
-        <div class="group-head"><h3>Drafts</h3></div>
-        <div id="drafts" class="list"></div>
-      </div>
-      <div class="group">
-        <div class="group-head"><h3>Projects</h3><button type="button" class="add" data-new="project" aria-label="New video project" title="New video project"><span class="ico ico-plus" aria-hidden="true"></span></button></div>
-        <div id="projects" class="list"></div>
-      </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <!-- tree rings: a branch cross-section, nature's record of time. Off-center rings, pith, one radial check. -->
+      <symbol id="rings" viewBox="0 0 100 100">
+        <ellipse cx="50" cy="50" rx="45" ry="43" fill="none" stroke="var(--text)" stroke-width="7"/>
+        <ellipse cx="53" cy="47" rx="32" ry="30" fill="none" stroke="var(--accent)" stroke-width="5"/>
+        <ellipse cx="55.5" cy="45" rx="20" ry="19" fill="none" stroke="var(--text)" stroke-width="4.5"/>
+        <ellipse cx="57" cy="44" rx="9.5" ry="9" fill="none" stroke="var(--accent)" stroke-width="4"/>
+        <circle cx="58" cy="43.5" r="3.4" fill="var(--text)"/>
+        <path d="M61 47 L73 64 L76 78" fill="none" stroke="var(--text)" stroke-width="3.5" stroke-linecap="round"/>
+      </symbol>
+    </defs>
+  </svg>
+  <canvas id="art" aria-hidden="true"></canvas>
+
+  <header class="k-top" data-tauri-drag-region>
+    <button type="button" class="k-brand" data-tab="ask" aria-label="Kioku: Ask">
+      <span class="k-word" aria-hidden="true">ki<svg><use href="#rings"/></svg>ku</span>
+      <span class="k-kanji" lang="ja" aria-hidden="true">記憶</span>
+    </button>
+    <nav class="k-nav" aria-label="Kioku">
+      <button type="button" data-tab="ask"><span class="ico ico-chat" aria-hidden="true"></span><span class="lbl">Ask</span></button>
+      <button type="button" data-tab="library"><span class="ico ico-all" aria-hidden="true"></span><span class="lbl">Library</span></button>
+      <button type="button" data-tab="projects"><span class="ico ico-film" aria-hidden="true"></span><span class="lbl">Projects</span><span class="n" id="n-projects"></span></button>
+      <button type="button" data-tab="albums"><span class="ico ico-stack" aria-hidden="true"></span><span class="lbl">Albums</span></button>
+      <button type="button" data-tab="review"><span class="ico ico-check" aria-hidden="true"></span><span class="lbl">Review</span><span class="n" id="n-review"></span></button>
+      <button type="button" data-tab="history"><span class="ico ico-clock" aria-hidden="true"></span><span class="lbl">History</span></button>
+      <button type="button" id="settings-btn" disabled><span class="ico ico-gear" aria-hidden="true"></span><span class="lbl">Settings</span></button>
     </nav>
-    <div id="activity" class="activity" hidden aria-live="polite"></div>
-    <div class="engine-row">
-      <button type="button" id="engine" class="engine" title="Search index details"><span class="dot"></span><span id="engine-text">Connecting</span></button>
-      <button type="button" id="settings-btn" class="add gear" aria-label="Settings" title="Settings" disabled><span class="ico ico-gear" aria-hidden="true"></span></button>
+    <div class="k-tools">
+      <button type="button" id="engine" class="engine" title="Search index details"><span class="dot"></span><span id="engine-text" class="engine-text">Connecting</span></button>
+      <div class="k-arts" role="group" aria-label="Background">
+        <button type="button" data-art="sunflower" style="--sh:70" title="Sunflower" aria-label="Sunflower background"></button>
+        <button type="button" data-art="meadow" style="--sh:150" title="Meadow" aria-label="Meadow background"></button>
+        <button type="button" data-art="pond" style="--sh:230" title="Pond" aria-label="Pond background"></button>
+        <button type="button" data-art="honeycomb" style="--sh:30" title="Honeycomb" aria-label="Honeycomb background"></button>
+      </div>
     </div>
-  </aside>
+  </header>
 
   <div class="main">
-    <header class="bar" data-tauri-drag-region>
+    <section id="ask-view" class="k-ask" hidden>
+      <h1>What should we remember today?</h1>
+      <form class="k-askform" id="ask-form">
+        <input id="ask-q" autocomplete="off" spellcheck="false" maxlength="4000" placeholder="Make a 30 second reel of the beach day, or find sunsets from the car" aria-label="Ask Kioku">
+        <button type="submit" class="primary">Ask</button>
+      </form>
+      <p class="k-hint">Start with make, cut or recap to have Claude edit a video. Anything else searches your library.</p>
+      <div class="k-sugg" id="ask-sugg"></div>
+      <div class="k-live" id="ask-live"></div>
+      <div class="k-board">
+        <div>
+          <h2 class="k-h2">Projects</h2>
+          <ul class="k-list" id="board-projects"></ul>
+          <h2 class="k-h2">Recent asks</h2>
+          <ul class="k-list" id="board-asks"></ul>
+        </div>
+        <div class="k-facts" id="board-facts"></div>
+      </div>
+    </section>
+
+    <section id="projects-view" class="k-page" hidden>
+      <div class="k-page-head"><h1>Projects</h1><span class="spacer"></span><button type="button" class="ghost" data-new="project">New project</button></div>
+      <div id="projects" class="list"></div>
+    </section>
+    <section id="albums-view" class="k-page" hidden>
+      <div class="k-page-head"><h1>Albums</h1><span class="spacer"></span>
+        <button type="button" id="smart-new" class="ghost" title="Describe the photos you want and Claude drafts an album">Smart album</button>
+        <button type="button" class="ghost" data-new="album">New album</button></div>
+      <div id="smart-slot"></div>
+      <div id="albums" class="list"></div>
+    </section>
+    <section id="review-view" class="k-page" hidden>
+      <div class="k-page-head"><h1>Review</h1></div>
+      <p class="hint" id="drafts-empty">Nothing to review. Make a smart album from Albums and its picks wait here.</p>
+      <div id="drafts-group"><div id="drafts" class="list"></div></div>
+    </section>
+    <section id="history-view" class="k-page k-hist" hidden>
+      <div class="k-page-head"><h1>History</h1></div>
+      <ol id="history" class="runs-list"></ol>
+    </section>
+
+    <div id="libbar" class="k-libbar" hidden>
+      <div class="k-seg" role="group" aria-label="Show">
+        <button type="button" data-kind="">All</button><button type="button" data-kind="image">Photos</button><button type="button" data-kind="video">Videos</button>
+      </div>
       <label class="search">
         <span class="sr">Search your library</span>
         <span class="ico ico-search" aria-hidden="true"></span>
-        <input id="q" type="search" placeholder="Search: “sunset from the car”, “mom”, “tacos in october”" autocomplete="off" spellcheck="false">
+        <input id="q" type="search" placeholder="Search: sunset from the car, mom, tacos in october" autocomplete="off" spellcheck="false">
         <kbd>⌘K</kbd>
       </label>
-    </header>
-
+    </div>
     <div id="head" class="view-head"></div>
     <p id="summary" class="summary" aria-live="polite"></p>
     <div id="project" class="project" hidden></div>
@@ -58,6 +111,8 @@
     <div id="grid" class="grid"></div>
     <div id="empty" class="empty" hidden></div>
   </div>
+
+  <div id="activity" class="activity" hidden aria-live="polite"></div>
 
   <div id="selbar" class="selbar" hidden>
     <span id="sel-count"></span>
@@ -79,10 +134,8 @@
         <legend>Appearance</legend>
         <div class="theme-opts">
           <label class="theme-opt"><input type="radio" name="theme" value=""><span class="sw sw-system"></span><span class="tn">System</span></label>
-          <label class="theme-opt"><input type="radio" name="theme" value="mist"><span class="sw sw-mist"></span><span class="tn">Mist</span></label>
-          <label class="theme-opt"><input type="radio" name="theme" value="peach"><span class="sw sw-peach"></span><span class="tn">Peach</span></label>
-          <label class="theme-opt"><input type="radio" name="theme" value="mint"><span class="sw sw-mint"></span><span class="tn">Mint</span></label>
-          <label class="theme-opt"><input type="radio" name="theme" value="dusk"><span class="sw sw-dusk"></span><span class="tn">Dusk</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="light"><span class="sw sw-light"></span><span class="tn">Light</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="dark"><span class="sw sw-dark"></span><span class="tn">Dark</span></label>
         </div>
       </fieldset>
       <div id="settings-fields"></div>
