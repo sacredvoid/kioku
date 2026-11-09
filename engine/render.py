@@ -531,8 +531,15 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 p = source_for(s, mode, tmp)
                 srcs[s.uuid] = (p, probe_source(p))
             except (RuntimeError, HTTPException, OSError, subprocess.SubprocessError) as e:
-                msg = e.detail if isinstance(e, HTTPException) else str(e)
+                if cancel.is_set():
+                    raise RuntimeError("Cancelled") from None
+                msg = (e.detail if isinstance(e, HTTPException) else
+                       "iCloud download timed out" if isinstance(e, subprocess.TimeoutExpired) else
+                       f"download failed (exit {e.returncode})" if isinstance(e, subprocess.CalledProcessError) else str(e))
+                log.warning("fetch %s failed: %s", s.uuid, e)
                 errors.append(f"{media.label_for(s.uuid)} ({msg[:120]})")
+        if cancel.is_set():
+            raise RuntimeError("Cancelled")
         if errors:
             raise RuntimeError(f"{len(errors)} clips could not be fetched: {'; '.join(errors)}. "
                                "Finished segments are kept; try again.")
@@ -662,6 +669,7 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         for p in parts:
             p.unlink(missing_ok=True)
         shutil.rmtree(tmp, ignore_errors=True)
+        media.stage(f"render:{cid}:{mode}", None)  # the last stages run after the slot is released; never leave a card behind
         with _gate:
             _active -= 1
         if CANCEL.get(jkey) is cancel:
