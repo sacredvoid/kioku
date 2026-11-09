@@ -168,8 +168,8 @@ input, textarea { caret-color: var(--accent) }
 @keyframes spin { to { rotate: 360deg } }
 
 /* ---------- main column */
-.main { max-width: 1240px; margin: 0 auto; padding: 0 28px 120px; min-width: 0 }
-.main.narrow { max-width: 820px }
+.main { max-width: 1680px; margin: 0 auto; padding: 0 clamp(20px, 3.5vw, 56px) 120px; min-width: 0 }
+.main.narrow { max-width: 1120px } /* Ask and History: reading width */
 .k-libbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 22px }
 .k-seg { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface-2) }
 .k-seg button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; font-size: 13px; color: var(--text-2) }
@@ -219,6 +219,15 @@ kbd { font: 500 11px var(--font); color: var(--text-3); background: var(--surfac
 .k-fact p { margin: 0; font-size: 13.5px; color: var(--text-2) }
 
 /* ---------- list pages: projects, albums, review, history */
+/* projects and albums: cover cards that fill the width */
+#projects, #albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 22px 18px; padding-top: 6px }
+#projects > .hint, #albums > .hint { grid-column: 1 / -1 }
+#projects .nav-item, #albums .nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px 10px; padding: 0; border: 0; border-radius: 12px }
+#projects .cover, #albums .cover { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 12px; box-shadow: var(--shadow);
+  transition: transform .3s var(--ease), box-shadow .3s var(--ease) }
+#projects .nav-item:hover .cover, #albums .nav-item:hover .cover { transform: translateY(-2px); box-shadow: var(--shadow-lg) }
+#projects .nav-item:focus-visible, #albums .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px }
+#projects .name, #albums .name { padding-left: 2px }
 .k-page { padding-top: 26px }
 .k-page-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px }
 .k-page-head h1 { margin: 0; font: 600 24px/1.1 var(--display); letter-spacing: -.025em }
@@ -322,7 +331,7 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
 @keyframes drop { from { opacity: 0; translate: 0 8px } }
 
 /* ---------- project */
-.project { display: flex; flex-direction: column; gap: 12px; max-width: 980px; padding-top: 10px }
+.project { display: flex; flex-direction: column; gap: 12px; padding-top: 10px }
 .brief-box { padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: var(--r); background: var(--surface) }
 .brief-box .k-h2 { margin: 0 }
 .brief-hint { margin: 2px 0 10px; font-size: 12.5px; color: var(--text-3) }

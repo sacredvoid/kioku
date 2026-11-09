@@ -202,7 +202,7 @@ async function go(v: View, search = q.value.trim()) {
   const own = v.type === "ask" ? "ask" : v.type === "page" ? v.page : "";
   for (const s of ["ask", "projects", "albums", "review", "history"]) $(`${s}-view`).hidden = s !== own;
   $("libbar").hidden = v.type !== "lib";
-  main.classList.toggle("narrow", !!own);
+  main.classList.toggle("narrow", own === "ask" || own === "history");
   for (const id of ["head", "summary", "grid"]) $(id).hidden = !!own;
   $("grid").style.display = ""; // a project view hides it; everything else shows it
   head.replaceChildren();
