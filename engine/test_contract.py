@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
 import media  # noqa: E402
@@ -36,7 +37,7 @@ assert media.RUNNING == 0
 print("ok")
 
 # connections from core.connect() close when their `with` block ends (they used to leak until the engine ran out of files)
-import sqlite3 as _sq  # noqa: E402
+from core import sqlite3 as _sq  # noqa: E402
 with core.connect() as _c:
     _c.execute("select 1")
 try:

@@ -54,9 +54,10 @@ class QuietPolls(logging.Filter):
 
 
 def setup_logging():
-    """Engine log to the terminal and to data/engine.log (1 MB x 3, rotated)."""
+    """Engine log to the terminal and to ~/Kioku/engine.log (1 MB x 3, rotated)."""
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
-    core.DATA.mkdir(parents=True, exist_ok=True)
+    core.DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
+    core.DATA.chmod(0o700)  # also tighten a folder that already existed
     fh = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3)
     sh = logging.StreamHandler()
     for h in (fh, sh):

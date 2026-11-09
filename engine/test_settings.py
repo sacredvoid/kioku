@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -97,7 +98,7 @@ assert TestClient(server.app, base_url="http://localhost:8765").get("/settings")
 # export keeps the exact 30000/1001 rate: FCP XML says timebase 30 + ntsc TRUE (Resolve reads 29.97); true 30 stays FALSE
 import opentimelineio as otio  # noqa: E402
 import core  # noqa: E402
-import sqlite3  # noqa: E402
+from core import sqlite3  # noqa: E402
 ntsc = 30000 / 1001
 for rate, flag in [(ntsc, "TRUE"), (30, "FALSE")]:
     xml = otio.adapters.write_to_string(projects.build_timeline("t", [(Path("/x/a.mov"), True, rate, 0, 2, 5)], rate), "fcp_xml")
@@ -118,6 +119,7 @@ core._wal.clear()
 assert core.connect(core.DB_PATH).execute("pragma journal_mode").fetchone()[0] == "wal" and core.DB_PATH in core._wal
 busy = Path(tempfile.mkdtemp()) / "b.db"
 holder = sqlite3.connect(busy)
+holder.execute(f"pragma key = \"x'{core.db_key()}'\"")
 holder.execute("create table t(x)"); holder.commit()
 holder.execute("begin exclusive")
 orig = sqlite3.connect

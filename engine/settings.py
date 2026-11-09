@@ -1,4 +1,4 @@
-"""App settings, stored in data/settings.json. Read live, so changes apply without restarting the engine."""
+"""App settings, stored in ~/Kioku/settings.json. Read live, so changes apply without restarting the engine."""
 import json
 import logging
 import threading

@@ -7,6 +7,7 @@ from pathlib import Path
 
 tmp = Path(tempfile.mkdtemp(prefix="cs-media-"))
 os.environ["CS_DB"] = str(tmp / "t.db")
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
 

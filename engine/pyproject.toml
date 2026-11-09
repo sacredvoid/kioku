@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.162.2",
+    "keyring>=25",
     "mcp>=2.3.0",
     "numpy>=2.5.4",
     "opentimelineio>=0.18.1",
@@ -15,6 +16,7 @@ dependencies = [
     "scenedetect[opencv-headless]>=0.7.2",
     "sentence-transformers[image]>=6.2.0",
     "soundfile>=0.14.0",
+    "sqlcipher3-wheels>=0.5.7",
     "torchcodec>=0.17.0",
     "torchvision>=0.29.2",
     "transformers>=5.22.2",

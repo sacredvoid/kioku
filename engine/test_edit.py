@@ -10,6 +10,7 @@ import types
 from pathlib import Path
 
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

@@ -11,7 +11,6 @@ import math
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -97,7 +96,7 @@ def setup_status():
     w, m = whisper_bin(), model_path().is_file()
     hint = "" if w and m else (
         ("brew install whisper-cpp\n" if not w else "") +
-        (f"mkdir -p data/models && curl -L -o data/models/{MODEL} "
+        (f"mkdir -p ~/Kioku/models && curl -L -o ~/Kioku/models/{MODEL} "
          f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{MODEL}\n" if not m else "")).strip()
     return {"whisper": w, "model": m, "hint": hint}
 
@@ -118,7 +117,7 @@ def _db(c):
             if col not in {r[1] for r in c.execute(f"pragma table_info({tbl})")}:
                 try:
                     c.execute(f"alter table {tbl} add column {col} {typ}")
-                except sqlite3.OperationalError as e:
+                except core.sqlite3.OperationalError as e:
                     if "duplicate column" not in str(e):  # another process added it first
                         raise
         c.commit()

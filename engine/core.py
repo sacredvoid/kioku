@@ -3,16 +3,43 @@ import itertools
 import logging
 import os
 import re
-import sqlite3
+import secrets
 import time
 from functools import cache, lru_cache
 from pathlib import Path
 
 import numpy as np
+from sqlcipher3 import dbapi2 as sqlite3  # SQLCipher 4: every page AES-256 encrypted + HMAC-SHA512 checked
 
 log = logging.getLogger("kioku")
-DATA = Path(__file__).resolve().parent.parent / "data"
+os.umask(0o077)  # everything the engine writes (index, thumbs, renders, logs) is readable by this user only
+DATA = Path(os.environ.get("KIOKU_DATA") or Path.home() / "Kioku")
 DB_PATH = Path(os.environ.get("CS_DB") or DATA / "index.db")
+KEYCHAIN = ("app.kioku.desktop", "index-key")  # login Keychain item: service, account
+
+
+@cache
+def db_key() -> str:
+    """The index's 256-bit key as 64 hex chars, from the login Keychain. KIOKU_DB_KEY overrides it (tests only).
+    A key is only ever created when no index exists: a new key can't open an existing one, so a missing key on an
+    existing index is an error, never a reason to start over."""
+    key = os.environ.get("KIOKU_DB_KEY")
+    if not key:
+        import keyring  # macOS backend: the item's ACL trusts only the Python that created it; others get a prompt
+        key = keyring.get_password(*KEYCHAIN)
+        if not key:
+            if DB_PATH.exists():
+                raise RuntimeError(f"{DB_PATH} exists but its key ({KEYCHAIN[0]} / {KEYCHAIN[1]}) is not in the "
+                                   "login Keychain. Restore the Keychain item; a new key cannot open this index.")
+            # ponytail: two processes creating the very first index at the same instant could race; one engine starts first in practice
+            key = secrets.token_hex(32)
+            keyring.set_password(*KEYCHAIN, key)
+            if keyring.get_password(*KEYCHAIN) != key:
+                raise RuntimeError("could not save the index key to the login Keychain")
+            log.info("created a new index key in the login Keychain")
+    if not re.fullmatch(r"[0-9a-f]{64}", key):
+        raise RuntimeError("index key must be 64 lowercase hex characters")
+    return key
 AUDIO_DIR = DATA / "audio"
 MODEL_ID = "google/embeddinggemma-2"
 IMAGE_TOKENS = 280  # allowed 70/140/280/560/1120. 280 matched 560 on search quality at 2.7x the speed (notes/tokens-ab.md)
@@ -67,8 +94,19 @@ class Conn(sqlite3.Connection):
 
 
 def connect(path=DB_PATH):
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    key = db_key()  # before connect(): connecting creates the file, and db_key() treats an existing file as an index
     db = sqlite3.connect(path, timeout=30, factory=Conn)  # the indexer may be writing; wait instead of failing
+    # raw hex key (no passphrase KDF needed: it's already 256 random bits). Must be the first statement.
+    db.execute(f"pragma key = \"x'{key}'\"")
+    db.execute("pragma temp_store = memory")  # sorts and temp tables never touch disk unencrypted
+    try:
+        db.execute("select count(*) from sqlite_master").fetchone()
+    except sqlite3.DatabaseError as e:
+        db.close()
+        if isinstance(e, sqlite3.OperationalError):  # busy/locked: the caller's usual retry handling applies
+            raise
+        raise RuntimeError(f"cannot open {path}: wrong key, or an unencrypted index ({e})") from e
     if path not in _wal:
         # WAL lets readers and the indexer's writes overlap. The switch is persistent but needs a brief exclusive
         # lock, so if the db is busy just try again on a later connect; never fail the connection over it.

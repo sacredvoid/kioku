@@ -25,6 +25,7 @@ for name, (url, _) in SAMPLES.items():
     urllib.request.urlretrieve(url, media / name)
 
 os.environ["CS_DB"] = str(tmp / "test.db")
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 here = Path(__file__).parent
 subprocess.run([sys.executable, here / "index.py", "--folder", media], check=True)
 

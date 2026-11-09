@@ -15,6 +15,7 @@ from pathlib import Path
 
 tempfile.tempdir = tempfile.mkdtemp(prefix="cs-test-tmp-")  # private, so renders running in other shells cannot confuse the leak check
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
 

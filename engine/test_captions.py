@@ -10,6 +10,7 @@ import types
 from pathlib import Path
 
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # before importing core
+os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
 
@@ -271,7 +272,7 @@ try:
 except RuntimeError as e:
     assert "brew install" in str(e)
 captions.whisper_bin = lambda: str(fake)
-assert captions.setup_status()["hint"].startswith("mkdir -p data/models")
+assert captions.setup_status()["hint"].startswith("mkdir -p ~/Kioku/models")
 captions.MODELS.mkdir()
 captions.model_path().write_bytes(b"x")
 assert captions.setup_status() == {"whisper": str(fake), "model": True, "hint": ""}

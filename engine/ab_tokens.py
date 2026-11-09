@@ -3,11 +3,10 @@
 Ground truth = Apple's Photos labels (imperfect, but the same for both arms). For each label query we rank a
 random sample of already-indexed stills by visual similarity only (no keyword boost) and score average
 precision and precision@10. 560 uses the vectors already in the index; 280 re-embeds the same files.
-Read-only on data/index.db.
+Reads ~/Kioku/index.db.
 """
 import argparse
 import random
-import sqlite3
 import time
 
 import numpy as np
@@ -46,7 +45,7 @@ def main():
     ap_.add_argument("--n", type=int, default=600)
     ap_.add_argument("--seed", type=int, default=7)
     a = ap_.parse_args()
-    db = sqlite3.connect(f"file:{core.DB_PATH}?mode=ro", uri=True)
+    db = core.connect()
     rows = db.execute("select a.uuid, a.path, a.meta, s.vec from assets a join segments s using(uuid) "
                       "where a.kind in ('image','poster') and s.source in ('image','poster') and a.path is not null").fetchall()
     rows = [r for r in rows if r[1] and __import__("os").path.isfile(r[1])]

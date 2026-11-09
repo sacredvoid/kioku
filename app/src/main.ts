@@ -575,7 +575,7 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
     out.className = `ask-out ${j.status === "idle" ? "failed" : j.status}`;
     // idle while we were watching a running job = the engine restarted and the job died with it
     if (j.status === "idle") out.textContent = `The ${KIND_WORD[kind]} stopped because the engine restarted. Clips placed so far are kept; run it again to continue.`;
-    else if (j.status === "failed") out.textContent = j.error || "Failed, no reason given. Check data/engine.log.";
+    else if (j.status === "failed") out.textContent = j.error || "Failed, no reason given. Check ~/Kioku/engine.log.";
     else if (kind === "ask") out.replaceChildren(); // the reply lands in the history line below
     // reload clips and history (the engine records the run right after the job finishes, hence the short delay)
     if (kind === "ask" && j.status !== "idle" && view.type === "col" && view.id === cid) refreshProjectSoon();
@@ -726,7 +726,7 @@ function runItem(r: Run): HTMLElement {
     el("span", `status ${r.status}`, r.status === "done" ? "Done" : r.status === "failed" ? "Failed" : r.status),
     el("span", "run-meta", [r.model, when(r.started), took].filter(Boolean).join(" · ")));
   li.append(head);
-  if (r.status === "failed") li.append(el("p", "run-error", r.error || "Failed, no reason given. Check data/engine.log."));
+  if (r.status === "failed") li.append(el("p", "run-error", r.error || "Failed, no reason given. Check ~/Kioku/engine.log."));
   if (r.output || r.status !== "failed") li.append(markdown(r.output || "Done"));
   if (r.steps?.length) {
     const d = document.createElement("details");
