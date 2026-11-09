@@ -1,6 +1,6 @@
 [package]
 name = "kioku"
-version = "0.2.0"
+version = "0.2.1"
 description = "Search your Photos library by what's in it."
 authors = ["Samanvya Tripathi"]
 edition = "2024"

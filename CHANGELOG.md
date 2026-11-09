@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.1 (2026-11-09)
+
+- Declare the Photos entitlement so the Photos prompt can appear
+
 ## v0.2.0 (2026-11-09)
 
 - Release cycle: semver, scripts/release.sh, CHANGELOG, version on the Settings page
