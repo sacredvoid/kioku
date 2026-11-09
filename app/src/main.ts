@@ -1,3 +1,4 @@
+declare const __APP_VERSION__: string; // from package.json, injected by vite.config.ts
 // Kioku: library, search, albums and video projects on top of your Photos library.
 import { API, api, ApiError, errMsg, fmtDur, isVideo, thumb, type Captions, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
 import { Grid } from "./grid";
@@ -1423,3 +1424,5 @@ new MutationObserver(() => {
   $("n-review").textContent = n ? String(n) : "";
   $("drafts-empty").hidden = n > 0;
 }).observe($("drafts"), { childList: true });
+
+$("app-version").textContent = `Kioku v${__APP_VERSION__}`;
