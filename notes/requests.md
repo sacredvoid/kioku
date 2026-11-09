@@ -34,6 +34,6 @@ Status words: **live** = on main and running in the installed app; **built** = c
 ## Waiting on Sam
 | # | Decision | Ask |
 |---|---|---|
-| 17 | Free internet audio (Claude adds it, Sam browses/plays in app) | plan done (Openverse); license default: "CC0 + CC-BY" or "include NC too" |
+| 17 | Free internet audio (Claude adds it, Sam browses/plays in app); mostly free music, sometimes own music | **built on feat/audio** (ceaaded, ec3c6d1, 5f67e71): Openverse music (default) + sound effects, My music (~/Music), MCP search_sounds/add_sound, credits + credits.txt. Default licenses CC0 + CC BY, NC switchable in Settings. Verified: engine tests (Openverse mocked), WebKit screenshots with mocked /sounds. Not verified: live Openverse download, installed app. |
 | 18 | Stable code signing so macOS permissions survive rebuilds | "sign it" (creates a local signing cert in Keychain) |
 | 19 | Delete old plaintext kioku/data/ (1.4 GB) | "delete old data" |
