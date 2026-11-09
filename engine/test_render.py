@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import edit  # noqa: E402  (real: output_size and look_filters; snapshot is replaced below)
+import library  # noqa: E402
 import media  # noqa: E402
 import projects  # noqa: E402
 import render  # noqa: E402
@@ -418,10 +419,13 @@ settings._cur = settings.Settings(max_agents=2)
 # ---------- routes: validation, a full job, file/sheet only for the recorded path, cancel, reveal
 app = FastAPI()
 app.include_router(render.router)
+app.add_exception_handler(library.RequestValidationError, library.validation_error)
 c = TestClient(app)
 assert c.post("/collections/1/render", json={"mode": "bogus"}).status_code == 422
 assert c.post("/collections/1/render", json={"mode": "final", "start": 1, "end": 2}).status_code == 422
 assert c.post("/collections/1/render", json={"mode": "preview", "start": 3, "end": 2}).status_code == 422
+for bad in ('{"mode": "preview", "start": NaN}', '{"mode": "preview", "end": Infinity}'):  # used to start a job that failed
+    assert c.post("/collections/1/render", content=bad, headers={"content-type": "application/json"}).status_code == 422, bad
 assert c.post("/collections/99/render", json={"mode": "preview"}).status_code == 422
 assert c.post("/collections/12345/render", json={"mode": "preview"}).status_code == 404
 PLAN[12] = PLAN[1]

@@ -45,3 +45,16 @@ try:
 except _sq.ProgrammingError:
     pass
 print("connection close ok")
+
+# the search index streams vectors into one preallocated matrix (fetchall + join used to hold every vector twice)
+import numpy as _np  # noqa: E402
+with core.connect() as _c:
+    _c.execute("insert into assets(uuid, kind) values ('a', 'image'), ('b', 'image')")
+    _c.executemany("insert into segments(uuid, t0, t1, source, vec) values (?, 0, 1, 'image', ?)",
+                   [(u, _np.full(768, v, _np.float32).tobytes()) for u, v in (("a", 1.0), ("b", 2.0), ("a", 3.0))])
+    _idx = core.Index(_c)
+assert _idx.M.shape == (3, 768) and _idx.M[2, 0] == 3.0 and _idx.M.dtype == _np.float32, _idx.M.shape
+assert _idx.seg_uuid == ["a", "b", "a"] and _idx.seg_asset.tolist() == [0, 1, 0] and _idx.seg_span[1] == (0, 1, "image")
+with core.connect(Path(tempfile.mkdtemp()) / "empty.db") as _c:
+    assert core.Index(_c).M.shape == (0, 768)
+print("index build ok")

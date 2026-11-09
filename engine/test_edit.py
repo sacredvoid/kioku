@@ -27,6 +27,7 @@ db.commit()
 app = FastAPI()
 app.include_router(library.router)
 app.include_router(edit.router)
+app.add_exception_handler(library.RequestValidationError, library.validation_error)
 c = TestClient(app)
 
 
@@ -68,6 +69,9 @@ assert c.patch(f"/collections/{cid}/edit", json={"aspect": None}).status_code ==
 assert c.patch(f"/collections/{cid}/edit", content=b'{"look_strength": NaN}',
                headers={"content-type": "application/json"}).status_code == 422
 assert c.patch(f"/collections/{cid}/edit/clips/{ids[2]}", json={"speed": 2}).status_code == 422  # photo
+J = {"content-type": "application/json"}
+assert c.patch(f"/collections/{cid}/edit/clips/{a}", content='{"speed": Infinity}', headers=J).status_code == 422  # was clamped, then 500 on the reply
+assert c.patch(f"/collections/{cid}/edit", content='{"look_strength": NaN}', headers=J).status_code == 422
 assert c.patch(f"/collections/{cid}/edit/clips/{ids[2]}", json={"speed": 1}).status_code == 200
 assert c.patch(f"/collections/{cid}/edit/clips/99999", json={"volume": 1}).status_code == 404
 assert c.get(f"/collections/{cid}/edit").json()["rev"] == 3  # failed requests changed nothing

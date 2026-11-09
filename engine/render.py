@@ -21,7 +21,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 import core
 import library
@@ -699,6 +699,7 @@ def _sheet(video, segs, win, fps, out):
 # ---------- routes
 
 class RenderBody(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)  # NaN/inf start made the job fail with "Unexpected error" instead of a 422
     mode: Literal["preview", "final"]
     start: float | None = None
     end: float | None = None

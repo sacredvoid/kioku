@@ -8,12 +8,20 @@ from contextlib import closing
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import core
 
 router = APIRouter()
 ASSET_COLS = ("uuid", "kind", "path", "duration", "meta", "created")
+
+
+def validation_error(request, exc: RequestValidationError):
+    """422 body without the echoed input: FastAPI's default includes it, and a NaN or inf input cannot be
+    serialized, which turned a bad request into a 500. The app reads only loc and msg."""
+    return JSONResponse(status_code=422, content={"detail": [{k: e.get(k) for k in ("loc", "msg", "type")} for e in exc.errors()]})
 
 
 def conn():
@@ -201,6 +209,7 @@ def add_items(cid: int, body: AddItems):
 
 
 class ItemPatch(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)  # NaN passed ge=0 and then broke the JSON reply (500)
     t0: float | None = Field(None, ge=0)
     t1: float | None = Field(None, ge=0)
     pos: float | None = None

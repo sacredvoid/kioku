@@ -133,13 +133,23 @@ class Index:
     FLOOR_MARGIN = 0.08  # vector-only hits must be within this of the best vector score
 
     def __init__(self, db):
-        rows = db.execute("select uuid, vec, t0, t1, source from segments").fetchall()
-        self.seg_uuid = [r[0] for r in rows]
-        self.seg_span = [(r[2], r[3], r[4]) for r in rows]
-        ids = {}
-        self.seg_asset = np.array([ids.setdefault(u, len(ids)) for u in self.seg_uuid], np.int64)
-        self.M = (np.frombuffer(b"".join(r[1] for r in rows), np.float32).reshape(len(rows), -1)
-                  if rows else np.zeros((0, 768), np.float32))
+        # Stream rows into one preallocated matrix. fetchall() plus b"".join() held every vector twice (peak 380 MB
+        # for a 137 MB matrix), and this runs every 30 s while the indexer writes, with the old index still live.
+        n = db.execute("select count(*) from segments").fetchone()[0]
+        self.seg_uuid, self.seg_span, ids = [], [], {}
+        seg_asset, M = np.empty(n, np.int64), None
+        for i, (u, vec, t0, t1, src) in enumerate(db.execute("select uuid, vec, t0, t1, source from segments")):
+            if i >= n:  # the indexer added rows since the count: the next reload picks them up
+                break
+            if M is None:
+                M = np.empty((n, len(vec) // 4), np.float32)
+            M[i] = np.frombuffer(vec, np.float32)
+            self.seg_uuid.append(u)
+            self.seg_span.append((t0, t1, src))
+            seg_asset[i] = ids.setdefault(u, len(ids))
+        k = len(self.seg_uuid)  # fewer than n if rows were deleted meanwhile (analyze rewrites a video's scenes)
+        self.seg_asset = seg_asset[:k]
+        self.M = M[:k] if M is not None else np.zeros((0, 768), np.float32)
         self.assets = {r[0]: r[1:] for r in db.execute("select uuid, kind, path, duration, meta from assets")}
         self.loaded_at = time.time()
 

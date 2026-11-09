@@ -231,7 +231,7 @@ F = float
 
 
 class EditPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     aspect: Literal["16:9", "9:16", "1:1", "4:5"] = "16:9"
     size: Literal[720, 1080, 2160] = 1080
     fps: Literal[24, 25, 30, 60] = 30
@@ -242,7 +242,7 @@ class EditPatch(BaseModel):
 
 
 class ClipPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     speed: F | None = None
     volume: F | None = None
     exposure: F | None = None
@@ -258,7 +258,7 @@ class ClipPatch(BaseModel):
 
 
 class TransitionPut(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     type: Literal["cut", "dissolve", "fade-black", "wipe-left", "wipe-right", "slide-left"]
     duration: F = 0.5
 
