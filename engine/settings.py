@@ -25,6 +25,8 @@ class Settings(BaseModel):
         "sonnet", description="Claude model that plans the searches for a smart album")
     ask_minutes: int = Field(30, ge=5, le=120, description="stop a Claude edit after this long")
     download_seconds: int = Field(180, ge=30, le=1800, description="give up on one iCloud video after this long")
+    caption_language: Literal["en", "auto", "es", "fr", "de", "it", "pt", "nl", "hi", "ja", "zh", "ko", "ru", "ar"] = Field(
+        "en", description="spoken language for captions; auto guesses per clip but is 25x slower on noisy clips and often wrong")
     proxy_height: Literal[360, 540, 720] = Field(540, description="playable copy height; 360 uses about half the disk")
 
 

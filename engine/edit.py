@@ -32,7 +32,13 @@ MAX_SECONDS = 15 * 60  # same limit as render.MAX_SECONDS
 ASPECTS = {"16:9": (16, 9), "9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5)}
 SIZES = (720, 1080, 2160)
 FPS = (24, 25, 30, 60)
-CAPTION_STYLES = ("bold", "box")
+CAPTION_STYLES = ("bold", "box", "pop")
+CAPTION_FONTS = ("arial", "impact", "georgia", "verdana", "trebuchet", "rounded", "courier")  # paths: captions.FONTS
+CAPTION_POSITIONS = ("bottom", "middle", "top")
+CAPTION_SIZES = ("S", "M", "L")
+HEX = r"^#[0-9a-fA-F]{6}$"
+CAPTIONS_DEFAULT = {"on": False, "style": "bold", "position": "bottom", "font": "arial", "size": "M", "color": "#FFFFFF",
+                    "highlight_color": "#FFD400", "highlight": False, "uppercase": False, "max_words": 0}
 XFADE = {"dissolve": "fade", "fade-black": "fadeblack", "wipe-left": "wipeleft",
          "wipe-right": "wiperight", "slide-left": "slideleft"}
 MIN_TRANS_FRAMES = 3
@@ -92,7 +98,7 @@ def look_filters(look):
 def default_spec():
     return {"version": 1, "format": {"aspect": "16:9", "size": 1080, "fps": 30, "fade_in": 0.0, "fade_out": 0.0}, "audio": [], "clip_volume": 1.0, "duck": True,
             "look": {"name": None, "strength": 1.0}, "clips": {}, "transitions": {},
-            "captions": {"on": False, "style": "bold"}}
+            "captions": dict(CAPTIONS_DEFAULT)}
 
 
 def output_size(aspect, size, preview):
@@ -129,6 +135,7 @@ def _read(c, col):
     row = c.execute("select spec, rev from edit_specs where collection_id = ?", (col["id"],)).fetchone()
     spec, rev = (json.loads(row[0]), row[1]) if row else (default_spec(), 0)
     _fill(spec)
+    spec["captions"] = {**CAPTIONS_DEFAULT, **spec.get("captions", {})}  # specs saved before the style options
     _prune(spec, col)
     return spec, rev
 
@@ -260,7 +267,16 @@ class EditPatch(BaseModel):
     look: str | None = None            # null or "none" clears the project look
     look_strength: F = 1.0
     captions: bool = False
-    caption_style: Literal["bold", "box"] = "bold"
+    caption_style: Literal["bold", "box", "pop"] = "bold"
+    caption_position: Literal["bottom", "middle", "top"] = "bottom"
+    caption_font: Literal["arial", "impact", "georgia", "verdana", "trebuchet", "rounded", "courier"] = "arial"
+    caption_size: Literal["S", "M", "L"] = "M"
+    caption_color: str = Field("#FFFFFF", pattern=HEX)
+    caption_highlight_color: str = Field("#FFD400", pattern=HEX)
+    caption_highlight: bool = False    # karaoke: the word being spoken changes colour
+    caption_uppercase: bool = False
+    caption_max_words: int = Field(0, ge=0, le=12)   # words per line, 0 = fit the frame; pop shows 1 to 3
+    caption_clips: list[int] | None = None   # item_ids to caption; exactly these, all other clips off
     fade_in: F = 0.0                   # seconds, 0 to 3
     fade_out: F = 0.0
     clip_volume: F = 1.0               # 0 to 1: scales every clip's own audio
@@ -294,6 +310,7 @@ class ClipPatch(BaseModel):
     reframe_from: F | None = None
     reframe_to: F | None = None
     mute: bool | None = None           # silence this clip's own audio
+    captions: bool | None = None       # caption this clip (project captions must also be on)
 
 
 class TransitionPut(BaseModel):
@@ -308,6 +325,7 @@ CLIP_FIELDS = {
     "exposure": (("adjust", "exposure"), 0.0, -1, 1), "contrast": (("adjust", "contrast"), 1.0, .8, 1.3),
     "saturation": (("adjust", "saturation"), 1.0, 0, 1.6), "warmth": (("adjust", "warmth"), 0.0, -1, 1),
     "reframe_mode": (("reframe", "mode"), "center", None, None),
+    "captions": (("captions",), False, None, None),
     "reframe_pos": (("reframe", "pos"), .5, 0, 1), "reframe_from": (("reframe", "pos_from"), .5, 0, 1),
     "reframe_to": (("reframe", "pos_to"), .5, 0, 1),
     "mute": (("mute",), False, None, None),
@@ -335,12 +353,21 @@ def get_edit(cid: int):
             "warnings": list(tl.warnings),
             "options": {"looks": sorted(LOOKS), "aspects": list(ASPECTS), "sizes": list(SIZES), "fps": list(FPS),
                         "transitions": ["cut", *XFADE], "caption_styles": list(CAPTION_STYLES),
+                        "caption_fonts": list(CAPTION_FONTS), "caption_positions": list(CAPTION_POSITIONS),
+                        "caption_sizes": list(CAPTION_SIZES),
                         "audio_ext": sorted(AUDIO_EXT), "max_audio": MAX_AUDIO, "max_fade": MAX_FADE}}
 
 
 @router.patch("/collections/{cid}/edit")
 def patch_edit(cid: int, body: EditPatch):
     given, flipped = body.model_fields_set, []
+    picks = None
+    if body.captions and "captions" in given:  # speech guesses read audio files: do them before the write lock
+        import captions
+        spec0, _ = load(cid)
+        if not spec0["captions"]["on"] and not any(e.get("captions") for e in spec0["clips"].values()):
+            picks = {i["item_id"] for i in library.get_collection(cid)["items"]
+                     if i["kind"] != "image" and captions.likely_speech(i["uuid"])}
 
     def fn(spec, col):
         notes = []
@@ -361,13 +388,32 @@ def patch_edit(cid: int, body: EditPatch):
         if "captions" in given:
             flipped.append(body.captions and not spec["captions"]["on"])
             spec["captions"]["on"] = body.captions
-        if "caption_style" in given:
-            spec["captions"]["style"] = body.caption_style
+            if picks and not any(e.get("captions") for e in spec["clips"].values()):
+                for i in picks:
+                    spec["clips"].setdefault(str(i), {})["captions"] = True
+        for k in ("style", "position", "font", "size", "color", "highlight_color", "highlight", "uppercase", "max_words"):
+            if f"caption_{k}" in given:
+                spec["captions"][k] = getattr(body, f"caption_{k}")
+        if body.caption_clips is not None and "caption_clips" in given:
+            ids = {str(i["item_id"]): i["kind"] for i in col["items"]}
+            bad = [i for i in body.caption_clips if str(i) not in ids or ids[str(i)] == "image"]
+            if bad:
+                raise HTTPException(422, f"caption_clips must be video clips of this project; not: {bad}")
+            want = {str(i) for i in body.caption_clips}
+            for k in ids:
+                e = spec["clips"].setdefault(k, {})
+                if k in want:
+                    e["captions"] = True
+                else:
+                    e.pop("captions", None)
+                if not e:
+                    del spec["clips"][k]
         return notes
 
     out = mutate(cid, fn)
-    if flipped and flipped[0]:
-        import captions  # lazy: C's module. The edit is already saved if this raises.
+    # lazy import; the edit is already saved if this raises. Starts for newly selected clips or word timing too.
+    if out["spec"]["captions"]["on"] and (flipped and flipped[0] or given & {"caption_clips", "caption_highlight", "caption_style"}):
+        import captions
         captions.start_transcription(cid)
     return out
 
@@ -382,6 +428,8 @@ def patch_clip(cid: int, item_id: int, body: ClipPatch):
             raise HTTPException(404, "no such item")
         if item["kind"] == "image" and body.speed not in (None, 1.0):
             raise HTTPException(422, "photos cannot change speed")
+        if item["kind"] == "image" and body.captions:
+            raise HTTPException(422, "photos have no speech to caption")
         notes, e = [], spec["clips"].setdefault(str(item_id), {})
         for k in given & CLIP_FIELDS.keys():
             (*parents, leaf), default, lo, hi = CLIP_FIELDS[k]
@@ -417,7 +465,11 @@ def patch_clip(cid: int, item_id: int, body: ClipPatch):
             del spec["clips"][str(item_id)]
         return notes
 
-    return mutate(cid, fn)
+    out = mutate(cid, fn)
+    if body.captions and out["spec"]["captions"]["on"]:
+        import captions
+        captions.start_transcription(cid)
+    return out
 
 
 @router.put("/collections/{cid}/edit/transitions/{item_id}")

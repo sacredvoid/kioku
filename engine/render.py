@@ -635,11 +635,12 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         warnings = list(tl.warnings)
         transcripts = {}
         on = spec["captions"]["on"]
-        if on:
-            uuids = list(dict.fromkeys(s.uuid for s in tl.segs if s.kind == "video"))
+        picked = {s.item_id for s in tl.segs if s.kind == "video" and spec["clips"].get(str(s.item_id), {}).get("captions")}
+        if on and picked:  # only the clips picked for captions are transcribed and drawn
+            uuids = list(dict.fromkeys(s.uuid for s in tl.segs if s.item_id in picked))
             state["stage"] = f"Transcribing {len(uuids)} clips"
             terrors = {}
-            transcripts = captions.ensure_transcripts(uuids, None, terrors)
+            transcripts = captions.ensure_transcripts(uuids, None, terrors, captions.needs_words(spec["captions"]))
             if terrors:
                 warnings.append(f"{len(terrors)} clips could not be transcribed and have no captions")
         if cancel.is_set():
@@ -743,9 +744,9 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
             cap_file, cues, all_cues = None, [], []
             if on:
                 prog.stage("Captions")
-                cues = all_cues = captions.map_cues(tl, transcripts)
+                cues = all_cues = captions.map_cues(tl, transcripts, picked)
                 wsec = (win[0] / fps, win[1] / fps) if win else None
-                cap = captions.build(tl, spec["captions"]["style"], dims, cues, work, wsec)
+                cap = captions.build(tl, spec["captions"], dims, cues, work, wsec)
                 cap_file = cap.list_file
             # 5. join levels, then the finish pass
             if mode == "preview":

@@ -30,7 +30,10 @@ export type Job = { status: "idle" | "running" | "done" | "failed"; started?: nu
   progress?: number; stage?: string; eta_seconds?: number; sheet?: string; srt?: string; edit_hash?: string; stale?: boolean;
   warnings?: string[]; seconds?: number };
 
-export type Captions = { on: boolean; style: string; ready: number; pending: number; no_speech: number;
+export type CapConfig = { on: boolean; style: string; position: string; font: string; size: string; color: string;
+  highlight_color: string; highlight: boolean; uppercase: boolean; max_words: number };
+export type Captions = { on: boolean; style: string; config: CapConfig; language: string; ready: number; pending: number; no_speech: number;
+  clips: { item_id: number; uuid: string; selected: boolean; speech: "speech" | "no speech" | "not transcribed"; lang: string | null }[];
   setup: { whisper: string | null; model: boolean; hint: string } };
 
 export type SettingField = { type?: string; minimum?: number; maximum?: number; enum?: (number | string)[]; description?: string; default?: number };

@@ -279,6 +279,38 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   prevBtn.disabled = rendBtn.disabled = !items.length;
   const renderRow = el("div", "proj-meta render-row");
   renderRow.append(capLabel, el("span", "spacer"), prevBtn, rendBtn);
+  // caption style row: only while captions are on
+  capRows.clear();
+  const capStyle = el("div", "cap-style");
+  capStyle.hidden = true;
+  const capInputs: Record<string, HTMLInputElement | HTMLSelectElement> = {};
+  const capField = (key: string, label: string, input: HTMLInputElement | HTMLSelectElement, send: () => string | number | boolean) => {
+    capInputs[key] = input;
+    input.onchange = () => api(`/collections/${c.id}/edit`, "PATCH", { [`caption_${key}`]: send() }).then(() => syncCaptions()).catch((e) => { fail("change the caption style")(e); syncCaptions(); });
+    const l = el("label", "", label);
+    l.append(input);
+    capStyle.append(l);
+  };
+  const capSel = (key: string, label: string, opts: string[]) => {
+    const sel = document.createElement("select");
+    opts.forEach((o) => sel.append(new Option(o, o)));
+    capField(key, label, sel, () => sel.value);
+  };
+  const capIn = (key: string, label: string, type: "color" | "checkbox" | "number") => {
+    const inp = document.createElement("input");
+    inp.type = type;
+    if (type === "number") { inp.min = "0"; inp.max = "12"; inp.title = "Words per line, 0 fits the frame"; }
+    capField(key, label, inp, () => type === "checkbox" ? inp.checked : type === "number" ? Number(inp.value) : inp.value);
+  };
+  capSel("style", "Style", ["bold", "box", "pop"]);
+  capSel("position", "Position", ["bottom", "middle", "top"]);
+  capSel("font", "Font", ["arial", "impact", "georgia", "verdana", "trebuchet", "rounded", "courier"]);
+  capSel("size", "Size", ["S", "M", "L"]);
+  capIn("color", "Color", "color");
+  capIn("highlight_color", "Highlight", "color");
+  capIn("highlight", "Highlight spoken word", "checkbox");
+  capIn("uppercase", "Uppercase", "checkbox");
+  capIn("max_words", "Words/line", "number");
   const capOut = el("div", "ask-out"), prevOut = el("div", "ask-out"), finOut = el("div", "ask-out");
   const startRender = (kind: "preview" | "final", out: HTMLElement, btn: HTMLButtonElement) => async () => {
     try { await api(`/collections/${c.id}/render`, "POST", { mode: kind }); pollJob(c.id, kind, out, btn); }
@@ -286,12 +318,31 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   };
   prevBtn.onclick = startRender("preview", prevOut, prevBtn);
   rendBtn.onclick = startRender("final", finOut, rendBtn);
-  const syncCaptions = () => api<Captions>(`/collections/${c.id}/captions`).then((s) => { capBox.checked = s.on; }).catch(() => {});
+  let capBusy = false;  // one transcription poll at a time
+  const pollCaps = () => {
+    if (capBusy) return;
+    capBusy = true;
+    pollJob(c.id, "captions", capOut, capBox).finally(() => { capBusy = false; syncCaptions(); });
+  };
+  const syncCaptions = () => api<Captions>(`/collections/${c.id}/captions`).then((s) => {
+    capBox.checked = s.on;
+    capStyle.hidden = !s.on;
+    for (const [k, inp] of Object.entries(capInputs)) {
+      const v = (s.config as unknown as Record<string, unknown>)[k];
+      if (inp instanceof HTMLInputElement && inp.type === "checkbox") inp.checked = !!v; else inp.value = String(v);
+    }
+    for (const x of s.clips) {
+      const r = capRows.get(x.item_id);
+      if (r) { r.box.checked = x.selected; r.note.textContent = x.speech === "speech" ? `speech · ${x.lang ?? "?"}` : x.speech; }
+    }
+    if (s.on && s.pending && !capBusy) api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollCaps(); }).catch(() => {});
+  }).catch(() => {});
+  capSync = syncCaptions;
   capBox.onchange = async () => {
     capBox.disabled = true;
     try {
       await api(`/collections/${c.id}/edit`, "PATCH", { captions: capBox.checked });
-      if (capBox.checked) pollJob(c.id, "captions", capOut, capBox);
+      if (capBox.checked) pollCaps();
       else capOut.replaceChildren();
     } catch (e) { capOut.className = "ask-out failed"; capOut.textContent = errMsg(e); }  // e.g. the whisper install hint
     capBox.disabled = false;
@@ -312,7 +363,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   claude.append(askOut, runs);
 
   const audio = el("section", "audio");
-  project.replaceChildren(brief, ask, claude, meta, expOut, renderRow, audio, capOut, prevOut, finOut, strip);
+  project.replaceChildren(brief, ask, claude, meta, expOut, renderRow, capStyle, audio, capOut, prevOut, finOut, strip);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
@@ -324,9 +375,11 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   loadAudio(c.id, audio, strip);
   for (const [kind, out, btn] of [["preview", prevOut, prevBtn], ["final", finOut, rendBtn]] as const)
     api<Job>(`/collections/${c.id}/render/${kind}`).then((j) => { if (j.status !== "idle") pollJob(c.id, kind, out, btn); }).catch(() => {});
-  api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollJob(c.id, "captions", capOut, capBox); }).catch(() => {});
+  api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollCaps(); }).catch(() => {});
 }
 
+const capRows = new Map<number, { box: HTMLInputElement; note: HTMLElement }>();
+let capSync: () => void = () => {};
 const clipLen = (it: Item) => it.video ? ((it.t1 ?? it.dur) - (it.t0 ?? 0)) : (it.t1 != null ? it.t1 - (it.t0 ?? 0) : 3);
 
 function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
@@ -338,6 +391,23 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
   const info = el("div", "clip-info");
   info.append(el("span", "clip-title", (it.meta || "").split(" ; ").slice(0, 3).join(", ") || (it.video ? "Video" : "Photo")));
   info.append(el("span", "muted", it.video ? `${fmtDur(it.dur)} source` : "Photo · 3s"));
+  if (it.video && it.item_id != null) {  // per-clip captions: only picked clips are transcribed and drawn
+    const pick = el("label", "cap-pick");
+    pick.title = "Caption this clip (needs Captions on above)";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    const note = el("span", "muted");
+    pick.append(box, document.createTextNode(" Caption "), note);
+    box.onchange = async () => {
+      box.disabled = true;
+      try { await api(`/collections/${cid}/edit/clips/${it.item_id}`, "PATCH", { captions: box.checked }); }
+      catch (e) { fail("change this clip's captions")(e); box.checked = !box.checked; }
+      box.disabled = false;
+      capSync();
+    };
+    capRows.set(it.item_id, { box, note });
+    info.append(pick);
+  }
   const range = el("div", "range");
   const mk = (label: string, val: number | null | undefined, key: "t0" | "t1") => {
     const w = el("label", "", label);
