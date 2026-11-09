@@ -133,7 +133,11 @@ def mk(spec, fps=30, size=360, aspect="9:16"):
 
 PLAN = {}
 CAPS = {}
-edit.snapshot = lambda cid: (PLAN[cid], {"captions": {"on": CAPS.get(cid, False), "style": "bold"}})
+class AllPicked(dict):  # every clip is picked for captions
+    get = lambda self, k, d=None: {"captions": True}  # noqa: E731
+
+
+edit.snapshot = lambda cid: (PLAN[cid], {"captions": {"on": CAPS.get(cid, False), "style": "bold"}, "clips": AllPicked()})
 
 
 def seg_for(uuid, **kw):
@@ -254,8 +258,9 @@ for n, col in (("g", (0, 255, 0, 255)), ("m", (255, 0, 255, 255)), ("blank", (0,
 (cd / "cues.txt").write_text("ffconcat version 1.0\n" + "".join(
     f"file {n}.png\noption framerate 30\nduration {d}\n" for n, d in (("blank", .5), ("g", 1.0), ("blank", .3), ("m", 1.0))) + "file blank.png\noption framerate 30\n")  # last duration is ignored
 fake = types.ModuleType("captions")
-fake.ensure_transcripts = lambda uuids, on_progress=None, errors=None: {u: [] for u in uuids}
-fake.map_cues = lambda tl, tr: [types.SimpleNamespace(t0=0.5, t1=1.5, text="a", ), types.SimpleNamespace(t0=1.8, t1=2.8, text="b")]
+fake.ensure_transcripts = lambda uuids, on_progress=None, errors=None, words=False: {u: [] for u in uuids}
+fake.needs_words = lambda cfg: False
+fake.map_cues = lambda tl, tr, only=None: [types.SimpleNamespace(t0=0.5, t1=1.5, text="a", ), types.SimpleNamespace(t0=1.8, t1=2.8, text="b")]
 fake.build = lambda tl, style, dims, cues, workdir, window: types.SimpleNamespace(cues=cues, list_file=cd / "cues.txt")
 fake.write_srt = lambda cues, path, shift=0.0, end=None: Path(path).write_text(f"srt shift {shift}")
 fake.cached = lambda uuid: None

@@ -17,7 +17,7 @@ import edit  # noqa: E402
 import library  # noqa: E402
 
 started = []
-sys.modules["captions"] = types.SimpleNamespace(start_transcription=lambda cid: started.append(cid))
+sys.modules["captions"] = types.SimpleNamespace(start_transcription=lambda cid: started.append(cid), likely_speech=lambda u: u == "V")
 
 db = core.connect()
 for u, kind, dur in [("P", "image", 0), ("V", "video", 12.0), ("S", "poster", 30.0)]:
@@ -93,6 +93,43 @@ c.patch(f"/collections/{cid}/edit", json={"captions": True})
 c.patch(f"/collections/{cid}/edit", json={"captions": False})
 c.patch(f"/collections/{cid}/edit", json={"captions": True})
 assert started == [cid, cid], started
+# turning captions on with nothing picked preselects the clips that likely have speech (not the photo); later flips keep the picks
+sp = c.get(f"/collections/{cid}/edit").json()["spec"]
+assert sp["clips"][str(ids[0])]["captions"] and sp["clips"][str(ids[1])]["captions"] and str(ids[2]) not in sp["clips"], sp
+c.patch(f"/collections/{cid}/edit", json={"caption_clips": [ids[0]]})
+assert started == [cid] * 3, "picking clips starts the transcription"
+c.patch(f"/collections/{cid}/edit", json={"captions": False})
+c.patch(f"/collections/{cid}/edit", json={"captions": True})
+sp = c.get(f"/collections/{cid}/edit").json()["spec"]
+assert sp["clips"][str(ids[0])]["captions"] and "captions" not in sp["clips"].get(str(ids[1]), {}), "an existing pick is not overridden"
+assert started == [cid] * 4
+c.patch(f"/collections/{cid}/edit", json={"caption_clips": []})
+sp = c.get(f"/collections/{cid}/edit").json()["spec"]
+assert not any("captions" in e for e in sp["clips"].values()), sp
+assert c.patch(f"/collections/{cid}/edit/clips/{ids[1]}", json={"captions": True}).status_code == 200
+assert started == [cid] * 6 and edit.load(cid)[0]["clips"][str(ids[1])]["captions"] is True
+c.patch(f"/collections/{cid}/edit/clips/{ids[1]}", json={"captions": False})
+assert str(ids[1]) not in edit.load(cid)[0]["clips"], "false is the default and is not stored"
+assert c.patch(f"/collections/{cid}/edit/clips/{ids[2]}", json={"captions": True}).status_code == 422  # photo
+for bad in ({"caption_clips": [ids[2]]}, {"caption_clips": [99999]}, {"caption_style": "neon"}, {"caption_position": "left"},
+            {"caption_font": "comic"}, {"caption_size": "XL"}, {"caption_color": "red"}, {"caption_highlight_color": "#FFF"},
+            {"caption_max_words": 13}, {"caption_max_words": -1}):
+    assert c.patch(f"/collections/{cid}/edit", json=bad).status_code == 422, bad
+n_started = len(started)
+good = {"caption_style": "pop", "caption_position": "middle", "caption_font": "impact", "caption_size": "L", "caption_color": "#00ff00",
+        "caption_highlight_color": "#FF0000", "caption_highlight": True, "caption_uppercase": True, "caption_max_words": 2}
+assert c.patch(f"/collections/{cid}/edit", json=good).status_code == 200
+cp = edit.load(cid)[0]["captions"]
+assert cp == {"on": True, "style": "pop", "position": "middle", "font": "impact", "size": "L", "color": "#00ff00",
+              "highlight_color": "#FF0000", "highlight": True, "uppercase": True, "max_words": 2}, cp
+assert len(started) == n_started + 1, "pop / highlight need word times: transcription is asked again"
+assert set(c.get(f"/collections/{cid}/edit").json()["options"]["caption_fonts"]) == set(edit.CAPTION_FONTS)
+# a spec saved before the style options reads back with the defaults filled in
+with edit.conn() as d:
+    d.execute("update edit_specs set spec = ? where collection_id = ?", ('{"version":1,"format":{"aspect":"16:9","size":1080,"fps":30},"look":{"name":null,"strength":1.0},"clips":{},"transitions":{},"captions":{"on":true,"style":"box"}}', cid))
+    d.commit()
+assert edit.load(cid)[0]["captions"] == {**edit.CAPTIONS_DEFAULT, "on": True, "style": "box"}
+assert edit.snapshot(cid)[1]["captions"]["position"] == "bottom"
 
 # orphans are pruned when an item is removed; deleting the collection deletes the spec
 c.put(f"/collections/{cid}/edit/transitions/{ids[1]}", json={"type": "dissolve"})

@@ -193,16 +193,30 @@ def get_edit(collection_id: int) -> dict:
 
 @server.tool()
 def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, look: str = "", look_strength: float = -1,
-             captions: bool | None = None, caption_style: str = "") -> dict:
+             captions: bool | None = None, caption_style: str = "", caption_clips: list[int] | None = None,
+             caption_position: str = "", caption_font: str = "", caption_size: str = "", caption_color: str = "",
+             caption_highlight_color: str = "", caption_highlight: bool | None = None, caption_uppercase: bool | None = None,
+             caption_max_words: int = -1) -> dict:
     """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
     stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop). size: short side 720, 1080 or 2160.
     fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
     unless the user wants it strong. captions=true burns the spoken words in and writes an .srt next to the video: it
-    transcribes each clip's audio once (needs whisper.cpp; the error says how to install it); silent clips and music
-    get no captions. caption_style: bold or box. Turning captions on starts the transcription and returns at once;
-    check get_edit captions_status.pending before rendering."""
+    transcribes each picked clip's audio once (needs whisper.cpp; the error says how to install it); silent clips and
+    music get no captions. Captions are per clip: caption_clips is the list of item_ids to caption (exactly those; [] picks
+    none). Turning captions on with nothing picked preselects clips that likely have speech. get_edit captions_status.clips
+    shows each clip's speech: "speech", "no speech" or "not transcribed", plus its language: pick only "speech" clips.
+    Style: caption_style bold, box or pop (1 to 3 words at a time, reel style); caption_position bottom, middle or top;
+    caption_font arial, impact, georgia, verdana, trebuchet, rounded or courier; caption_size S, M or L; caption_color and
+    caption_highlight_color as #RRGGBB; caption_highlight=true colours the word being spoken (needs word timing, which
+    is transcribed on demand); caption_uppercase; caption_max_words per line (0 = fit the frame).
+    Turning captions on or picking clips starts the transcription and returns at once; check get_edit
+    captions_status.pending before rendering."""
     body = drop_unset(aspect=aspect or None, size=size or None, fps=fps or None, look_strength=None if look_strength < 0 else look_strength,
-                      captions=captions, caption_style=caption_style or None)
+                      captions=captions, caption_style=caption_style or None, caption_clips=caption_clips,
+                      caption_position=caption_position or None, caption_font=caption_font or None, caption_size=caption_size or None,
+                      caption_color=caption_color or None, caption_highlight_color=caption_highlight_color or None,
+                      caption_highlight=caption_highlight, caption_uppercase=caption_uppercase,
+                      caption_max_words=None if caption_max_words < 0 else caption_max_words)
     if look:
         body["look"] = None if look.lower() == "none" else look
     if not body:
