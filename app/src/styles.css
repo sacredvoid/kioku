@@ -389,6 +389,14 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
   text-align: left; color: var(--text-2); font-size: 13px }
 .runs-bar:hover { background: var(--accent-soft) }
 .runs-bar .ico-spark { width: 13px; height: 13px; color: var(--accent) }
+.runs-top { display: flex; align-items: center; gap: 6px; padding-right: 8px }
+.runs-top .runs-bar { flex: 1; min-width: 0 }
+.run-state { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text-2) }
+.run-state .ico { width: 14px; height: 14px }
+.run-state.done { color: var(--ok) }
+.run-state.failed { color: var(--danger) }
+.runs-bar.fresh { animation: ok 1.8s var(--ease) }
+.runs-bar.fresh-bad { animation: bad 1.8s var(--ease) }
 .runs-bar .meta { flex: none; color: var(--text-3); white-space: nowrap }
 .runs-bar .gist { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text) }
 .runs-bar .n { flex: none; font-size: 12px; color: var(--text-3); background: var(--surface-2); padding: 1px 8px; border-radius: 999px }

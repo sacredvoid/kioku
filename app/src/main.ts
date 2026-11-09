@@ -622,8 +622,10 @@ function renderProgress(out: HTMLElement, j: Job, cid: number, kind: PollKind) {
   if (j.note && !out.querySelector("p.note")) out.append(el("p", "note", j.note));
 }
 
-async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean }) {
+async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean; textContent?: string | null }) {
   btn.disabled = true;
+  const label = kind === "ask" ? btn.textContent : null;  // Ask Claude reads "Working…" while the edit runs
+  if (label) btn.textContent = "Working…";
   out.className = "ask-out running";
   const row = el("div", "prog-row");
   row.append(ldFor(out, MOTIF[kind], kind === "ask" ? 22 : 30).el,
@@ -648,6 +650,7 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
       continue;
     }
     btn.disabled = false;
+    if (label) btn.textContent = label;
     stepsSeen.delete(cid);
     out.className = `ask-out ${j.status === "idle" ? "failed" : j.status}`;
     // idle while we were watching a running job = the engine restarted and the job died with it
@@ -777,9 +780,30 @@ function renderRuns(cid: number, box: HTMLElement, runs: Run[]) {
   bar.type = "button";
   bar.setAttribute("aria-expanded", String(open));
   bar.setAttribute("aria-controls", `runs-${cid}`);
-  bar.append(icon("spark"), el("span", "meta", [last.model, when(last.started)].filter(Boolean).join(" · ")),
-    el("span", "gist", last.status === "failed" ? `Failed: ${gist(last.error || "no reason given")}` : gist(last.output || "Done")),
+  // the latest run's outcome, unmistakable: Done (with how long it took) or Failed (with the cause and Retry)
+  const ok = last.status === "done", bad = last.status === "failed";
+  const state = el("span", `run-state ${last.status}`);
+  state.append(icon(ok ? "check" : bad ? "close" : "spark"), el("strong", "", ok ? "Done" : bad ? "Failed" : last.status));
+  const took = last.started && last.finished ? `took ${fmtDur(last.finished - last.started)}` : "";
+  bar.append(state, el("span", "meta", [took, last.model, when(last.started)].filter(Boolean).join(" · ")),
+    el("span", "gist", bad ? gist(last.error || "no reason given") : gist(last.output || "Done")),
     el("span", "n", `${runs.length} run${runs.length === 1 ? "" : "s"}`), icon("chev"));
+  if (last.finished && Date.now() / 1000 - last.finished < 20) bar.classList.add(bad ? "fresh-bad" : "fresh"); // just finished: one pulse
+  const top = el("div", "runs-top");
+  top.append(bar);
+  if (bad && last.prompt) {
+    const retry = el("button", "ghost", "Retry") as HTMLButtonElement;
+    retry.type = "button";
+    retry.title = `Run “${last.prompt}” again`;
+    retry.onclick = async () => {
+      const out = document.getElementById("ask-out"), btn = project.querySelector<HTMLButtonElement>("form.ask button");
+      if (!out || !btn) return;
+      retry.disabled = true;
+      try { await api(`/collections/${cid}/ask`, "POST", { prompt: last.prompt }); pollJob(cid, "ask", out, btn); }
+      catch (e) { retry.disabled = false; fail("start the edit again")(e); }
+    };
+    top.append(retry);
+  }
   const list = el("ol", "runs-list");
   list.id = `runs-${cid}`;
   list.hidden = !open;
@@ -792,7 +816,7 @@ function renderRuns(cid: number, box: HTMLElement, runs: Run[]) {
     box.classList.toggle("open", open);
     bar.setAttribute("aria-expanded", String(open));
   };
-  box.replaceChildren(bar, list);
+  box.replaceChildren(top, list);
 }
 
 function runItem(r: Run): HTMLElement {
