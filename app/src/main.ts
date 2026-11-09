@@ -5,6 +5,7 @@ import { Viewer } from "./viewer";
 import * as review from "./review";
 import { timeline } from "./timeline";
 import { initArt } from "./art";
+import { harmo, Loader, type Motif } from "./loaders";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -40,16 +41,24 @@ const summary = $("summary"), empty = $("empty"), head = $("head"), project = $(
 const grid = new Grid($("grid"), (i) => viewer.start(grid.items, i), () => updateSelbar());
 const viewer = new Viewer((text) => { q.value = text; go({ type: "lib", kind: "" }, text); }, () => {}, (m) => toast(m, true));
 
-// ---------- toast: info fades fast; errors stay longer, read out right away, click to dismiss
+// ---------- toast: info fades fast; errors stay longer, read out right away, click to dismiss.
+// An action ("Show in Finder") keeps it up longer; the same thing stays reachable in the activity center afterwards.
+type Action = { label: string; run: () => void };
 let toastT = 0;
-function toast(msg: string, error = false) {
+function toast(msg: string, error = false, action?: Action) {
   const t = $("toast");
   t.textContent = msg;
+  if (action) {
+    const b = el("button", "link", action.label) as HTMLButtonElement;
+    b.type = "button";
+    b.onclick = action.run;
+    t.append(" ", b);
+  }
   t.classList.toggle("error", error);
   t.setAttribute("role", error ? "alert" : "status");
   t.hidden = false;
   clearTimeout(toastT);
-  toastT = window.setTimeout(() => (t.hidden = true), error ? 8000 : 2600);
+  toastT = window.setTimeout(() => (t.hidden = true), error || action ? 8000 : 2600);
 }
 $("toast").onclick = () => ($("toast").hidden = true);
 /** Error toast with what was being attempted: "Couldn't save the trim: out point must be after in point". */
@@ -187,7 +196,9 @@ async function go(v: View, search = q.value.trim()) {
       grid.set(t.uuid.map((uuid, i) => ({ uuid, video: t.video[i], dur: t.dur[i], created: t.created[i] })), { months: true, badges: false });
       head.append(el("h1", "", { "": "Library", image: "Photos", video: "Videos" }[v.kind] ?? "Library"));
       summary.textContent = `${grid.items.length.toLocaleString()} items`;
-      if (!grid.items.length) showEmpty("Nothing indexed yet. Run the indexer, then reopen Kioku.");
+      // first index: the one other blocking wait, so it gets the big loader too
+      if (!grid.items.length) indexRow ? showEmpty("Indexing your library. Photos show up here as they're indexed; progress is under Activity, top right.", "index")
+                                       : showEmpty("Nothing indexed yet. Run the indexer, then reopen Kioku.");
     } else if (v.type === "col") {
       const c = await api<Collection & { brief: string; items: any[] }>(`/collections/${v.id}`);
       if (my !== seq) return;
@@ -205,7 +216,10 @@ async function go(v: View, search = q.value.trim()) {
   updateSelbar();
 }
 
-function showEmpty(msg: string) { empty.textContent = msg; empty.hidden = false; }
+function showEmpty(msg: string, motif?: Motif) {
+  empty.replaceChildren(...(motif ? [new Loader(motif, 120).el] : []), el("p", "", msg));
+  empty.hidden = false;
+}
 function showError(e: unknown) {
   console.error(e);
   grid.set([], { months: false, badges: false });
@@ -495,17 +509,27 @@ async function loadAudio(cid: number, box: HTMLElement) {
 
 type PollKind = "ask" | "export" | "preview" | "final" | "captions";
 const KIND_WORD: Record<PollKind, string> = { ask: "edit", export: "export", preview: "preview", final: "render", captions: "transcription" };
+const MOTIF: Record<PollKind, Motif> = { ask: "think", export: "download", preview: "render", final: "render", captions: "index" };
 const pollUrl = (cid: number, kind: PollKind) =>
   kind === "preview" || kind === "final" ? `/collections/${cid}/render/${kind}` : kind === "captions" ? `/collections/${cid}/captions/job` : `/collections/${cid}/${kind}`;
+/** The in-panel loader of a job's output box, kept across re-renders so it doesn't restart. */
+const inlineLd = new WeakMap<HTMLElement, Loader>();
+const ldFor = (out: HTMLElement, motif: Motif, size: number) => {
+  let l = inlineLd.get(out);
+  if (!l || l.motif !== motif) inlineLd.set(out, (l = new Loader(motif, size)));
+  return l;
+};
 
 /** Running render or transcription: stage text, a progress bar and (for renders) Cancel. Updated in place so Cancel stays clickable. */
 function renderProgress(out: HTMLElement, j: Job, cid: number, kind: PollKind) {
   let bar = out.querySelector("progress");
+  const ld = ldFor(out, MOTIF[kind], 30);
+  ld.progress = j.progress ?? null;
   if (!bar) {
     bar = document.createElement("progress");
     bar.max = 1;
     const row = el("div", "prog-row");
-    row.append(el("span", "prog-text"), bar);
+    row.append(ld.el, el("span", "prog-text"), bar);
     if (kind !== "captions") {
       const cancel = el("button", "ghost", "Cancel") as HTMLButtonElement;
       cancel.type = "button";
@@ -524,7 +548,10 @@ function renderProgress(out: HTMLElement, j: Job, cid: number, kind: PollKind) {
 async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean }) {
   btn.disabled = true;
   out.className = "ask-out running";
-  out.textContent = kind === "ask" ? "Claude is searching your library and editing…" : kind === "export" ? "Exporting: downloading originals from iCloud if needed…" : "Starting…";
+  const row = el("div", "prog-row");
+  row.append(ldFor(out, MOTIF[kind], kind === "ask" ? 22 : 30).el,
+    el("span", "", kind === "ask" ? "Claude is searching your library and editing…" : kind === "export" ? "Exporting: downloading originals from iCloud if needed…" : "Starting…"));
+  out.replaceChildren(row);
   let misses = 0;
   for (;;) {
     let j: Job;
@@ -727,7 +754,7 @@ const stepsSeen = new Map<number, number>(); // per project: steps already shown
 function renderSteps(out: HTMLElement, j: Job, cid: number) {
   const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
   const head = el("div", "steps-head");
-  head.append(el("span", "pulse-dot"), el("span", "", `Claude is editing${j.model ? ` · ${j.model}` : ""}`), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
+  head.append(ldFor(out, "think", 22).el, el("span", "", `Claude is editing${j.model ? ` · ${j.model}` : ""}`), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
   const list = el("ol", "steps");
   const steps = j.steps ?? [];
   const seen = stepsSeen.get(cid) ?? 0;
@@ -854,47 +881,151 @@ async function syncCollections() {
 setInterval(() => { if (ready && !document.hidden) syncCollections(); }, 5000);
 window.addEventListener("focus", () => ready && syncCollections());
 
-// ---------- media activity: videos being fetched from iCloud / analyzed
-type Activity = { active: { uuid: string; label: string; stage: string; seconds: number; stage_seconds: number }[]; ok: number; failed: number };
+// ---------- activity center: every background job in one place (notes/status-design.md).
+// A mini loader in the top bar while anything runs; it opens a list of each job with progress, Cancel / Open, and what
+// finished recently. A job you aren't looking at also gets a toast when it ends, with the one action you'd want next.
+type Activity = { active: { uuid: string; label: string; stage: string; seconds: number; stage_seconds: number }[] };
+type Row = { key: string; motif: Motif; title: string; detail: string; progress: number | null; cid?: number; kind?: PollKind; name?: string };
+type Done = { title: string; detail: string; ok: boolean; action?: Action };
 const STAGES = ["downloading from iCloud", "making a playable copy", "finding scenes", "understanding scenes"];
-let actBase: { ok: number; failed: number } | null = null;
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+const actBtn = $<HTMLButtonElement>("act-btn"), actPop = $("act-pop");
+let jobRows: Row[] = [], indexRow: Row | null = null, miniLd: Loader | null = null;
+const recent: Done[] = [];
+const actRows = new Map<string, { li: HTMLElement; ld: Loader; detail: HTMLElement; bar: HTMLProgressElement }>();
+const linkBtn = (label: string, onclick: (b: HTMLButtonElement) => void) => {
+  const b = el("button", "link", label) as HTMLButtonElement;
+  b.type = "button";
+  b.onclick = () => onclick(b);
+  return b;
+};
+
 async function pollActivity() {
-  const box = $("activity");
-  try {
-    const a = await api<Activity>("/media/activity");
-    if (!a.active.length) { box.hidden = true; actBase = null; return; }
-    actBase ??= { ok: a.ok, failed: a.failed };
-    const done = a.ok - actBase.ok, failed = a.failed - actBase.failed;
-    const head = el("div", "act-head");
-    head.append(el("span", "pulse-dot"), el("span", "", `Fetching ${a.active.length} video${a.active.length > 1 ? "s" : ""}`),
-      el("span", "spacer"), el("span", "muted", `${done} done${failed ? ` · ${failed} skipped` : ""}`));
-    const rows = a.active.slice(0, 4).map((x) => {
-      const r = el("div", "act-row");
-      const k = Math.max(0, STAGES.indexOf(x.stage));
-      const bar = el("div", "act-bar");
-      const fill = el("span", x.stage === STAGES[0] ? "indet" : "");
-      fill.style.width = `${((k + 1) / STAGES.length) * 100}%`;
-      bar.append(fill);
-      r.append(el("div", "act-label", x.label), bar, el("div", "act-stage", `${x.stage} · ${x.stage_seconds}s`));
-      return r;
-    });
-    box.replaceChildren(head, ...rows);
-    if (a.active.length > 4) box.append(el("p", "muted", `+${a.active.length - 4} more`));
-    box.hidden = false;
-  } catch { box.hidden = true; }
+  let a: Activity;
+  try { a = await api<Activity>("/media/activity"); } catch { return; } // the heartbeat reports the engine being down
+  // project jobs (the engine lists them as job:<project>:<kind>); their own endpoint has the stage, percent and eta
+  const jobs = a.active.flatMap((x) => {
+    const m = /^job:(\d+):(\w+)$/.exec(x.uuid);
+    return m && m[2] in KIND_WORD ? [{ x, cid: Number(m[1]), kind: m[2] as PollKind }] : [];
+  });
+  const rows = await Promise.all(jobs.map(async ({ x, cid, kind }): Promise<Row> => {
+    const j = await api<Job>(pollUrl(cid, kind)).catch(() => null);
+    const pct = j?.progress != null ? ` · ${Math.round(j.progress * 100)}%` : "", eta = j?.eta_seconds ? ` · about ${fmtDur(j.eta_seconds)} left` : "";
+    return { key: x.uuid, motif: MOTIF[kind], title: `${cap(KIND_WORD[kind])} · ${x.label}`, cid, kind, name: x.label,
+      detail: kind === "ask" ? j?.steps?.slice(-1)[0] ?? "Reading the brief" : kind === "export" ? "Copying originals, downloading from iCloud if needed" : `${j?.stage || "Starting"}${pct}${eta}`,
+      progress: kind === "ask" || kind === "export" ? null : j?.progress ?? null };
+  }));
+  // single videos fetched or analyzed on their own (viewer, Claude looking at clips). A render's slot is its job row;
+  // a captions job's per-clip slots are too.
+  const capJob = rows.some((r) => r.kind === "captions");
+  for (const x of a.active) {
+    if (x.uuid.startsWith("job:") || x.uuid.startsWith("render:") || (capJob && x.uuid.startsWith("captions:"))) continue;
+    const k = STAGES.indexOf(x.stage), caps = x.uuid.startsWith("captions:");
+    rows.push({ key: x.uuid, motif: caps || k > 0 ? "index" : "download", title: caps ? x.label.replace(/^Captions: /, "Captions · ") : `Video · ${x.label}`,
+      detail: `${cap(x.stage)} · ${x.stage_seconds}s`, progress: caps || k <= 0 ? null : (k + 1) / STAGES.length });
+  }
+  for (const r of jobRows) if (r.cid != null && !rows.some((n) => n.key === r.key)) jobFinished(r);
+  jobRows = rows;
+  drawActivity();
 }
 setInterval(() => { if (ready && !document.hidden) pollActivity(); }, 1500);
+
+async function jobFinished(r: Row) {
+  const cid = r.cid!, kind = r.kind!;
+  const j = await api<Job>(pollUrl(cid, kind)).catch(() => null);
+  if (!j || j.status === "running") return; // started again already
+  const ok = j.status === "done", what = cap(KIND_WORD[kind]);
+  const reveal = kind === "final" ? `/collections/${cid}/render/final/reveal` : kind === "export" ? `/collections/${cid}/reveal` : "";
+  const action: Action = ok && reveal ? { label: "Show in Finder", run: () => api(reveal, "POST").catch(fail("open Finder")) }
+                                      : { label: "Open", run: () => go({ type: "col", id: cid }) };
+  const why = j.status === "idle" ? "it stopped because the engine restarted" : j.error || "no reason given";
+  recent.unshift({ title: `${what} · ${r.name}`, detail: ok ? (kind === "final" && j.seconds ? `Done, ${fmtDur(j.seconds)} of video` : "Done") : `Failed: ${why}`, ok, action });
+  recent.splice(6);
+  // the project view already shows the result in place; only a job you aren't looking at gets a toast
+  if (!(view.type === "col" && view.id === cid && !document.hidden)) toast(ok ? `${what} of ${r.name} is done` : `${what} of ${r.name} failed: ${why}`, !ok, action);
+  drawRecent();
+  drawActivity();
+}
+
+function drawActivity() {
+  const rows = indexRow ? [indexRow, ...jobRows] : jobRows, lead = rows[0];
+  actBtn.hidden = !rows.length && !recent.length;
+  if (actBtn.hidden) closeAct();
+  // mini: the first job's motif and progress; a quiet tick (or a red one after a failure) once everything is done
+  if (lead) {
+    if (miniLd?.motif !== lead.motif) $("act-ld").replaceChildren((miniLd = new Loader(lead.motif, 18)).el);
+    miniLd.progress = lead.progress;
+  } else if (miniLd || !$("act-ld").firstChild) { miniLd = null; $("act-ld").replaceChildren(icon("check")); }
+  actBtn.classList.toggle("failed", !lead && recent.some((d) => !d.ok));
+  $("act-n").textContent = rows.length > 1 ? String(rows.length) : "";
+  actBtn.title = lead ? `${rows.length} running: ${lead.title}, ${lead.detail}` : recent.some((d) => !d.ok) ? "Activity: something failed" : "Activity: all done";
+  actBtn.setAttribute("aria-label", `Activity. ${actBtn.title}`);
+
+  // rows update in place, so a focused Cancel or Open survives the 1.5 s refresh
+  const list = $("act-list");
+  for (const [key, x] of actRows) if (!rows.some((r) => r.key === key)) { x.li.remove(); actRows.delete(key); }
+  rows.forEach((r, i) => {
+    let x = actRows.get(r.key);
+    if (!x) {
+      const li = el("li", "act-item"), ld = new Loader(r.motif, 28), detail = el("span", "act-detail"), bar = document.createElement("progress");
+      bar.max = 1;
+      const text = el("div", "act-text");
+      text.append(el("strong", "", r.title), detail, bar);
+      li.append(ld.el, text);
+      if (r.cid != null) {
+        const acts = el("div", "act-acts");
+        if (r.kind === "preview" || r.kind === "final")
+          acts.append(linkBtn("Cancel", (b) => { b.disabled = true; api(`/collections/${r.cid}/render/${r.kind}/cancel`, "POST").catch(fail("cancel")); }));
+        acts.append(linkBtn("Open", () => { closeAct(); go({ type: "col", id: r.cid! }); }));
+        li.append(acts);
+      }
+      actRows.set(r.key, (x = { li, ld, detail, bar }));
+      $("act-live").textContent = `Started: ${r.title}`;
+    }
+    x.ld.progress = r.progress;
+    x.detail.textContent = r.detail;
+    x.bar.hidden = r.progress == null;
+    if (r.progress != null) x.bar.value = r.progress;
+    if (list.children[i] !== x.li) list.insertBefore(x.li, list.children[i] ?? null);
+  });
+  $("act-none").hidden = rows.length > 0;
+}
+
+function drawRecent() {
+  $("act-recent").replaceChildren(...recent.map((d) => {
+    const li = el("li", `act-item done${d.ok ? "" : " failed"}`), text = el("div", "act-text");
+    text.append(el("strong", "", d.title), el("span", "act-detail", d.detail));
+    li.append(icon(d.ok ? "check" : "close"), text);
+    if (d.action) li.append(linkBtn(d.action.label, () => { closeAct(); d.action!.run(); }));
+    return li;
+  }));
+  $("act-recent-h").hidden = $("act-clear").hidden = !recent.length;
+}
+
+// the popover: button toggles it, Escape or a click elsewhere closes it, focus goes in on open and back on Escape
+function closeAct(refocus = false) {
+  if (actPop.hidden) return;
+  actPop.hidden = true;
+  actBtn.setAttribute("aria-expanded", "false");
+  if (refocus) actBtn.focus();
+}
+actBtn.onclick = () => {
+  if (!actPop.hidden) return closeAct();
+  actPop.hidden = false;
+  actBtn.setAttribute("aria-expanded", "true");
+  actPop.focus();
+};
+for (const t of [actPop, actBtn]) t.addEventListener("keydown", (e) => { if (e.key === "Escape" && !actPop.hidden) { e.stopPropagation(); closeAct(true); } });
+document.addEventListener("pointerdown", (e) => { if (!actPop.contains(e.target as Node) && !actBtn.contains(e.target as Node)) closeAct(); });
+$("act-clear").onclick = () => { recent.length = 0; drawRecent(); drawActivity(); actPop.focus(); };
 
 // ---------- engine status
 const dot = $("engine");
 let ready = false;
 
-// first-boot loader: a damped two-pendulum harmonograph that traces itself in, shown only until the first /health.
-// Each axis mixes a 2 and a 5 swing a hair out of tune, so the petals precess while the decay pulls them inward.
+// first-boot loader: the damped harmonograph (loaders.ts, the "think" motif) tracing itself in flat, until the first /health
 $("boot-line").setAttribute("d", Array.from({ length: 2001 }, (_, i) => {
-  const t = i * 0.05, a = 20 * Math.exp(-0.012 * t), q = Math.PI / 2;
-  const x = a * (Math.sin(2 * t) + Math.sin(5.01 * t + q));
-  const y = a * (Math.sin(2.003 * t + q) + Math.sin(5 * t));
+  const [x, y] = harmo(i * 0.05);
   return `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
 }).join(""));
 function bootDone() {
@@ -904,13 +1035,25 @@ function bootDone() {
   // let the fade finish before the view settles in where the loader was
   setTimeout(() => { boot.hidden = true; go(view); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 450);
 }
+let hbT = 0;
 async function heartbeat() {
   try {
-    const h = await api<{ assets: number; reindex: string }>("/health");
+    const h = await api<{ assets: number; reindex: string; progress?: { done: number; total: number | null } }>("/health");
     dot.className = "engine ok";
-    const failed = h.reindex.startsWith("failed");
-    $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${h.reindex === "running" ? " · indexing" : failed ? " · indexing failed" : ""}`;
+    const failed = h.reindex.startsWith("failed"), p = h.progress, was = indexRow;
+    $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${failed ? " · indexing failed" : ""}`;
     dot.title = failed ? h.reindex : "Search index details";
+    // indexing is a background job like any other: it lives in the activity center
+    indexRow = h.reindex !== "running" ? null : { key: "index", motif: "index", title: "Indexing new photos",
+      detail: p?.total ? `${p.done.toLocaleString()} of ${p.total.toLocaleString()} · ${Math.round((p.done / p.total) * 100)}%` : "Looking for new photos in your library",
+      progress: p?.total ? Math.min(1, p.done / p.total) : null };
+    if (was && !indexRow) {
+      recent.unshift({ title: "Indexing", detail: failed ? `Failed: ${h.reindex.slice(8)}` : "Done. New photos are searchable.", ok: !failed, action: { label: "Details", run: () => dot.click() } });
+      recent.splice(6);
+      drawRecent();
+      if (!$<HTMLDialogElement>("index-dlg").open) toast(failed ? `Indexing failed: ${h.reindex.slice(8)}` : "Indexing finished. New photos are searchable.", failed, recent[0].action);
+    }
+    drawActivity();
     if (!ready) { ready = true; syncCollections(); bootDone(); }
     $<HTMLButtonElement>("settings-btn").disabled = false;
   } catch {
@@ -918,7 +1061,8 @@ async function heartbeat() {
     $("engine-text").textContent = ready ? "Engine offline, retrying" : "Starting engine";
     if (ready) { ready = false; console.warn("engine went offline"); }
   }
-  setTimeout(heartbeat, ready ? 15000 : 1000);
+  clearTimeout(hbT); // two overlapping beats must not leave two chains
+  hbT = window.setTimeout(heartbeat,!ready ? 1000 : indexRow ? 2000 : 15000);
 }
 heartbeat();
 
@@ -964,6 +1108,7 @@ $("index-new").onclick = async () => {
   try {
     await api("/reindex?newer=true", "POST");
     showIndex();
+    heartbeat(); // shows up under Activity now, not at the next 15 s beat
   } catch (e) {
     const m = $("index-msg"); m.className = "set-msg error";
     m.textContent = e instanceof ApiError && e.status === 409 ? "Already fetching." : `Couldn't start: ${errMsg(e)}`;
@@ -1111,7 +1256,7 @@ async function renderBoard() {
     const steps = el("ol", "steps");
     (j.steps ?? []).slice(-3).forEach((t) => steps.append(el("li", "", t)));
     const lead = el("div", "steps-head");
-    lead.append(el("span", "pulse-dot"), el("span", "", `Claude is editing ${c.name}`), el("span", "spacer"), link);
+    lead.append(ldFor(live, "think", 22).el, el("span", "", `Claude is editing ${c.name}`), el("span", "spacer"), link);
     ko.append(lead, steps);
     live.replaceChildren(ko);
     boardT = window.setTimeout(() => view.type === "ask" && renderBoard(), 3000);

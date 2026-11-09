@@ -5,6 +5,7 @@
   curl "127.0.0.1:8765/recent?limit=50"
   curl -X POST "127.0.0.1:8765/reindex?since=2026-11-01"
 """
+import json
 import logging
 import logging.handlers
 import re
@@ -170,7 +171,23 @@ async def unhandled(request: Request, exc: Exception):
 @app.get("/health")
 def health():
     idx = fresh_index()
-    return {"assets": len(idx.assets) if idx else 0, "reindex": state["reindex"]}
+    out = {"assets": len(idx.assets) if idx else 0, "reindex": state["reindex"]}
+    if state["reindex"] == "running":
+        out["progress"] = index_progress()
+    return out
+
+
+def index_progress():
+    """This run's items done / total, from the progress.json index.py writes (status.py reads it the same way).
+    total is None until index.py has listed what's new."""
+    try:
+        run = json.loads((core.DATA / "progress.json").read_text())
+    except (OSError, ValueError):
+        return {"done": 0, "total": None}
+    if run.get("started", 0) < (state["last_run"] or {}).get("started", 0):
+        return {"done": 0, "total": None}  # the previous run's file: this run hasn't listed its items yet
+    done = one("select count(*) from assets where indexed_at >= ?", (run["started"],))[0][0]
+    return {"done": done, "total": run.get("total")}
 
 
 @app.get("/index/info")

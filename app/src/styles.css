@@ -454,18 +454,50 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
 .steps li.new { animation: rise .45s var(--ease) both }
 .note { margin: 0; font-style: italic; font-size: 13.5px; line-height: 1.5; color: var(--text-2) }
 
-/* media activity panel: floats bottom left */
-.activity { position: fixed; left: 16px; bottom: 16px; z-index: 8; width: 280px; padding: 11px; border-radius: var(--r); background: var(--surface-solid); border: 1px solid var(--line-soft); box-shadow: var(--shadow);
-  display: flex; flex-direction: column; gap: 9px; animation: rise .35s var(--ease) }
-.act-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 12.5px }
-.act-head .muted { font-size: 11.5px; font-weight: 400 }
-.act-row { display: flex; flex-direction: column; gap: 4px }
-.act-label { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.act-bar { height: 5px; border-radius: 5px; background: var(--surface-2); overflow: hidden; position: relative }
-.act-bar span { display: block; height: 100%; border-radius: 5px; background: var(--accent); transition: width .6s var(--ease) }
-.act-bar span.indet { width: 40% !important; animation: indet 1.5s var(--ease) infinite }
-@keyframes indet { from { transform: translateX(-100%) } to { transform: translateX(250%) } }
-.act-stage { font-size: 11.5px; color: var(--text-3) }
+/* status loaders (loaders.ts): projected wireframes, far edges faint, near ones ink, finished work in the accent.
+   They fade in after 350 ms, so work that ends sooner never flashes a loader. */
+.ld { flex: none; overflow: visible; fill: none; stroke-linecap: round; stroke-linejoin: round; animation: fade .3s var(--ease) .35s both }
+.ld path { vector-effect: non-scaling-stroke; stroke-width: 1 }
+.ld .far { stroke: var(--text-3); opacity: .32 }
+.ld .near { stroke: var(--text-2); opacity: .75 }
+.ld .hot { stroke: var(--accent) }
+.ld-index path { stroke-width: 2.6 }         /* points, not lines */
+.ld-index.mini path { stroke-width: 2.3 }
+.ld-think .hot { stroke-width: 1.5 }
+.empty .ld { display: block; margin: 0 auto 22px }
+.empty p { margin: 0 }
+
+/* activity center: mini indicator in the top bar, popover under it */
+.k-tools { position: relative }
+.act-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums; cursor: pointer; animation: fade .3s var(--ease); transition: background-color .2s var(--ease), border-color .2s var(--ease) }
+.act-btn:hover, .act-btn[aria-expanded="true"] { background: var(--surface-2); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) }
+.act-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.act-ld { display: grid; place-items: center; width: 18px; height: 18px }
+.act-ld .ico { width: 13px; height: 13px; color: var(--ok) }
+.act-btn.failed .act-ld .ico { color: var(--danger) }
+.act-n:empty { display: none }
+.act-pop { position: absolute; top: calc(100% + 14px); right: 0; z-index: 20; width: min(360px, calc(100vw - 24px)); max-height: min(70vh, 560px); overflow-y: auto;
+  padding: 14px; border-radius: var(--r-lg); background: var(--surface-solid); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  transform-origin: top right; animation: pop .22s var(--ease) }
+.act-pop:focus { outline: 0 }
+.act-pop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.act-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px }
+.act-top h2 { margin: 0; font: 600 14px var(--display); letter-spacing: -.01em }
+.act-pop .hint { margin: 2px 0 4px; font-size: 12.5px; color: var(--text-3) }
+.act-pop .k-h2 { margin: 14px 0 6px }
+.act-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px }
+.act-item { display: flex; align-items: center; gap: 11px; padding: 8px 6px; border-radius: var(--r); animation: rise .35s var(--ease) both }
+.act-item:hover { background: var(--surface-2) }
+.act-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px }
+.act-text strong { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.act-detail { font-size: 12px; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+.act-text progress { width: 100%; height: 4px; accent-color: var(--accent) }
+.act-acts { display: flex; flex-direction: column; align-items: flex-end; gap: 2px }
+.act-item.done > .ico { width: 14px; height: 14px; margin: 0 7px; color: var(--ok); flex: none }
+.act-item.failed > .ico { color: var(--danger) }
+.act-item.failed .act-detail { color: var(--danger) }
+.toast .link { margin-left: 6px }
 
 /* ---------- errors, settings */
 .toast.error { border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--text); cursor: pointer; max-width: min(620px, 90vw); border-radius: 16px }
@@ -524,7 +556,6 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
   .k-nav button.on::after { top: -1px; bottom: auto }
   .k-nav button .ico { width: 18px; height: 18px }
   .k-tools { margin-left: auto }
-  .activity { display: none !important }
   .main { padding: 0 14px 120px }
   .view-head h1 { font-size: 22px }
   .selbar { left: 50%; bottom: 64px; max-width: calc(100vw - 16px); padding-left: 14px; gap: 8px; flex-wrap: wrap; justify-content: center; border-radius: 22px }

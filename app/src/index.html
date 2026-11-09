@@ -41,6 +41,16 @@
       <button type="button" id="settings-btn" disabled><span class="ico ico-gear" aria-hidden="true"></span><span class="lbl">Settings</span></button>
     </nav>
     <div class="k-tools">
+      <!-- activity center: a mini loader while background work runs; opens the list of jobs -->
+      <button type="button" id="act-btn" class="act-btn" aria-expanded="false" aria-controls="act-pop" hidden><span id="act-ld" class="act-ld"></span><span id="act-n" class="act-n"></span></button>
+      <section id="act-pop" class="act-pop" role="dialog" aria-label="Activity" tabindex="-1" hidden>
+        <div class="act-top"><h2>Activity</h2><span class="spacer"></span><button type="button" id="act-clear" class="link" hidden>Clear finished</button></div>
+        <ul id="act-list" class="act-list"></ul>
+        <p id="act-none" class="hint">Nothing running. Renders, exports, Claude edits, iCloud downloads and indexing show up here.</p>
+        <h3 id="act-recent-h" class="k-h2" hidden>Finished</h3>
+        <ul id="act-recent" class="act-list"></ul>
+      </section>
+      <p id="act-live" class="sr" role="status" aria-live="polite"></p>
       <button type="button" id="engine" class="engine" title="Search index details"><span class="dot"></span><span id="engine-text" class="engine-text">Connecting</span></button>
       <div class="k-arts" role="group" aria-label="Background">
         <button type="button" data-art="sunflower" style="--sh:70" title="Sunflower" aria-label="Sunflower background"></button>
@@ -124,8 +134,6 @@
     <div id="grid" class="grid"></div>
     <div id="empty" class="empty" hidden></div>
   </div>
-
-  <div id="activity" class="activity" hidden aria-live="polite"></div>
 
   <div id="selbar" class="selbar" hidden>
     <span id="sel-count"></span>

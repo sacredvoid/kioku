@@ -1,5 +1,6 @@
 // Full-screen viewer with an info panel: date, place, where the original lives, caption, tags, labels.
 import { API, api, fmtDur, full, type Asset, type Item } from "./api";
+import { Loader } from "./loaders";
 
 type Scene = { idx: number; t0: number; t1: number; sharpness: number; motion: number };
 
@@ -111,6 +112,8 @@ export class Viewer {
       this.loadBtn.onclick = async () => {
         this.loadBtn.disabled = true;
         this.loadBtn.firstChild!.textContent = "Fetching from iCloud and finding scenes… ";
+        const ld = new Loader("download", 20); // after the text: firstChild is the label above
+        this.loadBtn.append(ld.el);
         try {
           await api(`/media/${it.uuid}/analyze`, "POST");
           if (this.i !== i) return;
@@ -118,7 +121,7 @@ export class Viewer {
         } catch (e) {
           this.loadBtn.disabled = false;
           this.loadBtn.firstChild!.textContent = `Couldn't load: ${(e as Error).message} `;
-        }
+        } finally { ld.el.remove(); }
       };
     }
   }

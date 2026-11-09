@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 import core
 import library
+import media
 import settings
 
 router = APIRouter()
@@ -40,6 +41,11 @@ def start_job(cid, kind, target, *args):
         if jobs.get((cid, kind), {}).get("status") == "running":
             raise HTTPException(409, f"{kind} already running for this project")
         jobs[(cid, kind)] = {"status": "running", "started": time.time()}
+    # listed in /media/activity too, so the app's activity center sees every project job without polling each project
+    with library.conn() as c:
+        row = c.execute("select name from collections where id = ?", (cid,)).fetchone()
+    key = f"job:{cid}:{kind}"
+    media.stage(key, kind, row[0] if row else f"project {cid}")
 
     def run():
         t = time.time()
@@ -53,6 +59,7 @@ def start_job(cid, kind, target, *args):
                       exc_info=not isinstance(e, RuntimeError))
             msg = str(e) if isinstance(e, RuntimeError) else f"Unexpected error ({type(e).__name__}): {e}"
             jobs[(cid, kind)].update(status="failed", error=msg[:1000])
+        media.stage(key, None)
         if kind == "ask":
             save_run(cid, args[0], job(cid, kind))
     threading.Thread(target=run, daemon=True).start()
