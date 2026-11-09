@@ -537,17 +537,19 @@ def _free_check(path, need, what):
 
 
 def _gc_cache():
+    # hold the gate for the whole sweep (a glob and some unlinks): a render registers in _active under this gate before
+    # it looks for cache hits, so no render can pick a segment that is about to be deleted (issue #9)
     with _gate:
         if _active:
             return
-    for mode, cap in CACHE_CAP.items():
-        files = sorted((f for f in (CACHE / mode).glob("*.mov") if f.is_file()), key=lambda f: f.stat().st_mtime)
-        total = sum(f.stat().st_size for f in files)
-        for f in files:
-            if total <= cap:
-                break
-            total -= f.stat().st_size
-            f.unlink(missing_ok=True)
+        for mode, cap in CACHE_CAP.items():
+            files = sorted((f for f in (CACHE / mode).glob("*.mov") if f.is_file()), key=lambda f: f.stat().st_mtime)
+            total = sum(f.stat().st_size for f in files)
+            for f in files:
+                if total <= cap:
+                    break
+                total -= f.stat().st_size
+                f.unlink(missing_ok=True)
 
 
 def _stamp():

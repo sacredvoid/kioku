@@ -176,10 +176,13 @@ def health():
 @app.get("/index/info")
 def index_info():
     """What's in the search index: counts by kind, date span, when it last changed, which model and image detail."""
-    kinds = dict(one("select kind, count(*) from assets group by kind"))
-    newest, oldest, last = one("select max(created), min(created), max(indexed_at) from assets")[0]
+    # one scan of assets (issue #8: was four)
+    rows = one("select kind, count(*), max(created), min(created), max(indexed_at), sum(error is not null) from assets group by kind")
+    kinds = {r[0]: r[1] for r in rows}
+    pick = lambda i, f: f([r[i] for r in rows if r[i] is not None], default=None)  # noqa: E731
+    newest, oldest, last = pick(2, max), pick(3, min), pick(4, max)
     return {"assets": sum(kinds.values()), "kinds": kinds, "newest": newest, "oldest": oldest, "last_indexed": last,
-            "failed": one("select count(*) from assets where error is not null")[0][0],
+            "failed": sum(r[5] or 0 for r in rows),
             "model": core.MODEL_ID, "image_tokens": core.IMAGE_TOKENS,
             "reindex": state["reindex"], "last_run": state["last_run"]}
 
