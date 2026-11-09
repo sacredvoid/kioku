@@ -285,7 +285,7 @@ class EditPatch(BaseModel):
 
 class AudioPut(BaseModel):
     """One extra audio track (voiceover, music). On an existing id only the fields you send change."""
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, allow_inf_nan=False)
     path: str | None = None            # local file; required when the id is new
     start: F | None = None             # seconds on the output timeline
     in_: F | None = Field(None, alias="in")    # seconds in the source
