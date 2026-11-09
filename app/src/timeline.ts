@@ -63,6 +63,8 @@ class Editor {
   ready = false;
   sel: Sel = null;
   pps = 60;
+  autoFit = true; // refit when the edit's length changes (Claude adding clips), until the user zooms by hand
+  fitDur = -1;
   snapOn = true;
   busy = false;                       // a pointer drag is running: no syncs, no FLIP
   optimistic = false;                 // local model is ahead of the server layout
@@ -194,6 +196,7 @@ class Editor {
     this.placeAll(true);
     this.renderInspector();
     this.player.load(this.model);
+    if (this.autoFit && this.ready && Math.abs(this.dur - this.fitDur) > 0.01) this.fit();
     this.checkExact();
   }
   async checkExact() {
@@ -461,6 +464,7 @@ class Editor {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
       const rect = this.canvas.getBoundingClientRect(), t = (e.clientX - rect.left) / this.pps;
+      this.autoFit = false;
       this.setZoom(this.pps * Math.exp(-e.deltaY * 0.01), t, e.clientX - this.scroll.getBoundingClientRect().left);
     }, { passive: false });
     this.scroll.onscroll = () => { if (!this.pop.hidden) this.pop.hidden = true; };
@@ -471,12 +475,12 @@ class Editor {
     add.title = "Add clips at the playhead (A)";
     this.snapB = btn("Snap", "ghost", () => this.toggleSnap());
     this.snapB.title = "Snapping (N). Hold Alt while dragging to bypass.";
-    const zoom = (f: number) => this.setZoom(this.pps * f, this.player.time, null);
+    const zoom = (f: number) => (this.autoFit = false, this.setZoom(this.pps * f, this.player.time, null));
     this.zoomIn = document.createElement("input");
     this.zoomIn.type = "range"; this.zoomIn.min = "0"; this.zoomIn.max = "100"; this.zoomIn.step = "1";
     this.zoomIn.setAttribute("aria-label", "Zoom");
-    this.zoomIn.oninput = () => this.setZoom(4 * Math.pow(60, Number(this.zoomIn.value) / 100), this.player.time, null);
-    this.tools.append(add, el("span", "spacer"), this.snapB, btn("−", "ghost icon", () => zoom(0.8), "Zoom out"), this.zoomIn, btn("+", "ghost icon", () => zoom(1.25), "Zoom in"), btn("Fit", "ghost", () => this.fit(), "Fit the whole edit"), this.totals);
+    this.zoomIn.oninput = () => (this.autoFit = false, this.setZoom(4 * Math.pow(60, Number(this.zoomIn.value) / 100), this.player.time, null));
+    this.tools.append(add, el("span", "spacer"), this.snapB, btn("−", "ghost icon", () => zoom(0.8), "Zoom out"), this.zoomIn, btn("+", "ghost icon", () => zoom(1.25), "Zoom in"), btn("Fit", "ghost", () => { this.autoFit = true; this.fit(); }, "Fit the whole edit"), this.totals);
     this.strip.hidden = true;
     this.strip.setAttribute("role", "region");
     this.strip.setAttribute("aria-label", "Clip picker");
@@ -546,7 +550,7 @@ class Editor {
     else { const x = anchorT * this.pps; if (x < this.scroll.scrollLeft || x > this.scroll.scrollLeft + this.scroll.clientWidth) this.scroll.scrollLeft = Math.max(0, x - 80); }
     this.onTime(this.player.time);
   }
-  fit() { this.pps = clamp((this.scroll.clientWidth - 40) / Math.max(this.dur, 1), 4, 240); this.setZoom(this.pps, 0, 0); }
+  fit() { this.fitDur = this.dur; this.pps = clamp((this.scroll.clientWidth - 40) / Math.max(this.dur, 1), 4, 240); this.setZoom(this.pps, 0, 0); }
 
   // ---------- rendering the lanes
   placeAll(anim: boolean) {
