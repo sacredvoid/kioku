@@ -37,6 +37,9 @@ TIMEOUT = 60
 TTL = 600  # search / record / waveform cache, seconds
 ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 EXTS = {e.lstrip(".") for e in edit.AUDIO_EXT}  # what the timeline can mix
+# Openverse filetype spellings -> file extension (Jamendo reports its MP3s as mp32). ffprobe checks the real content.
+# ponytail: ogg/flac/opus results are dropped; transcode to m4a on download if too much good music is missing
+FILETYPE = {"mp32": "mp3", "mpeg": "mp3", "aif": "aiff", "x-wav": "wav", "wave": "wav"}
 LOCAL_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".aiff"}
 # license sets per setting; share-alike and no-derivatives are never offered (a video edit is a derivative)
 LICENSES = {"commercial": ["cc0", "pdm", "by"], "noncommercial": ["cc0", "pdm", "by", "by-nc"]}
@@ -88,7 +91,7 @@ def norm(r: dict) -> dict:
             "license_url": r.get("license_url"), "attribution": r.get("attribution") or "",
             "provider": r.get("provider") or r.get("source"), "duration_s": round((r.get("duration") or 0) / 1000, 1),
             "tags": [t["name"] for t in (r.get("tags") or []) if t.get("name")][:8],
-            "filetype": (r.get("filetype") or "").lower(), "preview": f"/sounds/{r['id']}/preview",
+            "filetype": FILETYPE.get(ft := (r.get("filetype") or "").lower(), ft), "preview": f"/sounds/{r['id']}/preview",
             "needs_credit": r.get("license", "").startswith("by")}
 
 
@@ -98,8 +101,10 @@ def search(q: str = Query(..., min_length=1, max_length=200), kind: str = "music
     if kind not in ("music", "sfx"):
         raise HTTPException(422, "kind must be music or sfx")
     lic = allowed()
-    params = {"q": q, "category": "music" if kind == "music" else "sound_effect", "license": ",".join(lic),
-              "page": page, "page_size": 30}
+    # Freesound records carry no category, so category=sound_effect finds nothing; ask Freesound itself for effects
+    where = {"category": "music"} if kind == "music" else {"source": "freesound"}
+    params = {"q": q, **where, "license": ",".join(lic),
+              "page": page, "page_size": 20}  # anonymous max; more needs an API key (401)
     data = _cached(json.dumps(params, sort_keys=True), lambda: _ov("/audio/", params))
     out = [norm(r) for r in data.get("results", [])]
     # Openverse's license filter is trusted but re-checked; formats the timeline can't mix are dropped

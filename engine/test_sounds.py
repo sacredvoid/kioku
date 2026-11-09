@@ -105,7 +105,7 @@ assert NC not in ids and OGG not in ids and {A, B} <= ids, ids
 s = next(s for s in j["results"] if s["id"] == A)
 assert s["duration_s"] == 2.0 and s["tags"] == ["calm"] and s["needs_credit"] and s["preview"] == f"/sounds/{A}/preview"
 assert calls[-1][1]["category"] == "music" and calls[-1][1]["license"] == "cc0,pdm,by"
-assert c.get("/sounds/search", params={"q": "x", "kind": "sfx"}).status_code == 200 and calls[-1][1]["category"] == "sound_effect"
+assert c.get("/sounds/search", params={"q": "x", "kind": "sfx"}).status_code == 200 and calls[-1][1]["source"] == "freesound"
 assert c.get("/sounds/search", params={"q": "x", "kind": "bogus"}).status_code == 422
 assert c.get("/sounds/search", params={"q": "calm", "max_dur": 1}).json()["results"] == []
 
