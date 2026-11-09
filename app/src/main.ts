@@ -231,7 +231,8 @@ async function go(v: View, search = q.value.trim()) {
   const own = v.type === "ask" ? "ask" : v.type === "page" ? v.page : "";
   for (const s of ["ask", "projects", "albums", "review", "history", "settings"]) $(`${s}-view`).hidden = s !== own;
   $("libbar").hidden = v.type !== "lib";
-  main.classList.toggle("narrow", own === "ask" || own === "history");
+  main.classList.toggle("narrow", own === "history");
+  main.classList.toggle("wide", own === "ask"); // wider: the Ask board has a card grid
   for (const id of ["head", "summary", "grid"]) $(id).hidden = !!own;
   $("grid").style.display = ""; // a project view hides it; everything else shows it
   head.replaceChildren();
@@ -1344,7 +1345,7 @@ async function askKioku(text: string) {
 }
 $("ask-form").addEventListener("submit", (e) => { e.preventDefault(); askKioku($<HTMLInputElement>("ask-q").value); });
 $("ask-sugg").replaceChildren(...SUGGEST.map((t) => {
-  const b = el("button", "", t) as HTMLButtonElement;
+  const b = el("button", "chip", t) as HTMLButtonElement;
   b.type = "button";
   b.onclick = () => askKioku(t);
   return b;
@@ -1373,12 +1374,16 @@ async function renderBoard() {
     li.append(b);
     return li;
   };
-  $("board-projects").replaceChildren(...projects.slice(0, 5).map((c) => {
-    const t = el("i", "k-thumb");
-    if (c.cover) t.style.backgroundImage = `url(${thumb(c.cover)})`;
-    return row(() => go({ type: "col", id: c.id }), t, el("strong", "", c.name), el("span", "", `${c.count} clip${c.count === 1 ? "" : "s"}`));
+  // same cover cards as the Projects page
+  $("board-projects").replaceChildren(...projects.slice(0, 4).map((c) => {
+    const b = el("button", "nav-item") as HTMLButtonElement;
+    b.type = "button"; b.onclick = () => go({ type: "col", id: c.id });
+    const cover = el("span", "cover");
+    if (c.cover) cover.style.backgroundImage = `url(${thumb(c.cover)})`;
+    b.append(cover, el("span", "name", c.name), el("span", "count", `${c.count} clip${c.count === 1 ? "" : "s"}`));
+    return b;
   }));
-  if (!projects.length) $("board-projects").append(el("li", "empty-row", "No projects yet. Ask for one above."));
+  if (!projects.length) $("board-projects").append(el("p", "hint", "No projects yet. Ask for one above."));
 
   const [{ runs, running }, info, drafts] = await Promise.all([
     recentRuns(3).catch(() => ({ runs: [] as RunWith[], running: [] as { c: Collection; j: Job }[] })),
@@ -1387,41 +1392,46 @@ async function renderBoard() {
   ]);
   if (my !== boardSeq || view.type !== "ask") return;
 
-  // live: an edit running now, otherwise the last reply
+  // Latest: an edit running now, otherwise the last reply
   const live = $("ask-live");
   const r0 = runs[0];
+  const latest = (state: HTMLElement, meta: string, open: string, cid: number, ...body: HTMLElement[]) => {
+    const head = el("div", "k-card-head");
+    const btn = el("button", "ghost", open) as HTMLButtonElement;
+    btn.type = "button"; btn.onclick = () => go({ type: "col", id: cid });
+    head.append(el("h2", "", "Latest"), state, el("span", "meta", meta), el("span", "spacer"), btn);
+    head.querySelector("h2")!.id = "ask-live-h";
+    live.replaceChildren(head, ...body);
+    live.hidden = false;
+  };
   if (running.length) {
     const { c, j } = running[0];
-    const ko = el("div", "k-ko");
-    const link = el("button", "link", "Watch it") as HTMLButtonElement;
-    link.type = "button"; link.onclick = () => go({ type: "col", id: c.id });
+    const state = el("span", "run-state");
+    state.append(ldFor(live, "think", 20).el, el("strong", "", "Running"));
     const steps = el("ol", "steps");
     (j.steps ?? []).slice(-3).forEach((t) => steps.append(el("li", "", t)));
-    const lead = el("div", "steps-head");
-    lead.append(ldFor(live, "think", 22).el, el("span", "", `Claude is editing ${c.name}`), el("span", "spacer"), link);
-    ko.append(lead, steps);
-    live.replaceChildren(ko);
+    latest(state, `Claude is editing ${c.name}`, "Watch it", c.id, steps);
     boardT = window.setTimeout(() => view.type === "ask" && renderBoard(), 3000);
   } else if (r0) {
-    const me = el("div", "k-me", r0.prompt || "Edit");
-    const ko = el("div", "k-ko");
-    const link = el("button", "link", `Open ${r0.project}`) as HTMLButtonElement;
-    link.type = "button"; link.onclick = () => go({ type: "col", id: r0.cid });
-    const p = el("p", "", r0.status === "failed" ? `Failed: ${gist(r0.error || "no reason given")} ` : `${gist(r0.output || "Done")} `);
-    p.append(link);
-    ko.append(el("span", "who", [r0.model, when(r0.started)].filter(Boolean).join(" · ") || "Kioku"), p);
-    live.replaceChildren(me, ko);
-  } else live.replaceChildren();
+    const ok = r0.status === "done", bad = r0.status === "failed";
+    const state = el("span", `run-state ${r0.status}`);
+    state.append(icon(ok ? "check" : bad ? "close" : "spark"), el("strong", "", ok ? "Done" : bad ? "Failed" : r0.status));
+    latest(state, [r0.project, r0.model, when(r0.started)].filter(Boolean).join(" · "), "Open project", r0.cid,
+      el("p", "k-me", r0.prompt || "Edit"),
+      el("p", "k-ko", bad ? gist(r0.error || "no reason given") : gist(r0.output || "Done")));
+  } else { live.hidden = true; live.replaceChildren(); }
 
   $("board-asks").replaceChildren(...runs.slice(0, 5).map((r) =>
     row(() => go({ type: "col", id: r.cid }), el("strong", "", r.prompt || "Edit"), el("span", "", `${r.project} · ${when(r.started)}`))));
   if (!runs.length) $("board-asks").append(el("li", "empty-row", "Your asks show up here."));
 
   const fact = (title: string, big: string, text: string, onclick: () => void) => {
-    const b = el("button", "k-fact") as HTMLButtonElement;
+    const card = el("section", "k-card k-fact");
+    const b = el("button", "", "") as HTMLButtonElement;
     b.type = "button"; b.onclick = onclick;
-    b.append(el("h2", "k-h2", title), ...(big ? [el("b", "", big)] : []), el("p", "", text));
-    return b;
+    b.append(el("h2", "", title), ...(big ? [el("b", "", big)] : []), el("p", "", text));
+    card.append(b);
+    return card;
   };
   const facts: HTMLElement[] = [];
   if (info) {

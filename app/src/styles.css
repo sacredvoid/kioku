@@ -172,7 +172,7 @@ input, textarea { caret-color: var(--accent) }
 
 /* ---------- main column */
 .main { max-width: 1680px; margin: 0 auto; padding: 0 clamp(20px, 3.5vw, 56px) 120px; min-width: 0 }
-.main.narrow { max-width: 1120px } /* Ask and History: reading width */
+.main.narrow { max-width: 1120px } /* History: reading width */
 .k-libbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 22px }
 .k-seg { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface-2) }
 .k-seg button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; font-size: 13px; color: var(--text-2) }
@@ -186,51 +186,65 @@ input, textarea { caret-color: var(--accent) }
 .search input::-webkit-search-cancel-button { filter: grayscale(1) opacity(.5) }
 kbd { font: 500 11px var(--font); color: var(--text-3); background: var(--surface-2); border-radius: 5px; padding: 2px 6px }
 
-/* ---------- Ask: the landing page */
-.k-ask { padding-top: clamp(40px, 9vh, 104px) }
-.k-ask h1 { font: 600 clamp(22px, 2.6vw, 30px)/1.2 var(--display); letter-spacing: -.025em; margin: 0 0 16px; text-wrap: balance }
-.k-askform { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 6px 6px 6px 16px;
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); transition: border-color .2s var(--ease) }
-.k-askform:focus-within { border-color: var(--accent) }
+/* ---------- Ask: the landing page. Every section is an opaque card so it reads over the art. */
+.main.wide { max-width: 1400px }
+.k-ask { padding-top: clamp(24px, 6vh, 72px); display: grid; gap: 20px }
+.k-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 18px 20px;
+  -webkit-backdrop-filter: blur(14px) saturate(1.1); backdrop-filter: blur(14px) saturate(1.1); min-width: 0 }
+.k-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; min-height: 30px }
+.k-card h2 { margin: 0; font: 600 15px/1.2 var(--display); letter-spacing: -.02em; color: var(--text) }
+.k-card-head .meta { font-size: 12.5px; color: var(--text-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.k-card-head button.link { margin-left: auto; font-size: 13px; white-space: nowrap }
+.k-hero { padding: clamp(22px, 3vw, 36px); background: var(--surface-solid); box-shadow: var(--shadow-lg) }
+.k-ask h1 { font: 600 clamp(22px, 2.6vw, 30px)/1.2 var(--display); letter-spacing: -.025em; margin: 0 0 18px; text-wrap: balance }
+.k-askform { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 13px; padding: 6px 6px 6px 16px;
+  transition: border-color .2s var(--ease), box-shadow .2s var(--ease) }
+.k-askform:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft) }
 .k-askform input { flex: 1; min-width: 0; border: 0; background: none; outline: 0; font-size: 16px; padding: 11px 0 }
 .k-askform input::placeholder { color: var(--text-3) }
-.k-askform button.primary { border-radius: 9px }
+.k-askform button.primary { border-radius: 9px; padding-inline: 20px }
 .k-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--text-3) }
-.k-sugg { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 14px; font-size: 13.5px }
-.k-sugg button { border: 0; background: none; padding: 2px 0; color: var(--text-2); border-bottom: 1px solid var(--line) }
-.k-sugg button:hover { color: var(--text); border-color: var(--text-3) }
-.k-live { margin-top: 36px; display: grid; gap: 12px }
-.k-me { justify-self: end; max-width: 520px; background: var(--surface); border: 1px solid var(--line); padding: 9px 13px; border-radius: 11px; font-size: 14px }
-.k-ko { max-width: 640px; display: grid; gap: 6px; padding-left: 14px; border-left: 1px solid var(--line); font-size: 14px }
-.k-ko .who { font: 600 11.5px var(--display); color: var(--text-3) }
-.k-ko .md p { margin: 0 }
-.k-board { margin-top: 64px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 44px }
-.k-h2 { font: 600 11.5px/1 var(--font); letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); margin: 0 0 4px }
-.k-list { list-style: none; padding: 0; margin: 0 0 32px }
-.k-list li { border-bottom: 1px solid var(--line) }
-.k-list button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 11px 0; border: 0; background: none; text-align: left; color: var(--text) }
+.k-sugg { margin-top: 14px }
+.k-sugg .chip { font-size: 13px; padding: 5px 13px }
+.k-latest .k-card-head { margin-bottom: 10px }
+.k-latest .k-card-head > button { flex: none }
+.k-latest p { margin: 0 }
+.k-latest .k-me { color: var(--text-2); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.k-latest .k-me::before { content: "You asked: "; color: var(--text-3) }
+.k-latest .k-ko { margin-top: 6px; font-size: 14px; max-width: 80ch }
+.k-board { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); grid-template-areas: "projs facts" "asks facts"; gap: 20px; align-items: start }
+.k-projs { grid-area: projs }
+.k-asks { grid-area: asks }
+.k-list { list-style: none; padding: 0; margin: 0 }
+.k-list li + li { border-top: 1px solid var(--line-soft) }
+.k-list button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 0; border: 0; background: none; text-align: left; color: var(--text) }
 .k-list button:hover strong { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px }
 .k-list strong { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .k-list span { font-size: 12.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums }
-.k-list .k-thumb { width: 48px; height: 30px; border-radius: 5px; flex: none; background: var(--surface-3) center / cover }
-.k-list .pulse-dot { flex: none }
-.k-list .empty-row { padding: 11px 0; color: var(--text-3); font-size: 13.5px }
-.k-facts { display: grid; gap: 22px; align-content: start }
-.k-fact { display: grid; gap: 2px; padding-bottom: 18px; border-bottom: 1px solid var(--line); border-width: 0 0 1px; background: none; text-align: left; color: var(--text) }
-.k-fact:last-child { border-bottom: 0 }
-.k-fact b { font: 600 21px/1.15 var(--display); letter-spacing: -.03em; font-variant-numeric: tabular-nums }
+.k-list .empty-row { padding: 10px 0; color: var(--text-3); font-size: 13.5px }
+.k-facts { grid-area: facts; display: grid; gap: 20px; align-content: start }
+.k-fact { padding: 0 }
+.k-fact button { width: 100%; display: grid; gap: 4px; padding: 16px 20px; border: 0; border-radius: inherit; background: none; text-align: left; color: var(--text) }
+.k-fact button:hover h2 { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px }
+.k-fact b { font: 600 24px/1.15 var(--display); letter-spacing: -.03em; font-variant-numeric: tabular-nums }
 .k-fact p { margin: 0; font-size: 13.5px; color: var(--text-2) }
+#board-projects { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px }
+#board-projects > .hint { grid-column: 1 / -1; margin: 0 }
+#board-projects .nav-item { background: none; text-align: left; color: var(--text) }
+#board-projects .name { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#board-projects .count { font-size: 12.5px; color: var(--text-3); white-space: nowrap }
+#board-projects .nav-item:hover .name { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px }
 
 /* ---------- list pages: projects, albums, review, history */
 /* projects and albums: cover cards that fill the width */
 #projects, #albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 22px 18px; padding-top: 6px }
 #projects > .hint, #albums > .hint { grid-column: 1 / -1 }
-#projects .nav-item, #albums .nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px 10px; padding: 0; border: 0; border-radius: 12px }
-#projects .cover, #albums .cover { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 12px; box-shadow: var(--shadow);
+#projects .nav-item, #albums .nav-item, #board-projects .nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px 10px; padding: 0; border: 0; border-radius: 12px }
+#projects .cover, #albums .cover, #board-projects .cover { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 12px; box-shadow: var(--shadow);
   transition: transform .3s var(--ease), box-shadow .3s var(--ease) }
-#projects .nav-item:hover .cover, #albums .nav-item:hover .cover { transform: translateY(-2px); box-shadow: var(--shadow-lg) }
-#projects .nav-item:focus-visible, #albums .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px }
-#projects .name, #albums .name { padding-left: 2px }
+#projects .nav-item:hover .cover, #albums .nav-item:hover .cover, #board-projects .nav-item:hover .cover { transform: translateY(-2px); box-shadow: var(--shadow-lg) }
+#projects .nav-item:focus-visible, #albums .nav-item:focus-visible, #board-projects .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px }
+#projects .name, #albums .name, #board-projects .name { padding-left: 2px }
 .k-page { padding-top: 26px }
 .k-page-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px }
 .k-page-head h1 { margin: 0; font: 600 24px/1.1 var(--display); letter-spacing: -.025em }
@@ -588,7 +602,7 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
 .ask-out > p.muted:first-child { margin: 0 0 6px; font-size: 12px }
 
 /* ---------- narrow windows: nav keeps icons only, then moves to the bottom */
-@media (max-width: 980px) { .k-nav .lbl, .k-nav .n, .engine-text { display: none } .k-board { grid-template-columns: 1fr; gap: 28px } }
+@media (max-width: 980px) { .k-nav .lbl, .k-nav .n, .engine-text { display: none } .k-board { grid-template-columns: 1fr; grid-template-areas: "projs" "asks" "facts" } .k-facts { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) } }
 @media (max-width: 760px) {
   .k-top { padding-left: 80px; gap: 10px; -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--bg) } /* a filter here would trap the fixed nav inside the bar */
   .k-nav { position: fixed; left: 0; right: 0; bottom: 0; height: 52px; margin: 0; justify-content: space-around; z-index: 9;
@@ -605,6 +619,8 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
   .info { height: auto; border-left: 0; border-top: 1px solid var(--line-soft); padding: 20px 16px 40px; overflow: visible }
   .close { right: 12px }
   .runs-bar .meta { display: none }
+  #board-projects { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .k-latest .k-card-head { flex-wrap: wrap }
 }
 
 @media (prefers-reduced-motion: reduce) {
