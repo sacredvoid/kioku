@@ -193,16 +193,21 @@ def get_edit(collection_id: int) -> dict:
 
 @server.tool()
 def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, look: str = "", look_strength: float = -1,
-             captions: bool | None = None, caption_style: str = "") -> dict:
+             captions: bool | None = None, caption_style: str = "", fade_in: float = -1, fade_out: float = -1,
+             clip_volume: float = -1, duck: bool | None = None) -> dict:
     """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
     stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop). size: short side 720, 1080 or 2160.
     fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
     unless the user wants it strong. captions=true burns the spoken words in and writes an .srt next to the video: it
     transcribes each clip's audio once (needs whisper.cpp; the error says how to install it); silent clips and music
     get no captions. caption_style: bold or box. Turning captions on starts the transcription and returns at once;
-    check get_edit captions_status.pending before rendering."""
+    check get_edit captions_status.pending before rendering. fade_in / fade_out: seconds 0 to 3, the whole video fades
+    from / to black and silence (0 = none). clip_volume 0 to 1 scales every clip's own sound; duck (default true) lowers
+    clip sound under the audio tracks from set_audio."""
     body = drop_unset(aspect=aspect or None, size=size or None, fps=fps or None, look_strength=None if look_strength < 0 else look_strength,
-                      captions=captions, caption_style=caption_style or None)
+                      captions=captions, caption_style=caption_style or None,
+                      fade_in=None if fade_in < 0 else fade_in, fade_out=None if fade_out < 0 else fade_out,
+                      clip_volume=None if clip_volume < 0 else clip_volume, duck=duck)
     if look:
         body["look"] = None if look.lower() == "none" else look
     if not body:
@@ -215,15 +220,16 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
                 exposure: float | None = None, contrast: float | None = None, saturation: float | None = None,
                 warmth: float | None = None, look: str | None = None, look_strength: float | None = None,
                 reframe_mode: str | None = None, reframe_pos: float | None = None, reframe_from: float | None = None,
-                reframe_to: float | None = None) -> dict:
+                reframe_to: float | None = None, mute: bool | None = None) -> dict:
     """Change one clip's look and motion. Only the arguments you pass change; speed also scales its audio (0.25 to 4;
     photos cannot change speed). volume 0 to 2. exposure and warmth -1 to 1, contrast 0.8 to 1.3, saturation 0 to 1.6.
     look: a name from get_edit, or "none" for no look on this clip even when the project has one.
     reframe_mode: center, manual (reframe_pos) or pan (reframe_from to reframe_to); positions are 0 to 1 along the
-    axis being cropped. Item ids come from get_collection."""
+    axis being cropped. mute=true silences this clip's own sound (voiceover and music tracks stay). Item ids come from
+    get_collection."""
     body = drop_unset(speed=speed, volume=volume, exposure=exposure, contrast=contrast, saturation=saturation,
                       warmth=warmth, look_strength=look_strength, reframe_mode=reframe_mode, reframe_pos=reframe_pos,
-                      reframe_from=reframe_from, reframe_to=reframe_to)
+                      reframe_from=reframe_from, reframe_to=reframe_to, mute=mute)
     if look is not None:
         body["look"] = look.lower() if look.lower() == "none" else look  # engine: "none" = no look on this clip
     if not body:
@@ -237,6 +243,27 @@ def set_transition(collection_id: int, after_item_id: int, type: str, duration: 
     capped at half the shorter clip; transitions shorten the edit by their duration. Use 'cut' to remove one."""
     path = f"/collections/{collection_id}/edit/transitions/{after_item_id}"
     return call("DELETE", path) if type == "cut" else call("PUT", path, {"type": type, "duration": duration})
+
+
+@server.tool()
+def set_audio(collection_id: int, track_id: str, path: str = "", start: float | None = None, source_in: float | None = None,
+              source_out: float | None = None, volume: float | None = None, fade_in: float | None = None,
+              fade_out: float | None = None, remove: bool = False) -> dict:
+    """Add, change or remove an audio track (voiceover or music): at most 3 per project, mixed with the clips' own
+    sound and normalized to -14 LUFS, in previews and finals. track_id: any short name (letters, digits, - _); a new id
+    adds a track and needs path, an existing id changes only the arguments you pass. path: a local mp3, m4a, wav, aac,
+    aiff or caf file. start: seconds on the output timeline where it begins. source_in / source_out: the part of the
+    file to use (seconds; default all). volume 0 to 2. fade_in / fade_out: seconds. remove=true deletes the track.
+    While any track plays, clip sound is lowered under it (set_edit duck=false turns that off). Returns the edit."""
+    p = f"/collections/{collection_id}/edit/audio/{track_id}"
+    if remove:
+        return call("DELETE", p)
+    body = drop_unset(path=path or None, start=start, out=source_out, volume=volume, fade_in=fade_in, fade_out=fade_out)
+    if source_in is not None:
+        body["in"] = source_in
+    if not body:
+        return {"error": "Nothing to change: pass a path for a new track, or at least one setting."}
+    return call("PUT", p, body)
 
 
 @server.tool()

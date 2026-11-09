@@ -610,3 +610,15 @@ button.engine:focus-visible { outline: 2px solid var(--accent); outline-offset: 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 10px 18px; margin: 0; font-size: 13.5px }
 .facts dt { color: var(--text-3) }
 .facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere }
+
+/* audio tracks */
+.audio { display: flex; flex-direction: column; gap: 4px; padding-top: 6px }
+.audio-path { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; font-size: 13px; color: var(--text); outline: 0 }
+.audio-path:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft) }
+.tracks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px }
+.track { display: flex; align-items: center; gap: 12px; padding: 7px 10px; border-radius: 12px; font-size: 13px; background: var(--surface-2) }
+.track .clip-title { flex: 1; min-width: 0 }
+.track label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3) }
+.track label input { width: 66px; background: var(--surface-solid); border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; font-size: 13px; color: var(--text); outline: 0 }
+.track input[type=range], .cap-toggle input[type=range] { accent-color: var(--accent); width: 110px }
+.clip-actions button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent) }

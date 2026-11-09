@@ -311,7 +311,8 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const claude = el("div", "claude");
   claude.append(askOut, runs);
 
-  project.replaceChildren(brief, ask, claude, meta, expOut, renderRow, capOut, prevOut, finOut, strip);
+  const audio = el("section", "audio");
+  project.replaceChildren(brief, ask, claude, meta, expOut, renderRow, audio, capOut, prevOut, finOut, strip);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
@@ -320,6 +321,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   }).catch(() => loadRuns(c.id, runs));
   api<Job>(`/collections/${c.id}/export`).then((j) => { if (j.status !== "idle") pollJob(c.id, "export", expOut, exp); }).catch(() => {});
   syncCaptions();
+  loadAudio(c.id, audio, strip);
   for (const [kind, out, btn] of [["preview", prevOut, prevBtn], ["final", finOut, rendBtn]] as const)
     api<Job>(`/collections/${c.id}/render/${kind}`).then((j) => { if (j.status !== "idle") pollJob(c.id, kind, out, btn); }).catch(() => {});
   api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollJob(c.id, "captions", capOut, capBox); }).catch(() => {});
@@ -370,12 +372,97 @@ function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
     await api(`/collections/${cid}/items/${it.item_id}`, "PATCH", { pos }).catch(fail("move the clip"));
     go(view);
   };
-  actions.append(btn("up", "Move earlier", move(i - 1)), btn("down", "Move later", move(i + 1)),
+  li.dataset.item = String(it.item_id);
+  const mute = el("button", "ghost", "Mute") as HTMLButtonElement;
+  mute.type = "button"; mute.title = "Silence this clip's own sound"; mute.setAttribute("aria-pressed", "false");
+  mute.onclick = async () => {
+    const on = mute.getAttribute("aria-pressed") !== "true";
+    try { await api(`/collections/${cid}/edit/clips/${it.item_id}`, "PATCH", { mute: on }); mute.setAttribute("aria-pressed", String(on)); }
+    catch (e) { fail("change the clip's sound")(e); }
+  };
+  actions.append(mute, btn("up", "Move earlier", move(i - 1)), btn("down", "Move later", move(i + 1)),
     btn("close", "Remove from project", async () => { await api(`/collections/${cid}/items/${it.item_id}`, "DELETE").catch(fail("remove the clip")); go(view); loadCollections(); }));
   li.append(el("span", "clip-n", String(i + 1)), img, info, range, actions);
   return li;
 }
 const posOf = (it: any) => it.pos as number;
+
+// ---------- audio: voiceover / music tracks (at most 3), clip sound level, mute marks on the clip list
+type Track = { id: string; path: string; start: number; in: number; out: number; volume: number; fade_in: number; fade_out: number };
+type EditAudio = { spec: { audio: Track[]; clip_volume: number; duck: boolean; clips: Record<string, { mute?: boolean }> }; options: { max_audio: number } };
+
+async function loadAudio(cid: number, box: HTMLElement, strip: HTMLElement) {
+  let ed: EditAudio;
+  try { ed = await api<EditAudio>(`/collections/${cid}/edit`); } catch { return; }  // the edit panel is optional: no engine, no panel
+  const { audio, clip_volume, duck, clips } = ed.spec;
+  strip.querySelectorAll<HTMLElement>("li[data-item]").forEach((li) => {
+    if (clips[li.dataset.item!]?.mute) li.querySelector("button[aria-pressed]")?.setAttribute("aria-pressed", "true");
+  });
+  const refresh = () => loadAudio(cid, box, strip);
+  const put = (id: string, body: object) => api(`/collections/${cid}/edit/audio/${encodeURIComponent(id)}`, "PUT", body).then(refresh).catch((e) => { fail("save the audio")(e); refresh(); });
+  const head = el("div", "proj-meta");
+  head.append(el("strong", "", "Audio"), el("span", "muted", audio.length ? `${audio.length} of ${ed.options.max_audio}` : "voiceover or music"), el("span", "spacer"));
+
+  const pathIn = document.createElement("input");
+  pathIn.placeholder = "Full path to an mp3, m4a, wav, aac, aiff or caf file";
+  pathIn.className = "audio-path";
+  pathIn.setAttribute("aria-label", "Audio file path");
+  const add = el("button", "", "Add audio") as HTMLButtonElement;
+  add.type = "button";
+  add.disabled = audio.length >= ed.options.max_audio;
+  const addRow = el("form", "proj-meta audio-add") as HTMLFormElement;
+  addRow.append(pathIn, add);
+  addRow.onsubmit = (e) => {
+    e.preventDefault();
+    const path = pathIn.value.trim().replace(/^['"]|['"]$/g, "");  // a path dragged into the field arrives quoted
+    if (!path || add.disabled) return;
+    const id = `a${Date.now().toString(36)}`;
+    add.disabled = true;
+    put(id, { path, start: 0 }).then(() => toast("Audio added"));
+  };
+  add.onclick = () => addRow.requestSubmit();
+
+  const num = (label: string, val: number, min: number, max: number, step: number, save: (v: number) => void) => {
+    const w = el("label", "", label);
+    const n = document.createElement("input");
+    n.type = "number"; n.min = String(min); n.max = String(max); n.step = String(step); n.value = String(val);
+    n.onchange = () => { if (n.value !== "") save(Number(n.value)); };
+    w.append(n);
+    return w;
+  };
+  const list = el("ul", "tracks");
+  for (const t of audio) {
+    const li = el("li", "track");
+    const vol = document.createElement("input");
+    vol.type = "range"; vol.min = "0"; vol.max = "2"; vol.step = "0.05"; vol.value = String(t.volume);
+    vol.setAttribute("aria-label", `Volume of ${t.path.split("/").pop()}`);
+    const pct = el("span", "muted", `${Math.round(t.volume * 100)}%`);
+    vol.oninput = () => { pct.textContent = `${Math.round(Number(vol.value) * 100)}%`; };
+    vol.onchange = () => put(t.id, { volume: Number(vol.value) });
+    const rm = el("button", "ghost icon") as HTMLButtonElement;
+    rm.append(icon("close"));
+    rm.type = "button"; rm.title = rm.ariaLabel = "Remove this audio";
+    rm.onclick = () => api(`/collections/${cid}/edit/audio/${encodeURIComponent(t.id)}`, "DELETE").then(refresh).catch(fail("remove the audio"));
+    const name = el("span", "clip-title", t.path.split("/").pop() || t.path);
+    name.title = t.path;
+    li.append(name, el("span", "muted", `${(t.out - t.in).toFixed(1)}s`), num("Starts at", t.start, 0, 900, 0.1, (v) => put(t.id, { start: v })),
+      vol, pct, rm);
+    list.append(li);
+  }
+  const lvl = el("label", "cap-toggle");
+  const clipVol = document.createElement("input");
+  clipVol.type = "range"; clipVol.min = "0"; clipVol.max = "1"; clipVol.step = "0.05"; clipVol.value = String(clip_volume);
+  clipVol.onchange = () => api(`/collections/${cid}/edit`, "PATCH", { clip_volume: Number(clipVol.value) }).catch(fail("save the clip sound level"));
+  lvl.append("Clip sound ", clipVol);
+  const duckBox = document.createElement("input");
+  duckBox.type = "checkbox"; duckBox.checked = duck;
+  duckBox.onchange = () => api(`/collections/${cid}/edit`, "PATCH", { duck: duckBox.checked }).catch(fail("save ducking"));
+  const duckL = el("label", "cap-toggle");
+  duckL.append(duckBox, " Lower clip sound under audio");
+  const mix = el("div", "proj-meta");
+  mix.append(lvl, duckL);
+  box.replaceChildren(head, ...(audio.length ? [list, mix] : []), addRow);
+}
 
 type PollKind = "ask" | "export" | "preview" | "final" | "captions";
 const KIND_WORD: Record<PollKind, string> = { ask: "edit", export: "export", preview: "preview", final: "render", captions: "transcription" };

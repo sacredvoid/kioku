@@ -1,10 +1,13 @@
-"""Checks for the edit spec: validation, storage, timeline math, looks.  uv run test_edit.py  (no ffmpeg)"""
+"""Checks for the edit spec: validation, storage, timeline math, looks.  uv run test_edit.py  (ffprobe and ffmpeg for one tiny audio fixture)"""
+import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import threading
 import types
+from pathlib import Path
 
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 
@@ -206,9 +209,77 @@ for name in edit.LOOKS:
         f = edit.look_filters((name, k))
         assert f and safe.match(f), (name, k, f)
     assert edit.look_filters((name, 0)) == "", name
-assert edit.look_filters(("warm", 1.0)) == "eq=saturation=1.08,colorbalance=rs=0.06:bs=-0.06:rm=0.04:bm=-0.04"
-assert edit.look_filters(("warm", 0.5)) == "eq=saturation=1.04,colorbalance=rs=0.03:bs=-0.03:rm=0.02:bm=-0.02"
-assert edit.look_filters(("mono", 1.0)) == "eq=contrast=1.1:saturation=0"
+assert edit.look_filters(("warm", 1.0)) == ("eq=contrast=1.06:saturation=1.2:brightness=0.02,"
+                                            "colorbalance=rs=0.1:bs=-0.1:rm=0.09:bm=-0.09:rh=0.06:bh=-0.08")
+assert edit.look_filters(("warm", 0.5)) == ("eq=contrast=1.03:saturation=1.1:brightness=0.01,"
+                                            "colorbalance=rs=0.05:bs=-0.05:rm=0.045:bm=-0.045:rh=0.03:bh=-0.04")
+assert edit.look_filters(("mono", 1.0)) == "eq=contrast=1.25:saturation=0:brightness=-0.02"
+
+# fades, clip_volume, duck: defaults keep old renders identical, clamps, warning for a transition after the last clip
+cid, ids = project("V", "V")
+tl, spec = edit.snapshot(cid)
+assert (tl.fade_in, tl.fade_out, tl.audio, tl.clip_volume, tl.duck) == (0.0, 0.0, (), 1.0, True)
+r = c.patch(f"/collections/{cid}/edit", json={"fade_in": 1.5, "fade_out": 9, "clip_volume": 0.5, "duck": False}).json()
+assert r["spec"]["format"]["fade_in"] == 1.5 and r["spec"]["format"]["fade_out"] == 3.0 and r["clamped"][0]["field"] == "fade_out"
+assert r["spec"]["clip_volume"] == 0.5 and r["spec"]["duck"] is False
+tl, _ = edit.snapshot(cid)
+assert (tl.fade_in, tl.fade_out, tl.clip_volume, tl.duck) == (1.5, 3.0, 0.5, False)
+assert c.patch(f"/collections/{cid}/edit", json={"fade_in": -1}).json()["spec"]["format"]["fade_in"] == 0
+assert c.patch(f"/collections/{cid}/edit", json={"clip_volume": 4}).json()["spec"]["clip_volume"] == 1.0
+assert not any("last clip" in w for w in tl.warnings)
+c.put(f"/collections/{cid}/edit/transitions/{ids[1]}", json={"type": "dissolve", "duration": 0.5})
+tl, spec = edit.snapshot(cid)
+assert any("last clip" in w for w in tl.warnings) and tl.segs[-1].trans_after is None, tl.warnings
+# a spec saved before fades / audio existed gains the defaults
+with edit.conn() as db2:
+    old = edit.default_spec()
+    for k in ("audio", "clip_volume", "duck"):
+        del old[k]
+    del old["format"]["fade_in"], old["format"]["fade_out"]
+    db2.execute("insert or replace into edit_specs values (?,?,?,?)", (cid, json.dumps(old), 7, 0.0))
+    db2.commit()
+assert c.get(f"/collections/{cid}/edit").json()["spec"]["audio"] == []
+
+# mute: per clip, becomes volume 0 in the Seg, default removes the key
+cid, (i1, i2) = project("V", "V")
+c.patch(f"/collections/{cid}/edit/clips/{i1}", json={"mute": True, "volume": 1.5})
+tl, spec = edit.snapshot(cid)
+assert tl.segs[0].volume == 0.0 and tl.segs[1].volume == 1.0 and spec["clips"][str(i1)]["mute"] is True
+c.patch(f"/collections/{cid}/edit/clips/{i1}", json={"mute": False})
+assert "mute" not in edit.snapshot(cid)[1]["clips"][str(i1)] and edit.snapshot(cid)[0].segs[0].volume == 1.5
+
+# audio tracks: validation, merge on update, limit, delete, hash
+voice = os.path.join(tempfile.mkdtemp(), "vo.wav")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=500:d=6", voice], check=True)
+txt = voice.replace(".wav", ".txt")
+open(txt, "w").write("not audio")
+fake = voice.replace(".wav", ".mp3")
+open(fake, "w").write("not audio")
+A = f"/collections/{cid}/edit/audio"
+h0 = edit.snapshot(cid)[0].edit_hash
+for bad in ({"path": txt}, {"path": "/nonexistent/x.wav"}, {"path": fake}, {}, {"path": voice, "bogus": 1}):
+    assert c.put(f"{A}/vo", json=bad).status_code == 422, bad
+assert c.put(f"{A}/bad id", json={"path": voice}).status_code in (404, 422)
+assert c.put(f"{A}/{'x' * 40}", json={"path": voice}).status_code == 422
+r = c.put(f"{A}/vo", json={"path": voice, "start": 1, "volume": 3}).json()
+t = r["spec"]["audio"][0]
+assert t == {"id": "vo", "start": 1.0, "in": 0.0, "out": 6.0, "volume": 2.0, "fade_in": 0.0, "fade_out": 0.0,
+             "path": str(Path(voice).resolve())}, t
+assert r["clamped"][0]["field"] == "volume"
+r = c.put(f"{A}/vo", json={"in": 1, "out": 99, "fade_in": 50}).json()  # no path: the rest is kept, clamped to the file
+t = r["spec"]["audio"][0]
+assert (t["in"], t["out"], t["start"], t["fade_in"]) == (1.0, 6.0, 1.0, 5.0), t
+assert c.put(f"{A}/new", json={"volume": 1}).status_code == 422  # a new track needs a path
+for n in ("m1", "m2"):
+    assert c.put(f"{A}/{n}", json={"path": voice}).status_code == 200
+assert c.put(f"{A}/m3", json={"path": voice}).status_code == 422  # at most 3
+tl, spec = edit.snapshot(cid)
+assert [t["id"] for t in tl.audio] == ["vo", "m1", "m2"] and tl.edit_hash != h0
+assert c.delete(f"{A}/m1").status_code == 200 and c.delete(f"{A}/m1").status_code == 404
+assert [t["id"] for t in c.get(f"/collections/{cid}/edit").json()["spec"]["audio"]] == ["vo", "m2"]
+assert c.put(f"{A}/vo", json={"volume": 0.5}).json()["spec"]["audio"][0]["volume"] == 0.5
+alb = c.post("/collections", json={"name": "a2", "kind": "album"}).json()["id"]
+assert c.put(f"/collections/{alb}/edit/audio/vo", json={"path": voice}).status_code == 422
 
 # size limit
 cid, (i1,) = project("V")
