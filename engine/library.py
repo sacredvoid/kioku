@@ -46,6 +46,12 @@ def touch(c, cid):
     c.execute("update collections set updated = ? where id = ?", (time.time(), cid))
 
 
+def renumber(c, cid):
+    """Positions back to 1..n in order. Midpoints halve the gap on every move and run out of float precision after ~50."""
+    c.execute("update collection_items set pos = r from (select id, row_number() over (order by pos, id) r "
+              "from collection_items where collection_id = ?) n where collection_items.id = n.id", (cid,))
+
+
 # ---------- assets: details, tags, caption
 
 @router.get("/asset/{uuid}")
@@ -185,7 +191,9 @@ def delete_collection(cid: int):
 
 
 class AddItems(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     uuids: list[str] = Field(min_length=1, max_length=5000)
+    pos: float | None = None  # insert here (same scale as PATCH pos) instead of appending; ties go after existing items
 
 
 @router.post("/collections/{cid}/items")
@@ -200,9 +208,14 @@ def add_items(cid: int, body: AddItems):
         have = {r[0] for r in c.execute("select uuid from collection_items where collection_id = ?", (cid,))}
         # albums hold each item once; projects may reuse a clip with different in/out points
         new = list(body.uuids) if col["kind"] == "project" else [u for u in dict.fromkeys(body.uuids) if u not in have]
-        pos = (c.execute("select max(pos) from collection_items where collection_id = ?", (cid,)).fetchone()[0] or 0)
-        c.executemany("insert into collection_items(collection_id, uuid, pos) values (?, ?, ?)",
-                      [(cid, u, pos + i + 1) for i, u in enumerate(new)])
+        if body.pos is None:
+            pos = (c.execute("select max(pos) from collection_items where collection_id = ?", (cid,)).fetchone()[0] or 0)
+            c.executemany("insert into collection_items(collection_id, uuid, pos) values (?, ?, ?)",
+                          [(cid, u, pos + i + 1) for i, u in enumerate(new)])
+        else:
+            c.executemany("insert into collection_items(collection_id, uuid, pos) values (?, ?, ?)",
+                          [(cid, u, body.pos + i * 1e-6) for i, u in enumerate(new)])
+            renumber(c, cid)
         touch(c, cid)
         c.commit()
         return {"added": len(new), "skipped": len(body.uuids) - len(new)}
@@ -234,12 +247,51 @@ def update_item(cid: int, iid: int, body: ItemPatch):
         c.execute("update collection_items set t0 = ?, t1 = ?, pos = coalesce(?, pos) where id = ?",
                   (t0, t1, body.pos, iid))
         if body.pos is not None:
-            # midpoints halve the gap on every move and run out of float precision after ~50; keep positions 1..n
-            c.execute("update collection_items set pos = r from (select id, row_number() over (order by pos, id) r "
-                      "from collection_items where collection_id = ?) n where collection_items.id = n.id", (cid,))
+            renumber(c, cid)
         touch(c, cid)
         c.commit()
         return {"item_id": iid, "t0": t0, "t1": t1}
+
+
+class ItemReplace(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+    uuid: str | None = None
+    t0: float | None = Field(None, ge=0)
+    t1: float | None = Field(None, ge=0)
+
+
+@router.put("/collections/{cid}/items/{iid}")
+def replace_item(cid: int, iid: int, body: ItemReplace):
+    """Swap the source of a clip in place: item_id and pos stay, so its edit settings (speed, look, transition...) carry over.
+    A new uuid starts untrimmed unless t0/t1 are given; without uuid this trims like PATCH."""
+    with conn() as c:
+        require_collection(c, cid)
+        row = c.execute("select i.uuid, i.t0, i.t1, a.kind from collection_items i join assets a using(uuid) "
+                        "where i.id = ? and i.collection_id = ?", (iid, cid)).fetchone()
+        if not row:
+            raise HTTPException(404, "no such item")
+        uuid, t0, t1 = row[0], row[1], row[2]
+        new = row[0]
+        if body.uuid is not None and body.uuid != uuid:
+            a = c.execute("select kind, duration from assets where uuid = ?", (body.uuid,)).fetchone()
+            if not a:
+                raise HTTPException(422, f"not indexed: {body.uuid}")
+            if (a[0] == "image") != (row[3] == "image"):
+                raise HTTPException(422, "a photo can only be swapped for a photo, and a video for a video")
+            new, t0, t1 = body.uuid, None, None
+        dur = (c.execute("select duration from assets where uuid = ?", (new,)).fetchone() or [0])[0] or 0
+        if "t0" in body.model_fields_set:
+            t0 = body.t0
+        if "t1" in body.model_fields_set:
+            t1 = body.t1
+        if t0 is not None and t1 is not None and t1 <= t0:
+            raise HTTPException(422, "out point must be after in point")
+        if dur and any(t is not None and t > dur + 0.05 for t in (t0, t1)):
+            raise HTTPException(422, f"clip is only {dur:.1f}s long")
+        c.execute("update collection_items set uuid = ?, t0 = ?, t1 = ? where id = ?", (new, t0, t1, iid))
+        touch(c, cid)
+        c.commit()
+        return {"item_id": iid, "uuid": new, "t0": t0, "t1": t1}
 
 
 @router.delete("/collections/{cid}/items/{iid}", status_code=204)

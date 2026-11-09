@@ -26,6 +26,8 @@ router = APIRouter()
 log = logging.getLogger("safelight.media")
 PROXIES = core.DATA / "proxies"
 SHEETS = core.DATA / "sheets"
+STRIPS = core.DATA / "strips"
+STRIP_W, STRIP_H, STRIP_MAX = 160, 90, 120
 VIDEO_EXT = {".mov", ".mp4", ".m4v"}
 MAX_SCENE = 8.0  # split longer scenes into even pieces so cuts can land inside long takes
 _locks: dict[str, threading.Lock] = {}
@@ -116,7 +118,7 @@ def ensure_proxy(uuid):
         part = out.with_suffix(".part.mp4")
         r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
                             "-vf", f"scale=-2:'min({settings.get().proxy_height},ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
-                            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(part)],
+                            "-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(part)],
                            capture_output=True, text=True)
         if r.returncode != 0:
             part.unlink(missing_ok=True)
@@ -361,4 +363,49 @@ def sheet_route(uuid: str):
     f = SHEETS / f"{uuid}.jpg"
     if not f.is_file() or f.parent != SHEETS:
         raise HTTPException(404, "not analyzed yet")
+    return FileResponse(f, media_type="image/jpeg")
+
+
+def make_strip(proxy, out):
+    """One row of 160x90 tiles, centre-cropped to 16:9, n = min(120, ceil(duration)) frames spread evenly in time."""
+    import cv2
+    dur = probe_duration(proxy)
+    if not dur > 0:
+        raise RuntimeError("the playable copy has no length")
+    n = min(STRIP_MAX, int(np.ceil(dur)))
+    cap = cv2.VideoCapture(str(proxy))
+    try:
+        tiles, last = [], np.zeros((STRIP_H, STRIP_W, 3), np.uint8)
+        for k in range(n):
+            f = frame_at(cap, (k + 0.5) * dur / n)
+            if f is not None:
+                h, w = f.shape[:2]
+                cw, ch = (int(h * 16 / 9), h) if w * 9 > h * 16 else (w, int(w * 9 / 16))
+                x, y = (w - cw) // 2, (h - ch) // 2
+                last = cv2.resize(f[y:y + ch, x:x + cw], (STRIP_W, STRIP_H), interpolation=cv2.INTER_AREA)
+            tiles.append(last)  # a frame that will not decode repeats its neighbour
+    finally:
+        cap.release()
+    ok, buf = cv2.imencode(".jpg", np.hstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 70])
+    if not ok:
+        raise RuntimeError("could not encode the filmstrip")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    part = out.with_suffix(f".{threading.get_ident()}.part")
+    part.write_bytes(buf.tobytes())
+    part.replace(out)
+
+
+@router.get("/media/{uuid}/strip")
+def strip_route(uuid: str):
+    """Filmstrip of the whole source clip for the timeline block; built from the proxy, cached, rebuilt if the proxy is newer."""
+    proxy, f = PROXIES / f"{uuid}.mp4", STRIPS / f"{uuid}.jpg"
+    if proxy.parent != PROXIES or not proxy.is_file():
+        raise HTTPException(404, "no playable copy yet")
+    if f.parent != STRIPS:
+        raise HTTPException(404, "no such clip")
+    if not f.is_file() or f.stat().st_mtime < proxy.stat().st_mtime:
+        try:  # no lock_for here: analyze holds it for minutes. Two racing builds write the same bytes, replace is atomic
+            make_strip(proxy, f)
+        except RuntimeError as e:
+            raise HTTPException(502, str(e))
     return FileResponse(f, media_type="image/jpeg")

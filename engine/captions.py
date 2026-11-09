@@ -645,6 +645,27 @@ def captions_state(cid: int):
             **counts(selected_uuids(cid, spec), cfg), "setup": setup_status()}
 
 
+@router.get("/collections/{cid}/captions/cues")
+def captions_cues(cid: int):
+    """Output-time cues for the clips with captions on, from transcripts already stored (never transcribes), plus the
+    per-clip speech status. Same timing math as the render."""
+    import edit
+    tl, spec = edit.snapshot(cid)
+    picked = {i["item_id"] for i in video_items(cid) if spec["clips"].get(str(i["item_id"]), {}).get("captions")}
+    transcripts = {}
+    for u in {s.uuid for s in tl.segs if s.item_id in picked}:
+        got = cached(u)
+        transcripts[u] = got[1] if got and got[0] == "ok" else []
+    owner = {(c.t0, c.text): iid for iid in picked for c in map_cues(tl, transcripts, {iid})}  # who each cue belongs to
+    cues = [{"t0": c.t0, "t1": c.t1, "text": c.text, "item_id": owner[(c.t0, c.text)]} for c in map_cues(tl, transcripts, picked)]
+    clips = []
+    for i in video_items(cid):
+        got = _load(i["uuid"])
+        clips.append({"item_id": i["item_id"], "uuid": i["uuid"], "selected": i["item_id"] in picked,
+                      "speech": speech_status(i["uuid"]), "lang": got[1] if got else None})
+    return {"cues": cues, "clips": clips}
+
+
 @router.post("/collections/{cid}/captions/transcribe", status_code=202)
 def transcribe_route(cid: int):
     return start_transcription(cid)

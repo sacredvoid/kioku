@@ -6,6 +6,7 @@ edit_specs table. compute_timeline is pure and works in whole frames; render and
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import time
@@ -14,7 +15,8 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 import core
@@ -153,16 +155,19 @@ def load(cid):
         return _read(c, col)
 
 
-def mutate(cid, fn):
+def mutate(cid, fn, with_conn=False):
     """Atomic read-modify-write. fn(spec, collection) edits spec in place and returns a list of clamp notes
-    ({"field", "from", "to"}); it may raise HTTPException(422), which rolls everything back."""
+    ({"field", "from", "to"}); it may raise HTTPException(422), which rolls everything back.
+    with_conn: fn(spec, collection, c) also gets the write connection, so it can change collection items in the same
+    transaction (never use library.conn() inside fn, it would wait on this lock). If fn adds items it must add them
+    to collection["items"] too, or the spec entries it writes for them are pruned."""
     with conn() as c:
         c.execute("begin immediate")  # writers queue here, so parallel tool calls cannot lose updates
         try:
             col = library.get_collection(cid)
             _require_project(col)
             spec, rev = _read(c, col)
-            notes = fn(spec, col) or []
+            notes = (fn(spec, col, c) if with_conn else fn(spec, col)) or []
             _prune(spec, col)
             text = json.dumps(spec, separators=(",", ":"))
             if len(text) > MAX_SPEC_BYTES:
@@ -493,6 +498,51 @@ def delete_transition(cid: int, item_id: int):
     return put_transition(cid, item_id, TransitionPut(type="cut"))
 
 
+# ---------- split
+
+class SplitBody(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+    at: float = Field(ge=0)  # source seconds
+
+
+@router.post("/collections/{cid}/items/{item_id}/split")
+def split_item(cid: int, item_id: int, body: SplitBody):
+    """Cut one clip in two at a source time, atomically: the first keeps item_id and [t0, at], the new second clip
+    is [at, t1] right after it, with a copy of the clip's settings and the transition that followed the original."""
+    made = []
+
+    def fn(spec, col, c):
+        items = col["items"]
+        k = next((n for n, i in enumerate(items) if i["item_id"] == item_id), None)
+        if k is None:
+            raise HTTPException(404, "no such item")
+        it = items[k]
+        if it["kind"] == "image":
+            raise HTTPException(422, "photos cannot be split")
+        t0 = it["t0"] or 0.0
+        t1 = it["t1"] if it["t1"] is not None else it["duration"]
+        if not t1:
+            raise HTTPException(422, "this clip has no known length yet")
+        if not t0 + SHORT_CLIP < body.at < t1 - SHORT_CLIP:
+            raise HTTPException(422, f"split point must be between {t0 + SHORT_CLIP:.2f}s and {t1 - SHORT_CLIP:.2f}s of the clip")
+        nxt = items[k + 1]["pos"] if k + 1 < len(items) else it["pos"] + 1
+        new_pos = (it["pos"] + nxt) / 2
+        c.execute("update collection_items set t1 = ? where id = ?", (body.at, item_id))
+        new = c.execute("insert into collection_items(collection_id, uuid, t0, t1, pos) values (?,?,?,?,?)",
+                        (cid, it["uuid"], body.at, it["t1"], new_pos)).lastrowid
+        library.renumber(c, cid)
+        items.insert(k + 1, {**it, "item_id": new, "t0": body.at, "pos": new_pos})
+        a, b = str(item_id), str(new)
+        if a in spec["clips"]:
+            spec["clips"][b] = json.loads(json.dumps(spec["clips"][a]))
+        if a in spec["transitions"]:
+            spec["transitions"][b] = spec["transitions"].pop(a)
+        made.append(new)
+
+    out = mutate(cid, fn, with_conn=True)
+    return {"item_id": made[0], **out}
+
+
 # ---------- audio tracks
 
 def audio_info(path):
@@ -565,3 +615,54 @@ def delete_audio(cid: int, track_id: str):
         return []
 
     return mutate(cid, fn)
+
+
+def _track(cid, track_id):
+    """The audio file recorded in the spec for this track id. Only recorded paths are ever served."""
+    spec, _ = load(cid)
+    t = next((t for t in spec["audio"] if t["id"] == track_id), None)
+    if not t:
+        raise HTTPException(404, "no such audio track")
+    p = Path(t["path"])
+    if p.suffix.lower() not in AUDIO_EXT or not p.is_file():
+        raise HTTPException(404, "audio file is missing")
+    return p
+
+
+@router.get("/collections/{cid}/edit/audio/{track_id}/file")
+def audio_file(cid: int, track_id: str):
+    return FileResponse(_track(cid, track_id))  # Range supported, so <audio> can seek
+
+
+PEAKS = core.DATA / "peaks"
+PEAK_RATE = 8000
+
+
+@router.get("/collections/{cid}/edit/audio/{track_id}/peaks")
+def audio_peaks(cid: int, track_id: str, n: int = Query(600, ge=1, le=4000)):
+    """Waveform for the lane: n buckets of max abs sample, scaled so the loudest is 1. Cached by file, mtime and n."""
+    import numpy as np
+    p = _track(cid, track_id)
+    key = hashlib.sha1(f"{p}|{p.stat().st_mtime_ns}|{n}".encode()).hexdigest()
+    cache = PEAKS / f"{key}.json"
+    if cache.is_file():
+        return Response(cache.read_bytes(), media_type="application/json")
+    try:
+        r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(p), "-vn", "-ac", "1", "-ar", str(PEAK_RATE),
+                            "-f", "s16le", "-"], capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(502, "reading the audio took too long")
+    if r.returncode != 0:
+        raise HTTPException(422, f"{p.name} has no readable audio")
+    x = np.abs(np.frombuffer(r.stdout[: len(r.stdout) // 2 * 2], dtype="<i2").astype(np.int32))
+    if not x.size:
+        raise HTTPException(422, f"{p.name} has no readable audio")
+    edges = np.linspace(0, x.size, min(n, x.size) + 1).astype(int)
+    pk = np.maximum.reduceat(x, edges[:-1])
+    pk = pk / max(int(pk.max()), 1)
+    body = json.dumps({"duration": round(x.size / PEAK_RATE, 3), "peaks": [round(float(v), 2) for v in pk]}, separators=(",", ":"))
+    PEAKS.mkdir(parents=True, exist_ok=True)
+    tmp = cache.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(body)
+    tmp.replace(cache)
+    return Response(body, media_type="application/json")
