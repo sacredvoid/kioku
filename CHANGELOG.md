@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0 (2026-11-09)
+
+- Ask page: sections as cards with real headings
+- Top bar: centre the window buttons in the 56px bar
+- Library: year and month filters for browsing and search
+
 ## v0.2.1 (2026-11-09)
 
 - Declare the Photos entitlement so the Photos prompt can appear
