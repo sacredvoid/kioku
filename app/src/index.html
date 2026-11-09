@@ -38,7 +38,7 @@
       <button type="button" data-tab="albums"><span class="ico ico-stack" aria-hidden="true"></span><span class="lbl">Albums</span></button>
       <button type="button" data-tab="review"><span class="ico ico-check" aria-hidden="true"></span><span class="lbl">Review</span><span class="n" id="n-review"></span></button>
       <button type="button" data-tab="history"><span class="ico ico-clock" aria-hidden="true"></span><span class="lbl">History</span></button>
-      <button type="button" id="settings-btn" disabled><span class="ico ico-gear" aria-hidden="true"></span><span class="lbl">Settings</span></button>
+      <button type="button" data-tab="settings" title="Settings (⌘,)"><span class="ico ico-gear" aria-hidden="true"></span><span class="lbl">Settings</span></button>
     </nav>
     <div class="k-tools">
       <!-- activity center: a mini loader while background work runs; opens the list of jobs -->
@@ -118,6 +118,18 @@
       <p class="hint" id="drafts-empty">Nothing to review. Make a smart album from Albums and its picks wait here.</p>
       <div id="drafts-group"><div id="drafts" class="list"></div></div>
     </section>
+    <section id="settings-view" class="k-page k-settings" hidden>
+      <div class="k-page-head"><h1>Settings</h1></div>
+      <p class="hint">How the engine runs Claude edits, downloads and playable copies. Changes apply to the next edit or download. Appearance lives under the half-moon button in the top bar.</p>
+      <form id="settings-form" class="set-form" novalidate>
+        <div id="settings-fields"></div>
+        <p id="settings-msg" class="set-msg" aria-live="polite"></p>
+        <div class="set-actions">
+          <button type="button" id="settings-revert" class="ghost">Revert</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </section>
     <section id="history-view" class="k-page k-hist" hidden>
       <div class="k-page-head"><h1>History</h1></div>
       <ol id="history" class="runs-list"></ol>
@@ -155,17 +167,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <dialog id="settings" class="settings" aria-labelledby="settings-title">
-    <form id="settings-form" method="dialog">
-      <h2 id="settings-title">Settings</h2>
-      <div id="settings-fields"></div>
-      <p id="settings-msg" class="set-msg" role="alert"></p>
-      <div class="set-actions">
-        <button type="button" id="settings-cancel" class="ghost">Cancel</button>
-        <button type="submit" class="primary">Save</button>
-      </div>
-    </form>
-  </dialog>
 
   <dialog id="index-dlg" class="settings" aria-labelledby="index-title">
     <h2 id="index-title">Search index</h2>

@@ -71,7 +71,7 @@ function popover(btn: HTMLElement, pop: HTMLElement, onOpen?: () => void) {
 }
 popover($("look-btn"), lookPop, drawLooks);
 
-type Page = "projects" | "albums" | "review" | "history";
+type Page = "projects" | "albums" | "review" | "history" | "settings";
 type View = { type: "ask" } | { type: "page"; page: Page } | { type: "lib"; kind: string } | { type: "col"; id: number } | { type: "draft"; id: number };
 let view: View = { type: "ask" };
 let collections: Collection[] = [];
@@ -200,7 +200,7 @@ async function go(v: View, search = q.value.trim()) {
   review.hide();
   // ask and the list pages own the screen; library, collections and drafts use the grid area below
   const own = v.type === "ask" ? "ask" : v.type === "page" ? v.page : "";
-  for (const s of ["ask", "projects", "albums", "review", "history"]) $(`${s}-view`).hidden = s !== own;
+  for (const s of ["ask", "projects", "albums", "review", "history", "settings"]) $(`${s}-view`).hidden = s !== own;
   $("libbar").hidden = v.type !== "lib";
   main.classList.toggle("narrow", own === "ask" || own === "history");
   for (const id of ["head", "summary", "grid"]) $(id).hidden = !!own;
@@ -213,6 +213,7 @@ async function go(v: View, search = q.value.trim()) {
     summary.textContent = "";
     if (v.type === "ask") renderBoard();
     if (own === "history") renderHistory();
+    if (own === "settings") renderSettings();
     updateSelbar();
     return;
   }
@@ -1117,7 +1118,6 @@ async function heartbeat() {
     }
     drawActivity();
     if (!ready) { ready = true; syncCollections(); bootDone(); }
-    $<HTMLButtonElement>("settings-btn").disabled = false;
   } catch {
     dot.className = "engine wait";
     $("engine-text").textContent = ready ? "Engine offline, retrying" : "Starting engine";
@@ -1186,12 +1186,13 @@ const LABELS: Record<string, [string, string]> = {
   download_seconds: ["iCloud download timeout", "s per video"],
   proxy_height: ["Playable copy quality", "p"],
 };
-$("settings-btn").onclick = async () => {
-  const dlg = $<HTMLDialogElement>("settings");
+async function renderSettings() {
   const form = $<HTMLFormElement>("settings-form");
   const msg = $("settings-msg");
   let cur: { values: Settings; schema: Record<string, SettingField> };
-  try { cur = await api("/settings"); } catch (e) { return fail("load settings")(e); }
+  msg.className = "set-msg";
+  msg.textContent = "Loading…";
+  try { cur = await api("/settings"); } catch (e) { msg.className = "set-msg error"; msg.textContent = `Couldn't load settings: ${errMsg(e)}`; return; }
   const fields = Object.entries(cur.schema).map(([key, f]) => {
     const [label, unit] = LABELS[key] ?? [key.replace(/_/g, " "), ""];
     const row = el("label", "set-row");
@@ -1219,17 +1220,20 @@ $("settings-btn").onclick = async () => {
   msg.className = "set-msg";
   form.onsubmit = async (e) => {
     e.preventDefault();
-    // only the engine's own fields (the theme picker lives in this form too, but it's a local preference)
+    if (!form.reportValidity()) return;
     const body = Object.fromEntries([...new FormData(form)].filter(([k]) => k in cur.schema).map(([k, v]) => [k, cur.schema[k]?.type === "integer" || typeof cur.schema[k]?.enum?.[0] === "number" ? Number(v) : v]));
     try {
       await api("/settings", "PUT", body);
-      dlg.close();
-      toast("Settings saved. They apply to the next edit or download.");
+      msg.className = "set-msg ok";
+      msg.textContent = "Saved. Applies to the next edit or download.";
     } catch (err) { msg.className = "set-msg error"; msg.textContent = `Not saved: ${errMsg(err)}`; }
   };
-  dlg.showModal();
-};
-$("settings-cancel").onclick = () => $<HTMLDialogElement>("settings").close();
+}
+$("settings-revert").onclick = () => renderSettings();
+// macOS convention: Cmd+, opens Settings
+document.addEventListener("keydown", (e) => {
+  if (e.key === "," && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) { e.preventDefault(); go({ type: "page", page: "settings" }); }
+});
 
 // ---------- Ask: the landing page. "make / cut / recap ..." starts a new Claude edit; anything else is a library search.
 const MAKE = /^\s*(?:please\s+)?(?:make|cut|create|edit|recap|build|assemble|compile|stitch|put together|turn)\b/i;
