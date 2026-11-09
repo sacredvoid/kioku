@@ -423,7 +423,7 @@ class Editor {
     this.playB = btn("", "icon ghost tl-play", () => { this.stopShuttle(); this.player.toggle(); this.renderPlay(); }, "Play / pause (Space)");
     const stepB = (n: number, ico: string, label: string) => { const b = btn("", "icon ghost", () => { this.stopShuttle(); this.player.step(n); }, label); b.append(icon(ico)); return b; };
     this.roughB = btn("Rough", "", () => this.player.setExact(null));
-    this.exactB = btn("Exact", "", () => { if (this.previewHash) { this.player.setExact(`${API}/collections/${this.cid}/render/preview/file`); this.renderMode(); } });
+    this.exactB = btn("Exact", "", () => { if (this.previewHash) { this.showExact(this.exactOffset); } });
     this.roughB.onclick = () => { this.player.setExact(null); this.renderMode(); };
     const seg = el("div", "tl-seg");
     seg.setAttribute("role", "group");
@@ -493,8 +493,14 @@ class Editor {
     this.exactB.disabled = !this.previewHash || this.previewHash !== this.model.edit.edit_hash;
     this.exactB.title = this.exactB.disabled ? "Press Preview to render the exact cut" : "Watch the rendered preview";
   }
-  onPreviewDone(show = true) {
-    this.checkExact().then(() => { if (show && this.previewHash === this.model.edit.edit_hash) { this.player.setExact(`${API}/collections/${this.cid}/render/preview/file`); this.renderMode(); } });
+  exactOffset = 0;
+  showExact(offset: number) {  // T1's LivePlayer.setExact takes the output time where the preview file starts
+    this.exactOffset = offset;
+    (this.player as Player & { setExact(u: string | null, o?: number): void }).setExact(`${API}/collections/${this.cid}/render/preview/file`, offset);
+    this.renderMode();
+  }
+  onPreviewDone(show = true, offset = 0) {
+    this.checkExact().then(() => { if (show && this.previewHash === this.model.edit.edit_hash) { this.showExact(offset); this.renderMode(); } });
   }
 
   // ---------- time and zoom
@@ -1000,8 +1006,10 @@ class Editor {
     q.placeholder = mode === "add" ? "Search your library" : "Search for a replacement";
     q.setAttribute("aria-label", "Search");
     if (swapIt) q.value = this.clipName(swapIt).split(", ").slice(0, 3).join(" ");
-    let kind: "video" | "image" = "video";
+    let kind: "video" | "image" = swapIt && !swapIt.video ? "image" : "video";
     const kb = btn("Videos", "chip", () => { kind = kind === "video" ? "image" : "video"; kb.textContent = kind === "video" ? "Videos" : "Photos"; run(); });
+    kb.textContent = kind === "video" ? "Videos" : "Photos";
+    kb.hidden = mode === "swap";  // the engine refuses photo <-> video swaps
     const picked = new Set<string>();
     const addN = btn("", "primary", () => { this.addClips([...picked]); this.closeStrip(); });
     addN.hidden = true;
@@ -1263,6 +1271,6 @@ export const timeline = {
   unmount() { ed?.destroy(); ed = null; },
   /** Playhead in output seconds (for Preview windows). */
   time() { return ed ? ed.player.time : 0; },
-  /** Call when a preview render finishes: enables Exact and switches to it. */
-  previewDone() { ed?.onPreviewDone(true); },
+  /** Call when a preview render finishes: enables Exact and switches to it. offset = output second where the file starts (window start). */
+  previewDone(offset = 0) { ed?.onPreviewDone(true, offset); },
 };
