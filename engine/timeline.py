@@ -28,6 +28,11 @@ class Timeline:
     total_frames: int
     warnings: tuple[str, ...]
     edit_hash: str
+    fade_in: float = 0.0           # seconds, 0 to 3, black / silence at the start and end of the whole video
+    fade_out: float = 0.0
+    audio: tuple = ()              # extra tracks: dicts {id, path, start, in, out, volume, fade_in, fade_out}
+    clip_volume: float = 1.0       # scales every clip's own audio in the final mix
+    duck: bool = True              # lower clip audio under the extra tracks
 
     @property
     def duration(self) -> float:

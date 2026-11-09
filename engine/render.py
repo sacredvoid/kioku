@@ -32,7 +32,7 @@ from timeline import Seg
 
 router = APIRouter()
 log = logging.getLogger("safelight.render")
-RENDER_V = 1  # bump to invalidate every cached segment (e.g. when a look preset changes)
+RENDER_V = 2  # bump to invalidate every cached segment (e.g. when a look preset changes)
 CACHE = core.DATA / "render_cache"  # /final and /preview, LRU by mtime
 RENDERS = core.DATA / "renders"  # /<cid>/preview.mp4, .srt, <mode>-sheet.jpg
 EXPORTS = projects.EXPORTS  # finals go to EXPORTS/<slug>/
@@ -95,15 +95,17 @@ def probe_source(path):
 
 # ---------- sources
 
-def still_for(uuid, mode, tmp):
+def still_for(uuid, mode, tmp, orig=None):
     """A JPEG with orientation baked in (no EXIF guesswork left for ffmpeg). Preview: the indexed preview image.
-    Final: the original (HEIC goes through sips first)."""
+    Final: the original, already downloaded by fetch_originals when `orig` is given (HEIC goes through sips first)."""
     if mode == "preview":
         with core.connect() as c:
             row = c.execute("select path from assets where uuid = ?", (uuid,)).fetchone()
         src = Path(row[0]) if row and row[0] else None
         if not src or not src.is_file():
             raise RuntimeError("no preview image on disk")
+    elif orig:
+        src = orig
     else:
         with media.lock_for(uuid):  # same order as media.fetch: lock, then slot
             media.video_slot(uuid)
@@ -129,6 +131,70 @@ def still_for(uuid, mode, tmp):
 def source_for(seg, mode, tmp):
     """Before the render slot is taken: lock_for(uuid) then video_slot happen inside media.fetch / still_for."""
     return still_for(seg.uuid, mode, tmp) if seg.kind == "photo" else media.fetch(seg.uuid, mode, tmp / "src")
+
+
+def fetch_originals(segs, tmp, slot_key, label, report):
+    """Final renders: every original that is not already on disk, in ONE projects.originals call (one osxphotos
+    launch). Returns ({uuid: path}, {uuid: readable error}). Lock order as media.fetch: lock_for(uuid) for each
+    (sorted, so two batches cannot deadlock), then one video_slot. Never called while holding the render slot.
+    report(done, total) is called about once a second while downloading."""
+    got, errs, need = {}, {}, []
+    for s in segs:
+        if s.kind == "video":  # photos always go through originals (the indexed path is only a preview image)
+            try:
+                p = media.local_original(s.uuid)
+            except HTTPException as e:
+                errs[s.uuid] = str(e.detail)
+                continue
+            if p:
+                got[s.uuid] = p
+                continue
+        need.append(s.uuid)
+    need = list(dict.fromkeys(need))
+    if not need:
+        return got, errs
+    limit = settings.get().download_seconds * len(need)  # what projects.originals allows
+    dest = tmp / "orig"
+    locks = [media.lock_for(u) for u in sorted(need)]
+    for lk in locks:
+        lk.acquire()
+    stop = threading.Event()
+
+    def poll():  # originals() blocks; the files appearing in dest are the progress
+        while not stop.wait(1):
+            try:
+                report(len({f.stem for f in dest.iterdir()} & set(need)), len(need))
+            except OSError:
+                pass
+    poller = threading.Thread(target=poll, daemon=True)
+    try:
+        media.video_slot(slot_key, label)
+        try:
+            report(0, len(need))
+            poller.start()
+            res, why = {}, "iCloud download failed"
+            try:
+                res = projects.originals(need, dest)
+            except subprocess.TimeoutExpired:
+                why = f"iCloud download timed out after {limit} s"
+            except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+                why = str(e)[:200]
+                log.warning("batch download failed: %s", e)
+        finally:
+            media.release_video_slot()
+    finally:
+        stop.set()
+        if poller.is_alive():
+            poller.join()
+        for lk in locks:
+            lk.release()
+    for u in need:
+        if res.get(u):
+            got[u] = res[u]
+        else:
+            errs[u] = why
+    report(len(need) - sum(u in errs for u in need), len(need))
+    return got, errs
 
 
 def src_id(seg, mode):
@@ -254,9 +320,67 @@ def seg_command(seg, src, src_path, out, mode, dims, fps, workdir):
                   "-t", _n(L, 6), *SEG_CODEC[mode], "-c:a", "pcm_s16le", "-f", "mov", str(out)]
 
 
-def _graph(n, frames, trans, fps, window=None, has_cues=False):
+def _audio_tail(acc, fx, first_in):
+    """Filter lines from the joined clip audio [acc] to [aout]: clip volume, extra tracks (inputs first_in...) mixed
+    in with ducking, loudnorm to -14 LUFS (only when there are tracks, so edits without any keep their levels), fades."""
+    p, cur = [], acc
+    if fx["cv"] != 1:
+        p.append(f"[{cur}]volume={_n(fx['cv'])}[ca]")
+        cur = "ca"
+    if fx["tracks"]:
+        names = []
+        for k, t in enumerate(fx["tracks"]):
+            ch = [f"atrim=start={_n(t['a'], 6)}:end={_n(t['a'] + t['dur'], 6)}", "asetpts=PTS-STARTPTS", "aresample=48000",
+                  "aformat=channel_layouts=stereo", f"volume={_n(t['vol'])}"]
+            if t["fi"]:
+                ch.append(f"afade=t=in:st=0:d={_n(t['fi'], 6)}")
+            if t["fo"]:
+                ch.append(f"afade=t=out:st={_n(max(t['rem'] - t['fo'], 0), 6)}:d={_n(t['fo'], 6)}")
+            if t["delay"] > 0:
+                ch.append(f"adelay={round(t['delay'] * 1000)}:all=1")
+            p.append(f"[{first_in + k}:a]" + ",".join(ch) + f"[t{k}]")
+            names.append(f"[t{k}]")
+        vo = "t0"
+        if len(names) > 1:
+            p.append("".join(names) + f"amix=inputs={len(names)}:normalize=0:duration=longest[vo]")
+            vo = "vo"
+        if fx["duck"]:  # the key is padded to the full length so the clip audio never ends early
+            p.append(f"[{vo}]apad=whole_dur={_n(fx['D'], 6)},asplit=2[k1][k2]")
+            p.append(f"[{cur}][k1]sidechaincompress=threshold=0.01:ratio=6:attack=20:release=500[cd]")
+            cur, vo = "cd", "k2"
+        p.append(f"[{cur}][{vo}]amix=inputs=2:normalize=0:duration=first[mix]")
+        cur = "mix"
+    post = ["loudnorm=I=-14:TP=-1.5:LRA=11", "aresample=48000"] if fx["tracks"] else []
+    if fx["fi"]:
+        post.append(f"afade=t=in:st=0:d={_n(fx['fi'], 6)}")
+    if fx["fo"]:
+        post.append(f"afade=t=out:st={_n(max(fx['D'] - fx['fo'], 0), 6)}:d={_n(fx['fo'], 6)}")
+    p.append(f"[{cur}]" + ",".join(post or ["anull"]) + "[aout]")
+    return p
+
+
+def audio_fx(tl, win, D):
+    """What the finish pass needs beyond the clips: fades, clip volume, ducking and the extra tracks cut to the output
+    (win = (start_frame, end_frame) of a window preview, D = output seconds). Fades only apply where the window
+    reaches the real start / end of the edit. ponytail: a track's fade-in is not shifted when a window cuts its start."""
+    o = win[0] / tl.fps if win else 0.0
+    fi = min(tl.fade_in, D / 2) if o == 0 else 0.0
+    fo = min(tl.fade_out, D / 2) if not win or win[1] == tl.total_frames else 0.0
+    tracks = []
+    for t in tl.audio:
+        delay = t["start"] - o
+        a = t["in"] + max(0.0, -delay)
+        dur = min(t["out"] - a, D - max(delay, 0.0))
+        if dur > 0.01:
+            tracks.append(dict(path=t["path"], a=a, dur=dur, rem=t["out"] - a, delay=max(delay, 0.0), vol=t["volume"],
+                               fi=t["fade_in"], fo=t["fade_out"]))
+    return dict(D=D, fi=fi, fo=fo, cv=tl.clip_volume, duck=tl.duck, tracks=tracks)
+
+
+def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None):
     """Join n inputs (frames[i] long, trans[i] = (xfade name, frames) or None between i and i+1), then optionally
-    trim to window (start, end) in seconds and overlay the caption input (index n). Ends in [vout][aout]."""
+    trim to window (start, end) in seconds and overlay the caption input (index n). fx (audio_fx) adds fades and
+    the extra audio tracks (inputs after the caption input). Ends in [vout][aout]."""
     p = [f"[{i}:v]fps={fps}[v{i}]" for i in range(n)]
     accv, acca, acc = "v0", "0:a", frames[0]
     for i in range(1, n):
@@ -273,19 +397,23 @@ def _graph(n, frames, trans, fps, window=None, has_cues=False):
     if window:
         s, e = window
         p.append(f"[{accv}]trim=start={_n(s, 6)}:end={_n(e, 6)},setpts=PTS-STARTPTS[w]")
-        p.append(f"[{acca}]atrim=start={_n(s, 6)}:end={_n(e, 6)},asetpts=PTS-STARTPTS[aout]")
-        accv, acca = "w", None
+        p.append(f"[{acca}]atrim=start={_n(s, 6)}:end={_n(e, 6)},asetpts=PTS-STARTPTS[aw]")
+        accv, acca = "w", "aw"
     if has_cues:  # never shortest=1: it would end the video when the cue list ends
         p.append(f"[{n}:v]fps={fps},format=rgba[cap]")
         p.append(f"[{accv}][cap]overlay=0:0:eof_action=pass[o]")
         accv = "o"
-    p.append(f"[{accv}]setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,format=yuv420p[vout]")
-    if acca:
-        p.append(f"[{acca}]anull[aout]")
+    fade = ""
+    if fx and fx["fi"]:
+        fade += f"fade=t=in:st=0:d={_n(fx['fi'], 6)},"
+    if fx and fx["fo"]:
+        fade += f"fade=t=out:st={_n(max(fx['D'] - fx['fo'], 0), 6)}:d={_n(fx['fo'], 6)},"
+    p.append(f"[{accv}]{fade}setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,format=yuv420p[vout]")
+    p += _audio_tail(acca, fx, n + bool(has_cues)) if fx else [f"[{acca}]anull[aout]"]
     return ";\n".join(p)
 
 
-def _run_cmd(files, graph, out, workdir, codec, cue_list=None):
+def _run_cmd(files, graph, out, workdir, codec, cue_list=None, extra=()):
     gf = Path(workdir) / f"join_{out.name}.txt"
     gf.write_text(graph)
     cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y"]
@@ -293,6 +421,8 @@ def _run_cmd(files, graph, out, workdir, codec, cue_list=None):
         cmd += ["-i", str(f)]
     if cue_list:
         cmd += ["-f", "concat", "-safe", "0", "-i", str(cue_list)]
+    for f in extra:
+        cmd += ["-i", str(f)]
     return cmd + ["-/filter_complex", str(gf), "-map", "[vout]", "-map", "[aout]", *codec, str(out)]
 
 
@@ -301,10 +431,11 @@ def join_command(seg_files, frames, trans, fps, out, workdir, codec):
     return _run_cmd(seg_files, _graph(len(seg_files), frames, trans, fps), out, workdir, codec)
 
 
-def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec):
-    """Last pass: join (when several files are left), window trim, caption overlay, colour tags, delivery encode."""
-    g = _graph(len(files), frames, trans, fps, window, bool(cue_list))
-    return _run_cmd(files, g, out, workdir, codec, cue_list)
+def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None):
+    """Last pass: join (when several files are left), window trim, caption overlay, fades, audio mix, colour tags,
+    delivery encode."""
+    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx)
+    return _run_cmd(files, g, out, workdir, codec, cue_list, [t["path"] for t in fx["tracks"]] if fx else ())
 
 
 def chunks(trans, K):
@@ -435,7 +566,14 @@ def preview_key(tl, spec, win):
     words = ""
     if spec["captions"]["on"]:
         words = json.dumps([captions.cached(u) for u in sorted({s.uuid for s in tl.segs})], default=str)
-    return hashlib.sha1(f"{tl.edit_hash}|{win}|{words}".encode()).hexdigest()
+    files = []  # an audio file replaced in place keeps its path: mtime and size tell
+    for t in tl.audio:
+        try:
+            st = Path(t["path"]).stat()
+            files.append((t["path"], st.st_mtime_ns, st.st_size))
+        except OSError:
+            files.append((t["path"], None, None))
+    return hashlib.sha1(f"{tl.edit_hash}|{win}|{words}|{files}".encode()).hexdigest()
 
 
 def saved_preview(cid):
@@ -462,6 +600,9 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         raise RuntimeError(f"The edit has {len(tl.segs)} clips; renders are limited to {MAX_CLIPS}.")
     if tl.duration > MAX_SECONDS:
         raise RuntimeError(f"The edit is {tl.duration / 60:.1f} minutes; renders are limited to 15 minutes.")
+    for t in tl.audio:
+        if not Path(t["path"]).is_file():
+            raise RuntimeError(f"Audio file {Path(t['path']).name} is missing ({t['path']}). Remove the track or pick the file again.")
     fps = tl.fps
     dims = edit.output_size(tl.aspect, tl.size, mode == "preview")
     win = None  # (start_frame, end_frame) on the output timeline
@@ -522,13 +663,38 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
             folder = EXPORTS / projects.slug(name)
             _free_check(CACHE, miss_s * 10e6 + 2e9, "the render cache")
             _free_check(folder, out_s * FINAL_MBPS.get(tl.size, 12) * 1e6 / 8 * 2 + 2e9, "the finished video")
+        # progress weights: the join plan only needs frame counts, so progress can cover the downloads too
+        frames = [s.frames for s in sel]
+        trans = [s.trans_after for s in sel[:-1]]
+        K = JOIN_CHUNK.get(tl.size, 8)
+        plan = list(levels(frames, trans, K))
+        join_s = sum(sum(fr[a:b]) - sum(t[1] for t in tr[a:b - 1] if t) for cs, fr, tr in plan for a, b in cs if b - a > 1) / fps
+        dl_w = (miss_s + join_s) * 0.1 if mode == "final" else 0.0
+        prog = Progress(state, miss_s + join_s + dl_w + 0.0001, f"render:{cid}:{mode}", f"Render: {name} ({mode})")
         srcs, errors = {}, []
-        for s in {s.uuid: s for s in miss.values()}.values():
+        uniq = list({s.uuid: s for s in miss.values()}.values())
+        got = {}
+        if mode == "final" and uniq:
+            def report(n, total):
+                prog.stage(f"Downloading originals: {n} of {total}")
+                prog.cb(dl_w)(n / total)
+            got, derrs = fetch_originals(uniq, tmp, prog.slot_key, prog.label, report)
+            prog.add(dl_w)
+        else:
+            derrs = {}
+        for s in uniq:
             if cancel.is_set():
                 raise RuntimeError("Cancelled")
-            state["stage"] = "Fetching originals" if mode == "final" else "Preparing playable copies"
+            if s.uuid in derrs:
+                errors.append(f"{media.label_for(s.uuid)} ({derrs[s.uuid][:120]})")
+                continue
+            if mode == "preview":
+                state["stage"] = "Preparing playable copies"
             try:
-                p = source_for(s, mode, tmp)
+                if mode == "final":
+                    p = still_for(s.uuid, mode, tmp, got[s.uuid]) if s.kind == "photo" else got[s.uuid]
+                else:
+                    p = source_for(s, mode, tmp)
                 srcs[s.uuid] = (p, probe_source(p))
             except (RuntimeError, HTTPException, OSError, subprocess.SubprocessError) as e:
                 if cancel.is_set():
@@ -553,15 +719,8 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
             f = cdir / f"{keys[s.item_id]}.mov"
             if f.is_file():
                 os.utime(f)  # LRU
-        # plan the joins and the progress weights
         base = sel[0].start_frame
         files = [cdir / f"{keys[s.item_id]}.mov" for s in sel]
-        frames = [s.frames for s in sel]
-        trans = [s.trans_after for s in sel[:-1]]
-        K = JOIN_CHUNK.get(tl.size, 8)
-        plan = list(levels(frames, trans, K))
-        join_s = sum(sum(fr[a:b]) - sum(t[1] for t in tr[a:b - 1] if t) for cs, fr, tr in plan for a, b in cs if b - a > 1) / fps
-        prog = Progress(state, miss_s + join_s + 0.0001, f"render:{cid}:{mode}", f"Render: {name} ({mode})")
         # 3. the render slot covers ffmpeg only
         if media.RUNNING >= settings.get().max_agents:
             state["note"] = "Waiting for a free slot"
@@ -609,8 +768,10 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 if last:
                     prog.stage("Joining" if not cap_file else "Joining and adding captions")
                     fl = (sum(fr) - sum(t[1] for t in tr if t)) / fps
-                    cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size))
-                    run_ffmpeg(cmd, (window[1] - window[0]) if window else fl, prog.cb(fl), cancel, _timeout(fl), work)
+                    D = (window[1] - window[0]) if window else fl
+                    cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size),
+                                         audio_fx(tl, win, D))
+                    run_ffmpeg(cmd, D, prog.cb(fl), cancel, _timeout(fl), work)
                     prog.add(fl)
                     break
                 prog.stage(f"Joining (pass {li + 1})")

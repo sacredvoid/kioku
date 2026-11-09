@@ -6,13 +6,16 @@ edit_specs table. compute_timeline is pure and works in whole frames; render and
 import hashlib
 import json
 import math
+import re
+import subprocess
 import time
 from contextlib import closing
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 import core
 import library
@@ -25,6 +28,7 @@ EDIT_SCHEMA = """create table if not exists edit_specs(
   collection_id integer primary key references collections(id) on delete cascade,
   spec text not null, rev integer not null default 0, updated real)"""
 MAX_SPEC_BYTES = 100_000
+MAX_SECONDS = 15 * 60  # same limit as render.MAX_SECONDS
 ASPECTS = {"16:9": (16, 9), "9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5)}
 SIZES = (720, 1080, 2160)
 FPS = (24, 25, 30, 60)
@@ -33,6 +37,9 @@ XFADE = {"dissolve": "fade", "fade-black": "fadeblack", "wipe-left": "wipeleft",
          "wipe-right": "wiperight", "slide-left": "slideleft"}
 MIN_TRANS_FRAMES = 3
 SHORT_CLIP = 0.2
+AUDIO_EXT = {".mp3", ".m4a", ".wav", ".aac", ".aiff", ".caf"}
+MAX_AUDIO = 3
+MAX_FADE = 3.0
 
 
 # ---------- looks: parametric presets at strength 1; strength k scales every parameter's distance from identity
@@ -42,19 +49,21 @@ class Look:
     contrast: float = 1.0
     saturation: float = 1.0
     brightness: float = 0.0
-    rs: float = 0.0   # colorbalance shadows / midtones, red and blue
+    rs: float = 0.0   # colorbalance shadows / midtones / highlights, red and blue
     bs: float = 0.0
     rm: float = 0.0
     bm: float = 0.0
+    rh: float = 0.0
+    bh: float = 0.0
 
 
 # ponytail: no curves=preset (it cannot scale with strength); lut3d is the upgrade for real film LUTs.
 LOOKS = {
-    "warm": Look(saturation=1.08, rs=0.06, bs=-0.06, rm=0.04, bm=-0.04),
-    "cool": Look(saturation=0.98, rs=-0.05, bs=0.06, rm=-0.03, bm=0.04),
-    "film": Look(contrast=1.08, saturation=0.88, rs=0.05, bs=0.03, rm=0.02, bm=-0.02),
-    "mono": Look(contrast=1.1, saturation=0.0),
-    "punch": Look(contrast=1.15, saturation=1.3),
+    "warm": Look(contrast=1.06, saturation=1.2, brightness=0.02, rs=0.10, bs=-0.10, rm=0.09, bm=-0.09, rh=0.06, bh=-0.08),
+    "cool": Look(contrast=1.06, saturation=0.9, rs=-0.12, bs=0.17, rm=-0.09, bm=0.14, rh=-0.05, bh=0.10),
+    "film": Look(contrast=1.2, saturation=0.78, brightness=-0.02, rs=-0.06, bs=0.10, rm=0.02, bm=-0.03, rh=0.10, bh=-0.08),
+    "mono": Look(contrast=1.25, saturation=0.0, brightness=-0.02),
+    "punch": Look(contrast=1.3, saturation=1.6, brightness=0.01),
 }
 _IDENT = Look()
 
@@ -71,7 +80,7 @@ def look_filters(look):
     p = LOOKS[name]
     v = {f.name: getattr(_IDENT, f.name) + (getattr(p, f.name) - getattr(_IDENT, f.name)) * k for f in fields(Look)}
     parts = []
-    for flt, keys in (("eq", ("contrast", "saturation", "brightness")), ("colorbalance", ("rs", "bs", "rm", "bm"))):
+    for flt, keys in (("eq", ("contrast", "saturation", "brightness")), ("colorbalance", ("rs", "bs", "rm", "bm", "rh", "bh"))):
         args = [f"{x}={_num(v[x])}" for x in keys if _num(v[x]) != _num(getattr(_IDENT, x))]
         if args:
             parts.append(f"{flt}=" + ":".join(args))
@@ -81,7 +90,7 @@ def look_filters(look):
 # ---------- spec
 
 def default_spec():
-    return {"version": 1, "format": {"aspect": "16:9", "size": 1080, "fps": 30},
+    return {"version": 1, "format": {"aspect": "16:9", "size": 1080, "fps": 30, "fade_in": 0.0, "fade_out": 0.0}, "audio": [], "clip_volume": 1.0, "duck": True,
             "look": {"name": None, "strength": 1.0}, "clips": {}, "transitions": {},
             "captions": {"on": False, "style": "bold"}}
 
@@ -108,9 +117,18 @@ def _prune(spec, col):
         spec[k] = {i: v for i, v in spec[k].items() if i in ids}
 
 
+def _fill(spec):
+    """Specs saved before fades / audio existed gain the defaults."""
+    for k, v in (("fade_in", 0.0), ("fade_out", 0.0)):
+        spec["format"].setdefault(k, v)
+    for k, v in (("audio", []), ("clip_volume", 1.0), ("duck", True)):
+        spec.setdefault(k, v)
+
+
 def _read(c, col):
     row = c.execute("select spec, rev from edit_specs where collection_id = ?", (col["id"],)).fetchone()
     spec, rev = (json.loads(row[0]), row[1]) if row else (default_spec(), 0)
+    _fill(spec)
     _prune(spec, col)
     return spec, rev
 
@@ -183,13 +201,15 @@ def compute_timeline(items, spec):
                    "pan": ("pan", pf, pt)}[rf.get("mode", "center")]
         lk = e["look"] if "look" in e else spec["look"]
         raw.append(dict(item_id=it["item_id"], uuid=it["uuid"], kind="photo" if photo else "video",
-                        src_in=a, src_out=b, speed=speed, volume=e.get("volume", 1.0),
+                        src_in=a, src_out=b, speed=speed, volume=0.0 if e.get("mute") else e.get("volume", 1.0),
                         adjust=(adj.get("exposure", 0.0), adj.get("contrast", 1.0), adj.get("saturation", 1.0),
                                 adj.get("warmth", 0.0)),
                         look=(lk["name"], lk.get("strength", 1.0)) if lk["name"] else None,
                         reframe=reframe, frames=n))
         if n / fps < SHORT_CLIP:
             warnings.append(f"clip {len(raw)} is only {n / fps:.2f}s long")
+    if raw and spec["transitions"].get(str(raw[-1]["item_id"]), {"type": "cut"})["type"] != "cut":
+        warnings.append("the transition after the last clip does nothing (there is no next clip)")
     tf = [0] * len(raw)  # transition frames after each clip
     for i in range(len(raw) - 1):
         t = spec["transitions"].get(str(raw[i]["item_id"]))
@@ -213,7 +233,9 @@ def compute_timeline(items, spec):
     ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items]],
                        sort_keys=True, separators=(",", ":"))
     return Timeline(fps=fps, aspect=spec["format"]["aspect"], size=spec["format"]["size"], segs=tuple(segs),
-                    total_frames=total, warnings=tuple(warnings), edit_hash=hashlib.sha1(ident.encode()).hexdigest())
+                    total_frames=total, warnings=tuple(warnings), edit_hash=hashlib.sha1(ident.encode()).hexdigest(),
+                    fade_in=spec["format"].get("fade_in", 0.0), fade_out=spec["format"].get("fade_out", 0.0),
+                    audio=tuple(spec.get("audio", ())), clip_volume=spec.get("clip_volume", 1.0), duck=spec.get("duck", True))
 
 
 def snapshot(cid):
@@ -239,6 +261,22 @@ class EditPatch(BaseModel):
     look_strength: F = 1.0
     captions: bool = False
     caption_style: Literal["bold", "box"] = "bold"
+    fade_in: F = 0.0                   # seconds, 0 to 3
+    fade_out: F = 0.0
+    clip_volume: F = 1.0               # 0 to 1: scales every clip's own audio
+    duck: bool = True                  # lower clip audio under the audio tracks
+
+
+class AudioPut(BaseModel):
+    """One extra audio track (voiceover, music). On an existing id only the fields you send change."""
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    path: str | None = None            # local file; required when the id is new
+    start: F | None = None             # seconds on the output timeline
+    in_: F | None = Field(None, alias="in")    # seconds in the source
+    out: F | None = None
+    volume: F | None = None            # 0 to 2
+    fade_in: F | None = None
+    fade_out: F | None = None
 
 
 class ClipPatch(BaseModel):
@@ -255,6 +293,7 @@ class ClipPatch(BaseModel):
     reframe_pos: F | None = None
     reframe_from: F | None = None
     reframe_to: F | None = None
+    mute: bool | None = None           # silence this clip's own audio
 
 
 class TransitionPut(BaseModel):
@@ -271,6 +310,7 @@ CLIP_FIELDS = {
     "reframe_mode": (("reframe", "mode"), "center", None, None),
     "reframe_pos": (("reframe", "pos"), .5, 0, 1), "reframe_from": (("reframe", "pos_from"), .5, 0, 1),
     "reframe_to": (("reframe", "pos_to"), .5, 0, 1),
+    "mute": (("mute",), False, None, None),
 }
 
 
@@ -294,7 +334,8 @@ def get_edit(cid: int):
                        "end": (s.start_frame + s.frames) / tl.fps, "frames": s.frames} for s in tl.segs],
             "warnings": list(tl.warnings),
             "options": {"looks": sorted(LOOKS), "aspects": list(ASPECTS), "sizes": list(SIZES), "fps": list(FPS),
-                        "transitions": ["cut", *XFADE], "caption_styles": list(CAPTION_STYLES)}}
+                        "transitions": ["cut", *XFADE], "caption_styles": list(CAPTION_STYLES),
+                        "audio_ext": sorted(AUDIO_EXT), "max_audio": MAX_AUDIO, "max_fade": MAX_FADE}}
 
 
 @router.patch("/collections/{cid}/edit")
@@ -310,6 +351,13 @@ def patch_edit(cid: int, body: EditPatch):
             _set_look(spec, "look", body.look)
         if "look_strength" in given:
             spec["look"]["strength"] = _clamp(notes, "look_strength", body.look_strength, 0, 1)
+        for k in ("fade_in", "fade_out"):
+            if k in given:
+                spec["format"][k] = _clamp(notes, k, getattr(body, k), 0, MAX_FADE)
+        if "clip_volume" in given:
+            spec["clip_volume"] = _clamp(notes, "clip_volume", body.clip_volume, 0, 1)
+        if "duck" in given:
+            spec["duck"] = body.duck
         if "captions" in given:
             flipped.append(body.captions and not spec["captions"]["on"])
             spec["captions"]["on"] = body.captions
@@ -391,3 +439,77 @@ def put_transition(cid: int, item_id: int, body: TransitionPut):
 @router.delete("/collections/{cid}/edit/transitions/{item_id}")
 def delete_transition(cid: int, item_id: int):
     return put_transition(cid, item_id, TransitionPut(type="cut"))
+
+
+# ---------- audio tracks
+
+def audio_info(path):
+    """(resolved path, duration in seconds) of a local audio file, or HTTPException(422)."""
+    p = Path(path).expanduser()
+    if p.suffix.lower() not in AUDIO_EXT:
+        raise HTTPException(422, f"audio must be one of {sorted(AUDIO_EXT)}")
+    try:
+        p = p.resolve(strict=True)
+    except OSError:
+        raise HTTPException(422, f"{path} does not exist")
+    if not p.is_file() or p.suffix.lower() not in AUDIO_EXT:
+        raise HTTPException(422, f"{path} is not an audio file")
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration",
+                            "-of", "csv=p=0", str(p)], capture_output=True, text=True, timeout=30)
+        dur = float(r.stdout.strip())
+    except (ValueError, subprocess.SubprocessError, OSError):
+        raise HTTPException(422, f"{p.name} has no readable audio")
+    if not dur > 0:
+        raise HTTPException(422, f"{p.name} has no readable audio")
+    return str(p), dur
+
+
+AUDIO_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+@router.put("/collections/{cid}/edit/audio/{track_id}")
+def put_audio(cid: int, track_id: str, body: AudioPut):
+    if not AUDIO_ID.match(track_id):
+        raise HTTPException(422, "audio id must be 1 to 32 letters, digits, - or _")
+    given = body.model_fields_set
+    info = audio_info(body.path) if body.path else None  # probe before the write lock
+
+    def fn(spec, col):
+        tracks = spec["audio"]
+        old = next((t for t in tracks if t["id"] == track_id), None)
+        if not old and (info is None or len(tracks) >= MAX_AUDIO):
+            raise HTTPException(422, f"at most {MAX_AUDIO} audio tracks" if info else "path is required for a new track")
+        t = dict(old or {"id": track_id, "start": 0.0, "in": 0.0, "out": None, "volume": 1.0, "fade_in": 0.0, "fade_out": 0.0})
+        notes = []
+        if info:
+            if t.get("path") != info[0]:
+                t["out"] = None  # a different file: its own length unless out is given
+            t["path"], dur = info
+        else:
+            dur = audio_info(t["path"])[1]
+        t["in"] = _clamp(notes, "in", body.in_ if body.in_ is not None else t["in"], 0, max(dur - 0.05, 0))
+        out = body.out if body.out is not None else (t["out"] if t["out"] is not None else dur)
+        t["out"] = _clamp(notes, "out", out, t["in"] + 0.05, dur)
+        for k, lo, hi in (("start", 0, MAX_SECONDS), ("volume", 0, 2)):
+            if k in given and getattr(body, k) is not None:
+                t[k] = _clamp(notes, k, getattr(body, k), lo, hi)
+        for k in ("fade_in", "fade_out"):
+            if k in given and getattr(body, k) is not None:
+                t[k] = getattr(body, k)
+            t[k] = _clamp(notes, k, t[k], 0, t["out"] - t["in"])
+        spec["audio"] = [t if x["id"] == track_id else x for x in tracks] if old else [*tracks, t]
+        return notes
+
+    return mutate(cid, fn)
+
+
+@router.delete("/collections/{cid}/edit/audio/{track_id}")
+def delete_audio(cid: int, track_id: str):
+    def fn(spec, col):
+        if not any(t["id"] == track_id for t in spec["audio"]):
+            raise HTTPException(404, "no such audio track")
+        spec["audio"] = [t for t in spec["audio"] if t["id"] != track_id]
+        return []
+
+    return mutate(cid, fn)

@@ -13,6 +13,7 @@ import time
 import types
 from pathlib import Path
 
+tempfile.tempdir = tempfile.mkdtemp(prefix="cs-test-tmp-")  # private, so renders running in other shells cannot confuse the leak check
 os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
 
 import core  # noqa: E402
@@ -317,6 +318,177 @@ except RuntimeError as e:
     assert "disk space" in str(e), e
 finally:
     render.shutil.disk_usage = real_du
+assert_clean()
+
+# ---------- batch download: final render of N clips makes ONE originals call, readable errors, local clips skipped
+import dataclasses  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+for u in ("V1", "V2", "V3"):  # video assets Photos does not hold locally (iCloud only)
+    db.execute("insert into assets(uuid, kind, created, duration, path, indexed_at, meta) values (?,?,?,?,?,?,?)",
+               (u, "video", "x", 2, f"/nonexistent/{u}.mp4", 1.0, u))
+for i in range(14, 22):
+    db.execute("insert into collections(id, name, kind, created, updated) values (?,?,?,?,?)", (i, f"Proj {i}", "project", 1.0, 1.0))
+db.commit()
+dl_calls, dl_seen = [], []
+
+
+def fake_originals(uuids, dest):
+    dl_calls.append(list(uuids))
+    j = projects.jobs[(14, "final")]
+    dl_seen.append((j.get("stage"), media.ACTIVE.get("render:14:final", {}).get("stage"), media.RUNNING))
+    dest.mkdir(parents=True, exist_ok=True)
+    for u in uuids:
+        (dest / f"{u}.mp4").write_bytes((fx / "A.mp4").read_bytes()) if u != "E" else None
+    return {u: (fx / "E.jpg" if u == "E" else dest / f"{u}.mp4") for u in uuids}
+
+
+real_originals = projects.originals
+projects.originals = fake_originals
+PLAN[14] = mk([("A", "video", 0, 1, 1, None), ("V1", "video", 0, 1, 1, None), ("V2", "video", 0, 1, 1, None),
+               ("E", "photo", 0, 2, 1, None), ("V3", "video", 0, 1, 1, None)])
+projects.jobs[(14, "final")] = {}
+r, ran = go(14, "final")
+assert len(dl_calls) == 1 and sorted(dl_calls[0]) == ["E", "V1", "V2", "V3"] and ran == 5, (dl_calls, ran)  # one call; A is local
+assert dl_seen[0][0] == "Downloading originals: 0 of 4" == dl_seen[0][1], dl_seen  # job state and /media/activity both say it
+assert dl_seen[0][2] == 1, dl_seen  # only the download's slot is held, never the render slot
+assert abs(duration(r["path"]) - PLAN[14].duration) <= 1 / 30 + 1e-3 and media.RUNNING == 0
+assert_clean()
+# the worker also reports progress while it runs (n of N from files appearing in the destination)
+reports = []
+
+
+def slow_originals(uuids, dest):
+    dest.mkdir(parents=True, exist_ok=True)
+    for k, u in enumerate(uuids):
+        (dest / f"{u}.mp4").write_bytes(b"x")
+        time.sleep(1.2)
+    return {}
+
+
+projects.originals = slow_originals
+got, errs = render.fetch_originals([seg_for("V1"), seg_for("V2")], root / "fo", "k", "l", lambda n, t: reports.append((n, t)))
+assert got == {} and set(errs) == {"V1", "V2"} and reports[0] == (0, 2) and any(n == 1 for n, _ in reports) and reports[-1] == (0, 2), reports
+# failures: a partial result names the missing clip; a timeout says how long; both fail the render before any ffmpeg
+projects.originals = lambda uuids, dest: {u: fx / "A.mp4" for u in uuids if u != "V2"}
+PLAN[15] = mk([("V1", "video", 0, 1.5, 1, None), ("V2", "video", 0, 1.5, 1, None)])  # not cached yet
+n_before = len(RUNS)
+try:
+    go(15, "final")
+    raise AssertionError("expected failure")
+except RuntimeError as e:
+    assert "1 clips could not be fetched" in str(e) and "V2 · 2s (iCloud download failed)" in str(e) and "V1" not in str(e), e
+
+
+def times_out(uuids, dest):
+    raise subprocess.TimeoutExpired("osxphotos", 1)
+
+
+projects.originals = times_out
+try:
+    go(15, "final")
+    raise AssertionError("expected failure")
+except RuntimeError as e:
+    assert f"iCloud download timed out after {settings.get().download_seconds * 2} s" in str(e) and str(e).count("timed out") == 2, e
+assert len(RUNS) == n_before and media.RUNNING == 0 and not [lk for lk in media._locks.values() if lk.locked()]
+assert_clean()
+projects.originals = real_originals
+projects.originals = lambda uuids, dest: {u: fx / "E.jpg" for u in uuids}
+
+# ---------- audio, fades, mute, ducking
+def pcm(path):
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+                       capture_output=True, check=True)
+    return np.frombuffer(r.stdout, np.float32)
+
+
+def band(x, t0, t1, f, sr=16000):
+    seg = x[int(t0 * sr):int(t1 * sr)]
+    sp = np.abs(np.fft.rfft(seg * np.hanning(len(seg)))) / len(seg)
+    fr = np.fft.rfftfreq(len(seg), 1 / sr)
+    return float(sp[(fr > f - 10) & (fr < f + 10)].sum())
+
+
+def luma(path, n):
+    cap = cv2.VideoCapture(str(path))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, n)
+    ok, im = cap.read()
+    cap.release()
+    assert ok, (path, n)
+    return float(im.mean())
+
+
+def streams(path):
+    return sorted(s["codec_type"] for s in probe(path, ["-show_entries", "stream=codec_type"])["streams"])
+
+
+ff("-f", "lavfi", "-i", "sine=f=1000:d=1.5", str(fx / "vo.wav"))
+VO = {"id": "vo", "path": str(fx / "vo.wav"), "start": 1.0, "in": 0.0, "out": 1.5, "volume": 1.0, "fade_in": 0.0, "fade_out": 0.0}
+one = mk([("A", "video", 0, 3, 1, None)])  # clip audio: a 440 Hz tone for 3 s
+
+
+def tlx(base, **kw):
+    return dataclasses.replace(base, edit_hash=hashlib.sha1((base.edit_hash + repr(kw)).encode()).hexdigest(), **kw)
+
+
+PLAN[16] = tlx(one, audio=(VO,), duck=True)
+PLAN[17] = tlx(one, audio=(VO,), duck=False)
+PLAN[18] = tlx(one)
+res = {}
+for cid_, label in ((16, "duck"), (17, "noduck"), (18, "plain")):
+    r, _ = go(cid_)
+    res[label] = r["path"]
+    assert streams(r["path"]) == ["audio", "video"] and abs(duration(r["path"]) - 3.0) <= 1 / 30 + 1e-3, (label, r)
+duck, noduck, plain = (pcm(res[k]) for k in ("duck", "noduck", "plain"))
+assert band(plain, 0.2, 2.8, 440) > 0.05 and band(plain, 0.2, 2.8, 1000) < 0.005  # no tracks: clip audio only
+for x in (duck, noduck):  # the voiceover is there from 1.0 s to 2.5 s and nowhere else
+    assert band(x, 1.2, 2.3, 1000) > 10 * band(x, 0.1, 0.8, 1000) and band(x, 2.6, 2.95, 1000) < 0.3 * band(x, 1.2, 2.3, 1000)
+    assert band(x, 0.1, 0.8, 440) > 0.01  # clip audio before the voiceover
+r_duck = band(duck, 1.2, 2.3, 440) / band(duck, 1.2, 2.3, 1000)
+r_no = band(noduck, 1.2, 2.3, 440) / band(noduck, 1.2, 2.3, 1000)
+assert r_duck < r_no / 3, ("ducking must lower the clip audio under the voiceover", r_duck, r_no)
+assert band(duck, 0.1, 0.8, 440) > 0.5 * band(noduck, 0.1, 0.8, 440)  # and not before it starts
+# final includes the audio too (same finish pass)
+PLAN[19] = tlx(one, audio=(VO,))
+r, _ = go(19, "final")
+assert streams(r["path"]) == ["audio", "video"] and band(pcm(r["path"]), 1.2, 2.3, 1000) > 0.01, r
+# clip_volume scales clip audio; mute (volume 0 on the seg) silences it while the voiceover stays
+PLAN[16] = tlx(one, clip_volume=0.25)
+quiet = pcm(go(16)[0]["path"])
+assert 0.15 < band(quiet, 0.2, 2.8, 440) / band(plain, 0.2, 2.8, 440) < 0.35
+PLAN[17] = tlx(dataclasses.replace(one, segs=tuple(dataclasses.replace(s, volume=0.0) for s in one.segs)), audio=(VO,))
+muted = pcm(go(17)[0]["path"])
+assert band(muted, 0.1, 0.8, 440) < 0.002 and band(muted, 1.2, 2.3, 1000) > 0.01, (band(muted, 0.1, 0.8, 440), band(muted, 1.2, 2.3, 1000))
+# window preview: the track starts at 2.0 s on the timeline, the window is 1.0 to 2.8, so the voiceover enters 1.0 s in
+PLAN[18] = tlx(one, audio=({**VO, "start": 2.0},))
+r, _ = go(18, start=1.0, end=2.8)
+w = pcm(r["path"])
+assert abs(duration(r["path"]) - 1.8) <= 1 / 30 + 1e-3 and band(w, 0.1, 0.8, 1000) < 0.2 * band(w, 1.2, 1.7, 1000), r
+# fades: first and last frames black, audio silent there, the middle untouched
+PLAN[16] = tlx(one, fade_in=0.5, fade_out=0.5)
+r, _ = go(16)
+o = r["path"]
+a = pcm(o)
+assert luma(o, 0) < 20 < 60 < luma(o, 45) and luma(o, 89) < 40 and luma(o, 80) > luma(o, 89), (luma(o, 0), luma(o, 45), luma(o, 89))
+assert np.abs(a[:160]).max() < 0.01 and np.abs(a[-160:]).max() < 0.01 and np.abs(a[16000:32000]).max() > 0.08, (np.abs(a[:160]).max(), np.abs(a[-160:]).max())
+# preview_key changes when an audio file changes in place (path stays, mtime and size move); a missing file fails early
+ap = root / "k.wav"
+ap.write_bytes(b"1234")
+kt = tlx(one, audio=({**VO, "path": str(ap)},))
+k1 = render.preview_key(kt, {"captions": {"on": False}}, None)
+assert k1 == render.preview_key(kt, {"captions": {"on": False}}, None)
+ap.write_bytes(b"12345678")
+k2 = render.preview_key(kt, {"captions": {"on": False}}, None)
+assert k1 != k2
+os.utime(ap, ns=(1, 1))
+assert render.preview_key(kt, {"captions": {"on": False}}, None) != k2
+PLAN[20] = tlx(one, audio=({**VO, "path": str(root / "gone.wav")},))
+try:
+    go(20)
+    raise AssertionError("expected failure")
+except RuntimeError as e:
+    assert "gone.wav is missing" in str(e), e
 assert_clean()
 
 # ---------- chunked join: 20 one-second segments, a dissolve every third cut, JOIN_CHUNK patched to 4, final at 540x960
