@@ -1,7 +1,7 @@
 """Video projects: export a timeline for a real editor, and let Claude work on a project.
 
 Export is the one place originals get copied: editors need real files. They go to
-~/Movies/Safelight/<project>/media, downloaded from iCloud if needed. Albums never copy.
+~/Movies/Kioku/<project>/media, downloaded from iCloud if needed. Albums never copy.
 """
 import json
 import logging
@@ -23,8 +23,8 @@ import library
 import settings
 
 router = APIRouter()
-log = logging.getLogger("safelight.jobs")
-EXPORTS = Path.home() / "Movies" / "Safelight"
+log = logging.getLogger("kioku.jobs")
+EXPORTS = Path.home() / "Movies" / "Kioku"
 ENGINE = Path(__file__).resolve().parent
 STILL_SECONDS = 3.0
 jobs: dict[tuple[int, str], dict] = {}  # (collection id, "export" | "ask") -> status
@@ -99,7 +99,7 @@ def originals(uuids, dest):
         ufile.unlink(missing_ok=True)
         if "authorization" in (r.stdout + r.stderr).lower():
             raise RuntimeError("No Photos access for the process running the engine. Grant it in System Settings > "
-                               "Privacy & Security > Photos (the app or terminal that started Safelight).")
+                               "Privacy & Security > Photos (the app or terminal that started Kioku).")
         have = {f.stem: f for f in dest.iterdir() if f.is_file() and not f.name.startswith(".")}
         if any(u not in have for u in need):
             log.warning("export: %d of %d downloads missing; osxphotos said: %s", sum(u not in have for u in need),
@@ -211,13 +211,13 @@ def claude_bin():
 def mcp_config():
     cfg = core.DATA / "mcp.json"
     uv = next((str(p) for p in (Path.home() / ".local/bin/uv", Path("/opt/homebrew/bin/uv")) if p.exists()), "uv")
-    cfg.write_text(json.dumps({"mcpServers": {"safelight": {
+    cfg.write_text(json.dumps({"mcpServers": {"kioku": {
         "command": uv, "args": ["run", "--directory", str(ENGINE), "mcp_server.py"]}}}))
     return cfg
 
 
-SKILL = ENGINE.parent / "skills" / "safelight-editor" / "SKILL.md"
-SYSTEM = ("You are running inside the Safelight app. Use only the safelight tools. You are editing the EXISTING project "
+SKILL = ENGINE.parent / "skills" / "kioku-editor" / "SKILL.md"
+SYSTEM = ("You are running inside the Kioku app. Use only the kioku tools. You are editing the EXISTING project "
           "with id {cid} named {name!r} (don't create a new one). Its brief: {brief!r}. Follow the editing workflow "
           "below.\n\nYour final message is shown in the app's project panel, above the clip list, which already "
           "lists every shot. Keep it under 120 words: one sentence on the cut (shots, length, arc), then at most 4 short "
@@ -307,8 +307,8 @@ def run_claude(exe, cid, col, prompt, job_state):
     cmd = [exe, "-p", prompt, "--model", model, "--append-system-prompt",
            SYSTEM.format(cid=cid, name=col["name"], brief=col["brief"], skill=SKILL.read_text().split("---", 2)[-1]),
            "--mcp-config", str(mcp_config()), "--strict-mcp-config",
-           "--tools", "",  # no built-in tools: no shell, no file edits; only Safelight's own tools
-           "--allowedTools", "mcp__safelight", "--output-format", "stream-json", "--verbose"]
+           "--tools", "",  # no built-in tools: no shell, no file edits; only Kioku's own tools
+           "--allowedTools", "mcp__kioku", "--output-format", "stream-json", "--verbose"]
     # stderr goes to a file: an undrained PIPE fills up (~64 KB) and blocks claude forever
     errf = tempfile.TemporaryFile(mode="w+")
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, text=True, cwd=str(ENGINE))

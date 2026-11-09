@@ -1,4 +1,4 @@
-"""Shared model, database and hybrid search for the Safelight engine."""
+"""Shared model, database and hybrid search for the Kioku engine."""
 import itertools
 import logging
 import os
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-log = logging.getLogger("safelight")
+log = logging.getLogger("kioku")
 DATA = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = Path(os.environ.get("CS_DB") or DATA / "index.db")
 AUDIO_DIR = DATA / "audio"

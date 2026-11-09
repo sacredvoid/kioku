@@ -1,7 +1,7 @@
-"""Safelight tools for Claude (MCP over stdio). Talks to the running engine at 127.0.0.1:8765.
+"""Kioku tools for Claude (MCP over stdio). Talks to the running engine at 127.0.0.1:8765.
 
 Add to Claude Code once:
-  claude mcp add safelight -- uv run --directory ~/Documents-Local/github/contact-sheet/engine mcp_server.py
+  claude mcp add kioku -- uv run --directory ~/Documents-Local/github/kioku/engine mcp_server.py
 """
 import json
 import time
@@ -13,7 +13,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import ToolAnnotations
 
 API = "http://127.0.0.1:8765"
-server = MCPServer("safelight", instructions=(
+server = MCPServer("kioku", instructions=(
     "Search and organize the user's Photos library and build video projects. Albums and projects hold "
     "pointers to Photos items (uuid), never copies. Times are in seconds."))
 
@@ -36,7 +36,7 @@ def call(method, path, body=None, timeout=120):
     except TimeoutError:
         return {"error": f"No answer after {timeout} s. The engine keeps working; call the same tool again to wait for it."}
     except urllib.error.URLError:
-        return {"error": "Safelight engine isn't running. Open Safelight or run `uv run server.py`."}
+        return {"error": "Kioku engine isn't running. Open Kioku or run `uv run server.py`."}
 
 
 def slim(h):
@@ -160,7 +160,7 @@ def remove_from_collection(collection_id: int, item_id: int) -> dict:
 
 @server.tool()
 def export_project(collection_id: int) -> dict:
-    """Export the project as an FCP XML timeline (opens in DaVinci Resolve / Premiere) under ~/Movies/Safelight.
+    """Export the project as an FCP XML timeline (opens in DaVinci Resolve / Premiere) under ~/Movies/Kioku.
     Runs in the background; call export_status to see when it's done."""
     return call("POST", f"/collections/{collection_id}/export")
 
@@ -291,7 +291,7 @@ def render_preview(collection_id: int, start: float = 0, end: float = 0) -> dict
 @server.tool()
 def render_final(collection_id: int, codec: str = "hevc") -> dict:
     """Render the finished video from the original files (downloads iCloud originals, can take minutes). Only when the
-    user asked for the finished video. codec: hevc or h264. Output goes under ~/Movies/Safelight. Poll render_status."""
+    user asked for the finished video. codec: hevc or h264. Output goes under ~/Movies/Kioku. Poll render_status."""
     return call("POST", f"/collections/{collection_id}/render", {"mode": "final", "codec": codec})
 
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 import core
 
 router = APIRouter()
-log = logging.getLogger("safelight.settings")
+log = logging.getLogger("kioku.settings")
 FILE = core.DATA / "settings.json"
 _lock = threading.Lock()
 

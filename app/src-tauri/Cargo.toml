@@ -1,12 +1,12 @@
 [package]
-name = "safelight"
+name = "kioku"
 version = "0.1.0"
 description = "Search your Photos library by what's in it."
 authors = ["Samanvya Tripathi"]
 edition = "2024"
 
 [lib]
-name = "safelight_lib"
+name = "kioku_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

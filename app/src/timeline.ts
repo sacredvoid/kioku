@@ -1,4 +1,4 @@
-// Safelight timeline editor: player + inspector on top, ruler, V lane, A1..A3 voiceover lanes, read-only captions lane.
+// Kioku timeline editor: player + inspector on top, ruler, V lane, A1..A3 voiceover lanes, read-only captions lane.
 // Edits the same spec Claude edits (engine/edit.py). Layout comes from GET /edit (server truth); drags are optimistic
 // and send one request on pointerup. Design: notes/timeline-design.md. Mount API at the bottom of the file.
 import { API, api, errMsg, thumb, type Collection, type Item } from "./api";
@@ -126,7 +126,7 @@ class Editor {
     this.model = { cid, items: items as TItem[], edit: { spec: { audio: [], clips: {}, transitions: {}, format: {}, captions: {}, look: {} }, clips: [], options: { audio_ext: [], max_audio: 3, looks: [], transitions: [] }, duration: 0, fps: 30, edit_hash: "", warnings: [] } as unknown as Edit,
       cues: [], peaks: new Map(), scenes: new Map() };
     this.player = new LivePlayer();
-    try { const z = Number(localStorage.getItem(`safelight.tl.pps.${cid}`)); if (z >= 4 && z <= 240) this.pps = z; } catch { /* storage may be blocked */ }
+    try { const z = Number(localStorage.getItem(`kioku.tl.pps.${cid}`)); if (z >= 4 && z <= 240) this.pps = z; } catch { /* storage may be blocked */ }
     this.io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) this.wantStrip((e.target as HTMLElement).dataset.uuid!); }),
       { root: this.scroll, rootMargin: "0px 100% 0px 100%" });
     this.build();
@@ -540,7 +540,7 @@ class Editor {
   }
   setZoom(pps: number, anchorT: number, anchorX: number | null) {
     this.pps = clamp(pps, 4, 240);
-    try { localStorage.setItem(`safelight.tl.pps.${this.cid}`, String(Math.round(this.pps * 100) / 100)); } catch { /* storage may be blocked */ }
+    try { localStorage.setItem(`kioku.tl.pps.${this.cid}`, String(Math.round(this.pps * 100) / 100)); } catch { /* storage may be blocked */ }
     this.placeAll(false);
     if (anchorX != null) this.scroll.scrollLeft = Math.max(0, anchorT * this.pps - anchorX);
     else { const x = anchorT * this.pps; if (x < this.scroll.scrollLeft || x > this.scroll.scrollLeft + this.scroll.clientWidth) this.scroll.scrollLeft = Math.max(0, x - 80); }
@@ -1051,7 +1051,7 @@ class Editor {
     if (mode === "swap" && swapIt) {
       body.append(el("div", "tl-row-title muted", "Other moments in this clip"), scenes);
       this.scenesFor(swapIt.uuid).then((sc) => {
-        if (!sc.length) { scenes.append(el("span", "muted", "No scenes found for this clip yet. Open it once so Safelight can analyze it.")); return; }
+        if (!sc.length) { scenes.append(el("span", "muted", "No scenes found for this clip yet. Open it once so Kioku can analyze it.")); return; }
         for (const s of sc) {
           const len = Math.max(0.2, s.t1 - s.t0), w = 120;
           const t = btn("", "tl-tile");

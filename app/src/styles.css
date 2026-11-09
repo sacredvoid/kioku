@@ -1,4 +1,4 @@
-/* Safelight: soft pastel light, frosted surfaces, one quiet accent per theme.
+/* Kioku: soft pastel light, frosted surfaces, one quiet accent per theme.
    Type is Bricolage Grotesque (bundled, variable: weight, width and optical size).
    Themes: html[data-theme] = mist | peach | mint | dusk. No attribute = follow the system (mist / dusk). */
 @import "@fontsource-variable/bricolage-grotesque/standard.css";

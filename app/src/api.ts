@@ -1,4 +1,4 @@
-// Thin client for the local Safelight engine.
+// Thin client for the local Kioku engine.
 export const API = "http://127.0.0.1:8765";
 
 export type Item = {

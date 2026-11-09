@@ -1,4 +1,4 @@
-"""Local search API for the Safelight app. Keeps the model loaded so queries are fast.
+"""Local search API for the Kioku app. Keeps the model loaded so queries are fast.
 
   uv run server.py                        # http://127.0.0.1:8765
   curl "127.0.0.1:8765/search?q=dog&k=5"
@@ -37,7 +37,7 @@ import captions
 import edit
 import render
 
-log = logging.getLogger("safelight")
+log = logging.getLogger("kioku")
 LOG_FILE = core.DATA / "engine.log"
 # the app polls these every 1-5 s (and loads hundreds of thumbs); successful hits are noise in the access log
 QUIET = re.compile(r"^/(health|index/info|media/activity|collections|drafts|collections/\d+/(ask|export|render/(preview|final)|captions/job)|drafts/\d+/job|collections/\d+/captions/cues|collections/\d+/edit/audio/[^/]+/(peaks|file)|thumb/.+|full/.+|media/[^/]+/(proxy|sheet|scenes|strip))$")
@@ -60,7 +60,7 @@ def setup_logging():
     sh = logging.StreamHandler()
     for h in (fh, sh):
         h.setFormatter(fmt)
-    root = logging.getLogger("safelight")
+    root = logging.getLogger("kioku")
     root.setLevel(logging.INFO)
     root.handlers[:] = [fh, sh]
     root.propagate = False
@@ -127,7 +127,7 @@ async def lifespan(_app):
     yield
 
 
-app = FastAPI(title="Safelight engine", lifespan=lifespan)
+app = FastAPI(title="Kioku engine", lifespan=lifespan)
 # The Tauri webview (dev server and bundled app) calls this API directly.
 ORIGINS = {"http://localhost:1420", "tauri://localhost", "http://tauri.localhost"}
 app.add_middleware(CORSMiddleware, allow_origins=sorted(ORIGINS),

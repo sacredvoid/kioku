@@ -38,7 +38,7 @@ fn start_engine() -> Option<Child> {
     match Command::new(uv_path()).args(["run", "server.py"]).current_dir(engine_dir()).spawn() {
         Ok(child) => Some(child),
         Err(e) => {
-            eprintln!("safelight: could not start engine: {e}");
+            eprintln!("kioku: could not start engine: {e}");
             None
         }
     }
@@ -52,7 +52,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building Safelight");
+        .expect("error while building Kioku");
 
     app.run(|handle, event| {
         if let RunEvent::Exit = event {

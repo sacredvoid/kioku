@@ -23,7 +23,7 @@ import core
 import settings
 
 router = APIRouter()
-log = logging.getLogger("safelight.media")
+log = logging.getLogger("kioku.media")
 PROXIES = core.DATA / "proxies"
 SHEETS = core.DATA / "sheets"
 STRIPS = core.DATA / "strips"

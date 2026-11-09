@@ -1,4 +1,4 @@
-// Safelight: library, search, albums and video projects on top of your Photos library.
+// Kioku: library, search, albums and video projects on top of your Photos library.
 import { API, api, ApiError, errMsg, fmtDur, isVideo, thumb, type Captions, type Collection, type Item, type Job, type SettingField, type Settings } from "./api";
 import { Grid } from "./grid";
 import { Viewer } from "./viewer";
@@ -20,10 +20,10 @@ function applyTheme(t: string) {
   if (THEMES.includes(t)) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
 }
-try { applyTheme(localStorage.getItem("safelight.theme") ?? ""); } catch { /* storage blocked: follow the system */ }
+try { applyTheme(localStorage.getItem("kioku.theme") ?? ""); } catch { /* storage blocked: follow the system */ }
 document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
   applyTheme(r.value);
-  try { localStorage.setItem("safelight.theme", r.value); } catch { /* applies for this session only */ }
+  try { localStorage.setItem("kioku.theme", r.value); } catch { /* applies for this session only */ }
 }));
 
 type View = { type: "lib"; kind: string } | { type: "col"; id: number } | { type: "draft"; id: number };
@@ -153,7 +153,7 @@ async function go(v: View, search = q.value.trim()) {
       grid.set(t.uuid.map((uuid, i) => ({ uuid, video: t.video[i], dur: t.dur[i], created: t.created[i] })), { months: true, badges: false });
       head.append(el("h1", "", { "": "Library", image: "Photos", video: "Videos" }[v.kind] ?? "Library"));
       summary.textContent = `${grid.items.length.toLocaleString()} items`;
-      if (!grid.items.length) showEmpty("Nothing indexed yet. Run the indexer, then reopen Safelight.");
+      if (!grid.items.length) showEmpty("Nothing indexed yet. Run the indexer, then reopen Kioku.");
     } else {
       const c = await api<Collection & { brief: string; items: any[] }>(`/collections/${v.id}`);
       if (my !== seq) return;

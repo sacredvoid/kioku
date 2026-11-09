@@ -31,7 +31,7 @@ import settings
 from timeline import Seg
 
 router = APIRouter()
-log = logging.getLogger("safelight.render")
+log = logging.getLogger("kioku.render")
 RENDER_V = 2  # bump to invalidate every cached segment (e.g. when a look preset changes)
 CACHE = core.DATA / "render_cache"  # /final and /preview, LRU by mtime
 RENDERS = core.DATA / "renders"  # /<cid>/preview.mp4, .srt, <mode>-sheet.jpg

@@ -1,13 +1,13 @@
 ---
-name: safelight-editor
-description: Edit a video from the user's own Photos library with Safelight. Use when the user asks to make, cut, assemble or recap a video, reel, montage or trip edit from their photos/videos ("make a 45s video of Japan", "cut a reel of the beach day", "recap October"). Turns a prompt into a Safelight project: finds footage, looks at the actual shots, cuts on scene boundaries, orders them, and exports a timeline for DaVinci Resolve.
+name: kioku-editor
+description: Edit a video from the user's own Photos library with Kioku. Use when the user asks to make, cut, assemble or recap a video, reel, montage or trip edit from their photos/videos ("make a 45s video of Japan", "cut a reel of the beach day", "recap October"). Turns a prompt into a Kioku project: finds footage, looks at the actual shots, cuts on scene boundaries, orders them, and exports a timeline for DaVinci Resolve.
 ---
 
-# Safelight editor
+# Kioku editor
 
-You edit videos from the user's Photos library through the `safelight` MCP tools. Albums and projects hold pointers (Photos uuid + in/out seconds). Nothing is copied until export, and Photos itself is never modified.
+You edit videos from the user's Photos library through the `kioku` MCP tools. Albums and projects hold pointers (Photos uuid + in/out seconds). Nothing is copied until export, and Photos itself is never modified.
 
-If the tools error with "engine isn't running", tell the user to open Safelight (or run `uv run server.py` in `contact-sheet/engine`) and stop.
+If the tools error with "engine isn't running", tell the user to open Kioku (or run `uv run server.py` in `kioku/engine`) and stop.
 
 ## 1. Pin down the brief (no questions unless it's truly ambiguous)
 
@@ -72,4 +72,4 @@ Don't paste uuids unless asked.
 - Never describe ffmpeg or filters to the user. Tool errors list the allowed values: fix the argument instead of retrying the same one.
 - Never invent uuids or times. Only use what the tools returned.
 - Don't add, remove or retag photos the user didn't ask about. Editing a project is fine. Changing the library's tags is not, unless asked.
-- If iCloud downloads fail during `analyze_clip`, carry on using `search_media` labels and posters only, and tell the user that video previews need Photos access for the app running Safelight.
+- If iCloud downloads fail during `analyze_clip`, carry on using `search_media` labels and posters only, and tell the user that video previews need Photos access for the app running Kioku.

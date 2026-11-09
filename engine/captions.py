@@ -28,7 +28,7 @@ import settings
 from timeline import Timeline
 
 router = APIRouter()
-log = logging.getLogger("safelight.captions")
+log = logging.getLogger("kioku.captions")
 MODEL = "ggml-small.bin"
 MODELS = core.DATA / "models"
 SILENT_DB = -45.0  # mean volume under this: whisper would hallucinate "Thank you." on wind or music

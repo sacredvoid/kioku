@@ -1,10 +1,10 @@
-# Safelight handoff (2026-11-08, ~02:45)
+# Kioku handoff (2026-11-08, ~02:45)
 
 Read this first in a fresh session, then `WORK.md` (task list) and the build plan artifact:
 https://claude.ai/artifact/PzRFydjjED5yaPAK8jJuu6 (keep it updated as items finish: tasks marked `data-shipped`, collapsible "Build notes" per phase; source file lives in the old session's scratchpad, so read it back with the Artifact tool `read` before republishing).
 
-Private repo: https://github.com/sacredvoid/safelight (remote `personal-git:sacredvoid/safelight.git`, push as `sacredvoid`).
-Folder is still `contact-sheet/`. Rename to `safelight/` once indexing stops (the indexer writes to `data/index.db` by absolute path).
+Private repo: https://github.com/sacredvoid/kioku (remote `personal-git:sacredvoid/kioku.git`, push as `sacredvoid`).
+Folder is still `kioku/`. Rename to `kioku/` once indexing stops (the indexer writes to `data/index.db` by absolute path).
 
 ## What it is
 
@@ -16,14 +16,14 @@ A local Mac app for the user's Photos library (58,396 items; 54k iCloud-only):
   - `library.py`: tags, captions, albums and projects, stored as pointers.
   - `projects.py`: FCP XML export, plus Ask Claude via `claude -p`, streamed as live steps.
   - `media.py`: iCloud download via PhotoKit, 540p proxy, scene detection, contact sheets, scene embeddings, `/media/activity`.
-  - `mcp_server.py`: 14 tools, registered user-wide as `safelight`.
+  - `mcp_server.py`: 14 tools, registered user-wide as `kioku`.
   - `status.py`: indexing progress bar.
   - Tests: `selfcheck.py`, `test_library.py`, `test_media.py`.
 - `app/`: Tauri 2 with plain TypeScript and Vite, modeled on `~/Documents-Local/github/otto`.
   - `src/grid.ts`: virtualized grid.
   - `src/viewer.ts`: viewer with info panel, video playback and scene chips.
   - `src/main.ts`: sidebar, views, selection bar, project editor, live refresh, activity panel.
-- `skills/safelight-editor/SKILL.md`: the editing workflow, symlinked into `~/.claude/skills`. The in-app Ask Claude uses the same text as its system prompt.
+- `skills/kioku-editor/SKILL.md`: the editing workflow, symlinked into `~/.claude/skills`. The in-app Ask Claude uses the same text as its system prompt.
 - `data/` (git-ignored, personal): index.db, thumbs, proxies, audio, sheets.
 
 ## Running right now
@@ -42,7 +42,7 @@ A local Mac app for the user's Photos library (58,396 items; 54k iCloud-only):
 - Query embedding runs on CPU (text-only fp32, ~40 ms). The GPU is used only by the indexer and scene embedding.
 - Image tokens are 560 (about 3× slower than 280). Still to do: A/B 280 vs 560 on the user's own queries, and pick one before indexing all 58k.
 - Disk: the index is about 5.3 KB per item (about 310 MB for everything). Thumbs are 41 KB each, made on view. Proxies are about 4.4 MB per minute, made on play or analyze; all 3,551 video minutes would be about 15.6 GB. Option offered: 360p proxies.
-- Photos is never written to. Albums and projects are pointers. Only a project *export* copies originals, to `~/Movies/Safelight/<project>/`.
+- Photos is never written to. Albums and projects are pointers. Only a project *export* copies originals, to `~/Movies/Kioku/<project>/`.
 
 ## Since the first handoff (night of 2026-11-08)
 
@@ -50,7 +50,7 @@ A local Mac app for the user's Photos library (58,396 items; 54k iCloud-only):
 - `settings.py` + `data/settings.json`, edited from the ⚙ dialog. `max_agents` caps both Claude Ask jobs and parallel video analysis. `new_cut_model` (opus) for empty projects, `revise_model` (sonnet) otherwise.
 - Engine refuses foreign web origins (403) and non-localhost Host headers (audit, 003fbb4).
 - MCP read-only tools carry `readOnlyHint` so Claude Code runs them in parallel.
-- Deferred fixes are GitHub issues #1 to #5 on sacredvoid/safelight (also listed in WORK.md). Close them from commits with `Fixes #N`.
+- Deferred fixes are GitHub issues #1 to #5 on sacredvoid/kioku (also listed in WORK.md). Close them from commits with `Fixes #N`.
 - Tests: `uv run test_library.py`, `test_media.py`, `test_settings.py` (settings, queues, log filter, origin checks).
 
 ## Editing, captions, smart albums (2026-11-08 afternoon)

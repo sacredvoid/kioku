@@ -21,7 +21,7 @@ import projects
 import settings
 
 router = APIRouter()
-log = logging.getLogger("safelight.albums")
+log = logging.getLogger("kioku.albums")
 
 SCHEMA = """
 create table if not exists album_drafts(

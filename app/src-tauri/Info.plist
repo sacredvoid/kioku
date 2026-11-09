@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSPhotoLibraryUsageDescription</key>
-  <string>Safelight reads your Photos library to search it and to download video originals from iCloud for previews and exports. It never changes or deletes anything in Photos.</string>
+  <string>Kioku reads your Photos library to search it and to download video originals from iCloud for previews and exports. It never changes or deletes anything in Photos.</string>
 </dict>
 </plist>
