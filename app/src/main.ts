@@ -4,7 +4,7 @@ import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 import * as review from "./review";
 import { timeline } from "./timeline";
-import { initArt } from "./art";
+import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -27,7 +27,49 @@ initArt();
 document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
   applyTheme(r.value);
   try { localStorage.setItem("kioku.theme", r.value); } catch { /* applies for this session only */ }
+  drawLooks();
 }));
+// the picker's cards: a still of each art in its own hue, redrawn when the mode changes the ink
+const lookPop = $("look-pop");
+$("look-arts").append(...ARTS.map((a) => {
+  const card = el("label", "look-opt"), input = el("input") as HTMLInputElement, txt = el("span", "look-txt");
+  input.type = "radio"; input.name = "art"; input.value = a;
+  input.onchange = () => setArt(a);
+  txt.append(el("strong", "", ART_INFO[a].name), el("span", "", ART_INFO[a].note));
+  card.append(input, el("canvas", "look-cv"), txt);
+  return card;
+}));
+function drawLooks() {
+  if (lookPop.hidden) return;
+  lookPop.querySelectorAll<HTMLInputElement>('input[name="art"]').forEach((r) => {
+    r.checked = r.value === currentArt();
+    preview(r.nextElementSibling as HTMLCanvasElement, r.value as (typeof ARTS)[number]);
+  });
+  const theme = document.documentElement.dataset.theme ?? "";
+  lookPop.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => (r.checked = r.value === theme));
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawLooks);
+/** A button-toggled popover: Escape or a click elsewhere closes it, focus goes in on open and back on Escape. */
+function popover(btn: HTMLElement, pop: HTMLElement, onOpen?: () => void) {
+  const close = (refocus = false) => {
+    if (pop.hidden) return;
+    pop.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    if (refocus) btn.focus();
+  };
+  btn.setAttribute("aria-expanded", "false");
+  btn.onclick = () => {
+    if (!pop.hidden) return close();
+    pop.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    onOpen?.();
+    pop.focus();
+  };
+  for (const t of [pop, btn]) t.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { e.stopPropagation(); close(true); } });
+  document.addEventListener("pointerdown", (e) => { if (!pop.contains(e.target as Node) && !btn.contains(e.target as Node)) close(); });
+  return close;
+}
+popover($("look-btn"), lookPop, drawLooks);
 
 type Page = "projects" | "albums" | "review" | "history";
 type View = { type: "ask" } | { type: "page"; page: Page } | { type: "lib"; kind: string } | { type: "col"; id: number } | { type: "draft"; id: number };
@@ -890,6 +932,7 @@ type Done = { title: string; detail: string; ok: boolean; action?: Action };
 const STAGES = ["downloading from iCloud", "making a playable copy", "finding scenes", "understanding scenes"];
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 const actBtn = $<HTMLButtonElement>("act-btn"), actPop = $("act-pop");
+const closeAct = popover(actBtn, actPop);
 let jobRows: Row[] = [], indexRow: Row | null = null, miniLd: Loader | null = null;
 const recent: Done[] = [];
 const actRows = new Map<string, { li: HTMLElement; ld: Loader; detail: HTMLElement; bar: HTMLProgressElement }>();
@@ -1002,21 +1045,6 @@ function drawRecent() {
   $("act-recent-h").hidden = $("act-clear").hidden = !recent.length;
 }
 
-// the popover: button toggles it, Escape or a click elsewhere closes it, focus goes in on open and back on Escape
-function closeAct(refocus = false) {
-  if (actPop.hidden) return;
-  actPop.hidden = true;
-  actBtn.setAttribute("aria-expanded", "false");
-  if (refocus) actBtn.focus();
-}
-actBtn.onclick = () => {
-  if (!actPop.hidden) return closeAct();
-  actPop.hidden = false;
-  actBtn.setAttribute("aria-expanded", "true");
-  actPop.focus();
-};
-for (const t of [actPop, actBtn]) t.addEventListener("keydown", (e) => { if (e.key === "Escape" && !actPop.hidden) { e.stopPropagation(); closeAct(true); } });
-document.addEventListener("pointerdown", (e) => { if (!actPop.contains(e.target as Node) && !actBtn.contains(e.target as Node)) closeAct(); });
 $("act-clear").onclick = () => { recent.length = 0; drawRecent(); drawActivity(); actPop.focus(); };
 
 // ---------- engine status
@@ -1153,8 +1181,6 @@ $("settings-btn").onclick = async () => {
     return row;
   });
   $("settings-fields").replaceChildren(...fields);
-  const theme = document.documentElement.dataset.theme ?? "";
-  form.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => (r.checked = r.value === theme));
   msg.textContent = "";
   msg.className = "set-msg";
   form.onsubmit = async (e) => {

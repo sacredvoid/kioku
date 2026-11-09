@@ -1,19 +1,116 @@
-// Background art: quiet nature geometry drawn in the theme's accent at low opacity, behind everything.
-// Capped at 24 fps, paused while the window is hidden, one still frame under prefers-reduced-motion.
+// Background art: thin-line generative geometry (the Leisure Lab / creative-code-lab family) in the theme's accent at
+// low opacity, behind everything, weighted toward the bottom-right so the content side stays calm.
+// Each art also sets the accent hue. Capped at 24 fps, paused while the window is hidden, one still frame under
+// prefers-reduced-motion.
 
-export const ARTS = ["sunflower", "meadow", "pond", "honeycomb"] as const;
+export const ARTS = ["vortex", "flow", "hilbert", "grid"] as const;
 export type Art = (typeof ARTS)[number];
+export const ART_INFO: Record<Art, { name: string; hue: number; note: string }> = {
+  vortex: { name: "Vortex", hue: 70, note: "Polar curves twisting round a centre" },
+  flow: { name: "Flow field", hue: 150, note: "Streamlines drifting through a slow current" },
+  hilbert: { name: "Hilbert", hue: 230, note: "A space-filling curve, traced end to end" },
+  grid: { name: "Grid", hue: 30, note: "Recursive subdivision, lines gliding" },
+};
+const LEGACY: Record<string, Art> = { sunflower: "vortex", meadow: "flow", pond: "hilbert", honeycomb: "grid" }; // keep a saved hue
+
+type Ink = (a: number) => string;
+type Draw = (c: CanvasRenderingContext2D, W: number, H: number, t: number, ink: Ink) => void;
 
 const root = document.documentElement;
 const cv = document.getElementById("art") as HTMLCanvasElement;
 const ctx = cv.getContext("2d")!;
 const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-let art: Art = "sunflower";
-let W = 0, H = 0, raf = 0, last = 0, color = "";
+let art: Art = "vortex";
+let W = 0, H = 0, raf = 0, last = 0;
 const t0 = performance.now();
+const STILL = 8; // the time a reduced-motion frame (and every preview) is drawn at
 
-// the drawing color is the --art token (accent hue, light or dark), read once per frame so theme flips apply at once
-const ink = (a: number) => color.replace(")", ` / ${a})`);
+/** The --art token (accent hue, light or dark), optionally re-hued for a preview. */
+function inkFor(hue?: number): Ink {
+  let color = getComputedStyle(root).getPropertyValue("--art").trim() || "oklch(0.45 0.08 70)";
+  if (hue != null) color = color.replace(/[\d.]+\s*\)$/, `${hue})`);
+  return (a) => color.replace(")", ` / ${a})`);
+}
+/** 1 at the bottom-right corner, 0 a screen-diagonal away. */
+const fall = (x: number, y: number, W: number, H: number) => Math.max(0, 1 - Math.hypot(W - x, H - y) / (Math.hypot(W, H) * .8));
+/** Small deterministic hash in [0, 1). */
+const rnd = (n: number) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+
+// Hilbert curve of order 6 in the unit square, computed once
+const HIL = (() => {
+  const n = 64, pts: [number, number][] = [];
+  for (let d = 0; d < n * n; d++) {
+    let x = 0, y = 0, t = d;
+    for (let s = 1; s < n; s *= 2) {
+      const rx = 1 & (t / 2), ry = 1 & (t ^ rx);
+      if (!ry) { if (rx) { x = s - 1 - x; y = s - 1 - y; } [x, y] = [y, x]; }
+      x += s * rx; y += s * ry; t = Math.floor(t / 4);
+    }
+    pts.push([(x + .5) / n, (y + .5) / n]);
+  }
+  return pts;
+})();
+
+const draw: Record<Art, Draw> = {
+  vortex(c, W, H, t, ink) { // concentric polar rings r(θ) with a 6-fold ripple, each ring turned a little further
+    const cx = W * .84, cy = H * .78, R = Math.min(W, H) * .62;
+    c.lineWidth = 1;
+    for (let i = 1; i <= 46; i++) {
+      const k = i / 46, r0 = R * k, tw = i * .07 + t * .04;
+      c.strokeStyle = ink(.26 * (1 - k * .75));
+      c.beginPath();
+      for (let j = 0; j <= 160; j++) {
+        const a = (j / 160) * 6.2832, r = r0 * (1 + .16 * Math.sin(6 * a + i * .23 + t * .15));
+        c.lineTo(cx + r * Math.cos(a + tw), cy + r * Math.sin(a + tw));
+      }
+      c.stroke();
+    }
+  },
+  flow(c, W, H, t, ink) { // streamlines through a smooth angle field; seeds on a grid, fading away from the corner
+    const S = Math.max(16, Math.min(W, H) / 26), step = S * .3;
+    const ang = (x: number, y: number) => Math.sin(x * .0042 + t * .05) * 1.4 + Math.cos(y * .0051 - t * .04) * 1.2 + Math.sin((x + y) * .0021) * .8;
+    c.lineWidth = 1;
+    for (let gy = 0; gy < H + S; gy += S) for (let gx = 0; gx < W + S; gx += S) {
+      const x0 = gx + rnd(gx * 7 + gy) * S, y0 = gy + rnd(gx + gy * 3) * S, f = fall(x0, y0, W, H);
+      if (f < .04) continue;
+      let x = x0, y = y0;
+      c.strokeStyle = ink(.26 * f);
+      c.beginPath(); c.moveTo(x, y);
+      for (let s = 0; s < 18; s++) { const a = ang(x, y); x += Math.cos(a) * step; y += Math.sin(a) * step; c.lineTo(x, y); }
+      c.stroke();
+    }
+  },
+  hilbert(c, W, H, t, ink) { // the whole curve faint, one bright stretch travelling along it
+    const side = Math.min(W, H) * .78, ox = W - side * .92, oy = H - side * .92, n = HIL.length;
+    const P = (i: number) => [ox + HIL[i][0] * side, oy + HIL[i][1] * side] as const;
+    c.lineWidth = 1;
+    c.strokeStyle = ink(.1);
+    c.beginPath(); for (let i = 0; i < n; i++) c.lineTo(...P(i)); c.stroke();
+    const head = Math.floor((t * 60) % n), len = 700;
+    for (let s = 0; s < len; s += 20) { // 35 short runs, brighter toward the head
+      c.strokeStyle = ink(.34 * (s / len));
+      c.beginPath();
+      for (let i = s; i <= Math.min(s + 20, len); i++) c.lineTo(...P((head - len + i + n) % n));
+      c.stroke();
+    }
+  },
+  grid(c, W, H, t, ink) { // recursive subdivision (Mondrian-ish); split positions drift slowly, a few cells tinted
+    c.lineWidth = 1;
+    const cut = (x: number, y: number, w: number, h: number, d: number, id: number) => {
+      const f = fall(x + w / 2, y + h / 2, W, H);
+      if (d > 6 || w < 26 || h < 26 || (d > 2 && rnd(id) > .82)) {
+        if (d >= 4 && f > .45 && rnd(id * 3.1) > .88) { c.fillStyle = ink(.06 * f); c.fillRect(x + 1, y + 1, w - 2, h - 2); }
+        return;
+      }
+      const r = .5 + .22 * Math.sin(t * .07 + id * 1.7), vert = w > h ? rnd(id * 5.3) > .2 : rnd(id * 5.3) > .8;
+      c.strokeStyle = ink(.36 * f);
+      c.beginPath();
+      if (vert) { c.moveTo(x + w * r, y); c.lineTo(x + w * r, y + h); c.stroke(); cut(x, y, w * r, h, d + 1, id * 2); cut(x + w * r, y, w * (1 - r), h, d + 1, id * 2 + 1); }
+      else { c.moveTo(x, y + h * r); c.lineTo(x + w, y + h * r); c.stroke(); cut(x, y, w, h * r, d + 1, id * 2); cut(x, y + h * r, w, h * (1 - r), d + 1, id * 2 + 1); }
+    };
+    cut(0, 0, W, H, 0, 1);
+  },
+};
 
 function size() {
   const d = Math.min(devicePixelRatio || 1, 1.5);
@@ -21,71 +118,43 @@ function size() {
   cv.width = W * d; cv.height = H * d;
   ctx.setTransform(d, 0, 0, d, 0, 0);
 }
-const wind = (x: number, t: number) => Math.sin(x * .006 + t * .35) * .6 + Math.sin(x * .017 - t * .21) * .4;
-
-const draw: Record<Art, (t: number) => void> = {
-  sunflower(t) { // phyllotaxis: florets on the golden angle, turning very slowly
-    const cx = W * .86, cy = H * .8, sc = Math.min(W, H) / 52, rot = t * .015;
-    for (let i = 1; i < 700; i++) {
-      const a = i * 2.39996 + rot, r = sc * Math.sqrt(i);
-      ctx.fillStyle = ink(.3 * (1 - i / 850));
-      ctx.beginPath(); ctx.arc(cx + r * Math.cos(a), cy + r * Math.sin(a), 1 + Math.sqrt(i) * .11, 0, 6.283); ctx.fill();
-    }
-  },
-  meadow(t) { // grass: thin blades leaning with a slow wind
-    ctx.lineWidth = 1;
-    for (let i = 0, n = Math.floor(W / 7); i < n; i++) {
-      const x = i * 7 + (i * 37 % 5), h = H * (.07 + .13 * ((i * 53) % 100) / 100), b = wind(x, t) * 26;
-      ctx.strokeStyle = ink(.16 + .05 * (i % 3));
-      ctx.beginPath(); ctx.moveTo(x, H); ctx.quadraticCurveTo(x + b * .25, H - h * .6, x + b, H - h); ctx.stroke();
-    }
-  },
-  pond(t) { // ripples spreading from a few drops
-    ctx.lineWidth = 1;
-    for (const [px, py, ph] of [[.14, .7, 0], [.82, .3, 2.1], [.6, .9, 4.2]]) for (let k = 0; k < 6; k++) {
-      const life = (t * .045 + ph * .17 + k / 6) % 1, r = 12 + life * Math.max(W, H) * .38;
-      ctx.strokeStyle = ink(.24 * (1 - life));
-      ctx.beginPath(); ctx.ellipse(px * W, py * H, r, r * .55, 0, 0, 6.283); ctx.stroke();
-    }
-  },
-  honeycomb(t) { // hex outlines that brighten in a slow wave
-    ctx.lineWidth = 1;
-    const R = 26, w = R * 1.732, cols = Math.ceil(W / w) + 2, rows = Math.ceil(H / (R * 1.5)) + 2, ox = W * .9, oy = H * .1, far = Math.max(W, H);
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-      const x = c * w + (r % 2) * w / 2, y = r * R * 1.5, d = Math.hypot(x - ox, y - oy);
-      ctx.strokeStyle = ink(.03 + .15 * Math.max(0, Math.sin(t * .4 - d * .01)) * Math.max(0, 1 - d / far));
-      ctx.beginPath();
-      for (let k = 0; k < 6; k++) { const q = k * 1.0472 + .5236; ctx.lineTo(x + R * .92 * Math.cos(q), y + R * .92 * Math.sin(q)); }
-      ctx.closePath(); ctx.stroke();
-    }
-  },
-};
 
 function frame(now: number) {
   raf = 0;
   if (document.hidden) return;
   if (!reduce.matches && now - last < 1000 / 24) { raf = requestAnimationFrame(frame); return; }
   last = now;
-  color = getComputedStyle(root).getPropertyValue("--art").trim() || "oklch(0.45 0.08 70)";
   ctx.clearRect(0, 0, W, H);
-  draw[art](reduce.matches ? 8 : (now - t0) / 1000);
+  draw[art](ctx, W, H, reduce.matches ? STILL : (now - t0) / 1000, inkFor());
   if (!reduce.matches) raf = requestAnimationFrame(frame);
 }
 /** Draw now (and keep animating unless motion is reduced). */
 export function redraw() { last = 0; if (!raf) raf = requestAnimationFrame(frame); }
 
+/** A still frame of one art, in its own hue, for the picker. */
+export function preview(canvas: HTMLCanvasElement, a: Art) {
+  const d = Math.min(devicePixelRatio || 1, 2), w = canvas.clientWidth || 120, h = canvas.clientHeight || 80;
+  canvas.width = w * d; canvas.height = h * d;
+  const c = canvas.getContext("2d")!;
+  c.setTransform(d, 0, 0, d, 0, 0);
+  c.clearRect(0, 0, w, h);
+  const ink = inkFor(ART_INFO[a].hue);
+  draw[a](c, w, h, STILL, (al) => ink(Math.min(1, al * 1.8))); // small canvases need a firmer line to read
+}
+
+export const currentArt = () => art;
+
 export function setArt(a: string) {
-  art = (ARTS as readonly string[]).includes(a) ? (a as Art) : "sunflower";
+  art = (ARTS as readonly string[]).includes(a) ? (a as Art) : LEGACY[a] ?? "vortex";
   root.dataset.art = art;
+  root.style.setProperty("--h", String(ART_INFO[art].hue));
   try { localStorage.setItem("kioku.art", art); } catch { /* this session only */ }
-  document.querySelectorAll<HTMLButtonElement>(".k-arts button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.art === art)));
   redraw();
 }
 
 export function initArt() {
   let saved = "";
   try { saved = localStorage.getItem("kioku.art") ?? ""; } catch { /* storage blocked */ }
-  document.querySelectorAll<HTMLButtonElement>(".k-arts button").forEach((b) => (b.onclick = () => setArt(b.dataset.art!)));
   addEventListener("resize", () => { size(); redraw(); });
   document.addEventListener("visibilitychange", redraw);
   reduce.addEventListener("change", redraw);

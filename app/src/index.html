@@ -52,12 +52,19 @@
       </section>
       <p id="act-live" class="sr" role="status" aria-live="polite"></p>
       <button type="button" id="engine" class="engine" title="Search index details"><span class="dot"></span><span id="engine-text" class="engine-text">Connecting</span></button>
-      <div class="k-arts" role="group" aria-label="Background">
-        <button type="button" data-art="sunflower" style="--sh:70" title="Sunflower" aria-label="Sunflower background"></button>
-        <button type="button" data-art="meadow" style="--sh:150" title="Meadow" aria-label="Meadow background"></button>
-        <button type="button" data-art="pond" style="--sh:230" title="Pond" aria-label="Pond background"></button>
-        <button type="button" data-art="honeycomb" style="--sh:30" title="Honeycomb" aria-label="Honeycomb background"></button>
-      </div>
+      <!-- appearance: background art (sets the accent) and light / dark / system -->
+      <button type="button" id="look-btn" class="look-btn" aria-controls="look-pop" title="Appearance" aria-label="Appearance"><span class="ico ico-contrast" aria-hidden="true"></span></button>
+      <section id="look-pop" class="act-pop look-pop" role="dialog" aria-label="Appearance" tabindex="-1" hidden>
+        <div class="act-top"><h2>Appearance</h2></div>
+        <fieldset class="looks"><legend class="k-h2">Background</legend><div id="look-arts" class="look-arts"></div></fieldset>
+        <fieldset class="themes"><legend class="k-h2">Mode</legend>
+        <div class="theme-opts">
+          <label class="theme-opt"><input type="radio" name="theme" value=""><span class="sw sw-system"></span><span class="tn">System</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="light"><span class="sw sw-light"></span><span class="tn">Light</span></label>
+          <label class="theme-opt"><input type="radio" name="theme" value="dark"><span class="sw sw-dark"></span><span class="tn">Dark</span></label>
+        </div>
+        </fieldset>
+      </section>
     </div>
   </header>
 
@@ -151,14 +158,6 @@
   <dialog id="settings" class="settings" aria-labelledby="settings-title">
     <form id="settings-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
-      <fieldset class="themes">
-        <legend>Appearance</legend>
-        <div class="theme-opts">
-          <label class="theme-opt"><input type="radio" name="theme" value=""><span class="sw sw-system"></span><span class="tn">System</span></label>
-          <label class="theme-opt"><input type="radio" name="theme" value="light"><span class="sw sw-light"></span><span class="tn">Light</span></label>
-          <label class="theme-opt"><input type="radio" name="theme" value="dark"><span class="sw sw-dark"></span><span class="tn">Dark</span></label>
-        </div>
-      </fieldset>
       <div id="settings-fields"></div>
       <p id="settings-msg" class="set-msg" role="alert"></p>
       <div class="set-actions">

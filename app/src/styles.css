@@ -1,14 +1,11 @@
-/* Kioku: near-monochrome, one accent per background theme, content sitting on quiet nature-geometric art (art.ts).
-   html[data-art] = sunflower | meadow | pond | honeycomb sets the accent hue. html[data-theme] = light | dark; none = follow the system.
+/* Kioku: near-monochrome, one accent per background theme, content sitting on quiet generative line art (art.ts).
+   art.ts sets --h (the accent hue) inline on <html> for the chosen art. html[data-theme] = light | dark; none = follow the system.
    Type: Unbounded (wordmark, headings) and Hanken Grotesk (everything else), both bundled. */
 @import "@fontsource/unbounded/600.css";
 @import "@fontsource/unbounded/700.css";
 @import "@fontsource-variable/hanken-grotesk/index.css";
 
 :root { --h: 70 }
-:root[data-art="meadow"] { --h: 150 }
-:root[data-art="pond"] { --h: 230 }
-:root[data-art="honeycomb"] { --h: 30 }
 :root {
   --bg: oklch(0.975 0.006 var(--h));
   --surface: oklch(0.99 0.004 var(--h) / .86);
@@ -100,6 +97,7 @@ input, textarea { caret-color: var(--accent) }
 .ico-chat { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'%3E%3Cpath d='M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H8.5L5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z'/%3E%3C/svg%3E") }
 .ico-film { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'%3E%3Crect x='1.5' y='3' width='13' height='10' rx='1.8'/%3E%3Cpath d='M4.5 3v10M11.5 3v10'/%3E%3C/svg%3E") }
 .ico-stack { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M4 1.8h8M2.5 4.6h11'/%3E%3Crect x='1.5' y='7.3' width='13' height='7' rx='1.8'/%3E%3C/svg%3E") }
+.ico-contrast { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5.9' fill='none' stroke='%23000' stroke-width='1.6'/%3E%3Cpath d='M8 2.1a5.9 5.9 0 0 1 0 11.8z'/%3E%3C/svg%3E") }
 .ico-check { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.2 3.2L13 4.5'/%3E%3C/svg%3E") }
 .ico-clock { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M8 4.8V8l2.2 1.5'/%3E%3C/svg%3E") }
 .ico-chev { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E") }
@@ -124,10 +122,24 @@ input, textarea { caret-color: var(--accent) }
 .k-nav .n { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums }
 .k-nav .n:empty { display: none }
 .k-tools { display: flex; align-items: center; gap: 12px }
-.k-arts { display: flex; gap: 4px }
-.k-arts button { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: none; padding: 0; display: grid; place-items: center }
-.k-arts button::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: oklch(0.62 0.12 var(--sh)) }
-.k-arts button[aria-pressed="true"] { border-color: var(--text-2) }
+.look-btn { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: none; padding: 0; display: grid; place-items: center; color: var(--text-2);
+  transition: background .2s var(--ease), color .2s var(--ease) }
+.look-btn:hover, .look-btn[aria-expanded="true"] { background: var(--surface-2); color: var(--text) }
+.look-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.look-pop { width: min(400px, calc(100vw - 24px)) }
+.look-pop fieldset { border: 0; margin: 0; padding: 0 }
+.look-pop legend { padding: 0; margin: 6px 0 8px }
+.look-arts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px }
+.look-opt { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 6px 6px 8px; border-radius: 12px; border: 1px solid var(--line); cursor: pointer;
+  transition: border-color .2s var(--ease), background .2s var(--ease) }
+.look-opt:hover { background: var(--surface-2) }
+.look-opt input { position: absolute; opacity: 0; pointer-events: none }
+.look-opt:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) }
+.look-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px }
+.look-cv { display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; background: var(--bg) }
+.look-txt { padding: 0 2px }
+.look-txt strong { display: block; font-size: 13px; font-weight: 600; color: var(--text) }
+.look-txt span { display: block; font-size: 11.5px; line-height: 1.35; color: var(--text-3) }
 .engine { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-3); white-space: nowrap }
 .engine .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex: none }
 .engine.ok .dot { background: var(--accent) }
@@ -481,7 +493,7 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
   padding: 14px; border-radius: var(--r-lg); background: var(--surface-solid); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
   transform-origin: top right; animation: pop .22s var(--ease) }
 .act-pop:focus { outline: 0 }
-.act-pop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.act-pop:focus-visible { outline: 0 } /* focus lands on the panel only to start keyboard travel inside it; its controls show their own rings */
 .act-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px }
 .act-top h2 { margin: 0; font: 600 14px var(--display); letter-spacing: -.01em }
 .act-pop .hint { margin: 2px 0 4px; font-size: 12.5px; color: var(--text-3) }
