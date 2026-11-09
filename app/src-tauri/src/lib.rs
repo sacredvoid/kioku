@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use tauri::{Manager, RunEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const ENGINE_ADDR: &str = "127.0.0.1:8765";
 
@@ -35,7 +36,11 @@ fn start_engine() -> Option<Child> {
     if engine_running() {
         return None;
     }
-    match Command::new(uv_path()).args(["run", "server.py"]).current_dir(engine_dir()).spawn() {
+    // Launched from Finder or at login, the app gets PATH=/usr/bin:/bin:...; the engine calls ffmpeg, ffprobe
+    // and claude by name, which live in Homebrew and ~/.local/bin.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default());
+    match Command::new(uv_path()).args(["run", "server.py"]).current_dir(engine_dir()).env("PATH", path).spawn() {
         Ok(child) => Some(child),
         Err(e) => {
             eprintln!("kioku: could not start engine: {e}");
@@ -44,11 +49,29 @@ fn start_engine() -> Option<Child> {
     }
 }
 
+/// Open at login, turned on once on first launch. A marker file keeps it from coming back after Sam
+/// switches it off in System Settings > General > Login Items.
+fn enable_login_item_once(app: &tauri::App) {
+    let Ok(dir) = app.path().app_data_dir() else { return };
+    let marker = dir.join("login-item-set");
+    if marker.exists() {
+        return;
+    }
+    match app.autolaunch().enable() {
+        Ok(()) => {
+            let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&marker, b""));
+        }
+        Err(e) => eprintln!("kioku: could not add login item: {e}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             app.manage(Engine(Mutex::new(start_engine())));
+            enable_login_item_once(app);
             Ok(())
         })
         .build(tauri::generate_context!())
