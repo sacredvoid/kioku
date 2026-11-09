@@ -280,6 +280,38 @@ def set_audio(collection_id: int, track_id: str, path: str = "", start: float | 
     return call("PUT", p, body)
 
 
+@server.tool(annotations=READ_ONLY)
+def search_sounds(query: str, kind: str = "music", max_duration: float | None = None, source: str = "free") -> dict:
+    """Find music (kind="music", the default) or sound effects (kind="sfx") for a project. You cannot hear audio:
+    choose from title, tags, creator and duration_s, and tell the user what you picked so they can listen in the app.
+    source="free" (default) searches free Creative Commons audio (Openverse), already limited to licenses the user
+    allows; source="mine" searches the user's own files under ~/Music by title, artist or file name (the user handles
+    the rights for those). max_duration: seconds. Returns results; pass a result's id (free) or path (mine) to
+    add_sound."""
+    if source == "mine":
+        return call("GET", "/sounds/local?" + urllib.parse.urlencode({"q": query}))
+    if source != "free":
+        return {"error": "source must be free or mine"}
+    params = {"q": query, "kind": kind} | ({"max_dur": max_duration} if max_duration else {})
+    return call("GET", "/sounds/search?" + urllib.parse.urlencode(params))
+
+
+@server.tool()
+def add_sound(collection_id: int, sound_id: str, start: float = 0, track_id: str = "", volume: float | None = None,
+              fade_in: float | None = None, fade_out: float | None = None) -> dict:
+    """Put a sound from search_sounds on the project's audio as a new track (at most 3). sound_id: the id of a free
+    result, or the path of a "mine" result. start: seconds on the output timeline. The free file is downloaded once
+    and checked. When the result has a "credit", say that credit line to the user: CC BY music must be credited
+    where the video is posted (Kioku also writes credits.txt next to final renders and exports). Use set_audio to
+    trim, fade or move the track afterwards."""
+    if sound_id.startswith("/"):
+        return set_audio(collection_id, track_id or f"m{int(time.time()) % 100000}", path=sound_id, start=start,
+                         volume=volume, fade_in=fade_in, fade_out=fade_out)
+    body = drop_unset(cid=collection_id, start=start, track_id=track_id or None, volume=volume, fade_in=fade_in,
+                      fade_out=fade_out)
+    return call("POST", f"/sounds/{urllib.parse.quote(sound_id, safe='')}/add", body)
+
+
 @server.tool()
 def render_preview(collection_id: int, start: float = 0, end: float = 0) -> dict:
     """Render a quick low-resolution preview from the playable copies. Optional start/end (seconds on the output

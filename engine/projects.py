@@ -178,7 +178,9 @@ def do_export(cid):
     otio.adapters.write_to_file(tl, str(xml), adapter_name="fcp_xml")
     otio.adapters.write_to_file(tl, str(xml.with_suffix(".otio")))
     total = sum(c[4] for c in clips)
-    return {"path": str(xml), "folder": str(out), "clips": len(clips), "missing": missing,
+    import sounds  # late: sounds imports edit, which imports this module
+    credit = sounds.write_credits(cid, out)
+    return {"path": str(xml), "folder": str(out), "clips": len(clips), "missing": missing, "credits": credit,
             "seconds": round(total, 1), "message": f"{len(clips)} clips, {total:.0f}s at {rate:.3f} fps"
             + (f" ({len(missing)} couldn't be downloaded from iCloud and were left out)" if missing else "")}
 

@@ -34,6 +34,6 @@ Status words: **live** = on main and running in the installed app; **built** = c
 ## Waiting on Sam
 | # | Decision | Ask |
 |---|---|---|
-| 17 | Free internet audio (Claude adds it, Sam browses/plays in app), music first, plus Sam's own ~/Music files | IN PROGRESS: kioku-audio agent on feat/audio; default CC0 + CC-BY (setting to allow NC) |
+| 17 | Free internet audio (Claude adds it, Sam browses/plays in app); mostly free music, sometimes own music | MERGED to main: Openverse music (default) + sound effects, My music (~/Music), MCP search_sounds/add_sound, credits + credits.txt; default CC0 + CC BY, NC switchable in Settings. Verified: 12 engine tests, live Openverse search + download + waveform, WebKit (mocked). Not verified: Add at playhead in the installed app; drag onto a lane not built; ogg/flac results skipped. |
 | 18 | Stable code signing so macOS permissions survive rebuilds | DONE 8168a14: "Kioku Local Signing" cert in login Keychain |
 | 19 | Delete old plaintext kioku/data/ (1.4 GB) | "delete old data" |

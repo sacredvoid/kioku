@@ -28,6 +28,9 @@ class Settings(BaseModel):
     caption_language: Literal["en", "auto", "es", "fr", "de", "it", "pt", "nl", "hi", "ja", "zh", "ko", "ru", "ar"] = Field(
         "en", description="spoken language for captions; auto guesses per clip but is 25x slower on noisy clips and often wrong")
     proxy_height: Literal[360, 540, 720] = Field(540, description="playable copy height; 360 uses about half the disk")
+    sound_licenses: Literal["commercial", "noncommercial"] = Field(
+        "commercial", description="free music and sounds offered: commercial = public domain and CC BY (fine for "
+        "monetized posts, credit CC BY); noncommercial also offers CC BY-NC (personal posts only)")
 
 
 _cur: Settings | None = None

@@ -584,7 +584,25 @@ async function loadAudio(cid: number, box: HTMLElement) {
   duckL.append(duckBox, " Lower clip sound under audio");
   const mix = el("div", "proj-meta");
   mix.append(lvl, duckL);
-  box.replaceChildren(head, ...(audio.length ? [list, mix] : []), addRow);
+  // the path field is the fallback; Music & sounds under the timeline and Finder drops are the main ways in
+  const more = el("details", "audio-more");
+  more.append(el("summary", "", "Add a file by path"), addRow);
+  const credits = el("div", "credits");
+  credits.hidden = true;
+  box.replaceChildren(head, ...(audio.length ? [list, mix] : []), credits, more);
+  api<{ credits: { title: string; creator: string; needs_credit: boolean }[]; text: string; required: boolean }>(`/collections/${cid}/credits`)
+    .then((c) => {
+      if (!c.required) return;
+      const copy = el("button", "", "Copy credits") as HTMLButtonElement;
+      copy.type = "button";
+      copy.onclick = () => navigator.clipboard.writeText(c.text).then(() => toast("Credits copied")).catch(fail("copy the credits"));
+      const row = el("div", "proj-meta");
+      row.append(el("strong", "", "Credits"), el("span", "muted", "required when you post this video (CC BY)"), el("span", "spacer"), copy);
+      const ul = el("ul");
+      ul.append(...c.text.trim().split("\n").slice(2).map((l) => el("li", "", l)));
+      credits.replaceChildren(row, ul);
+      credits.hidden = false;
+    }).catch(() => { /* older engine: no credits route */ });
 }
 
 type PollKind = "ask" | "export" | "preview" | "final" | "captions";
