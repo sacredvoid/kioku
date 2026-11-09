@@ -120,7 +120,7 @@ input, textarea { caret-color: var(--accent) }
 .k-nav button .ico { width: 15px; height: 15px; opacity: .85 }
 .k-nav button:hover { color: var(--text) }
 .k-nav button.on { color: var(--text) }
-.k-nav button.on::after { content: ""; position: absolute; left: 11px; right: 11px; bottom: -1px; height: 1.5px; background: var(--accent) }
+.k-nav button.on::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2.5px; border-radius: 2px 2px 0 0; background: var(--accent-fill) }
 .k-nav .n { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums }
 .k-nav .n:empty { display: none }
 .k-tools { display: flex; align-items: center; gap: 12px }
