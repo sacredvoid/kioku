@@ -219,7 +219,7 @@ class Index:
         k = len(self.seg_uuid)  # fewer than n if rows were deleted meanwhile (analyze rewrites a video's scenes)
         self.seg_asset = seg_asset[:k]
         self.M = M[:k] if M is not None else np.zeros((0, 768), np.float32)
-        self.assets = {r[0]: r[1:] for r in db.execute("select uuid, kind, path, duration, meta from assets")}
+        self.assets = {r[0]: r[1:] for r in db.execute("select uuid, kind, path, duration, meta, created from assets")}
         self.loaded_at = time.time()
 
     def vector_hits(self, query):
@@ -247,7 +247,8 @@ class Index:
             db.close()
         return {u: -b for u, b in rows}  # bm25 is lower-is-better; flip so higher is better
 
-    def search(self, query, k=20, kind=None):
+    def search(self, query, k=20, kind=None, date=None):
+        """date: 'YYYY' or 'YYYY-MM' prefix of created, applied before the top k so a filter never comes back empty."""
         vec, kw = self.vector_hits(query), self.keyword_hits(query)
         floor = next(iter(vec.values()), (0,))[0] - self.FLOOR_MARGIN
         kw_rank = {u: i for i, u in enumerate(kw)}
@@ -257,14 +258,16 @@ class Index:
         for u in dict.fromkeys([*strong, *kw]):
             if u not in self.assets:
                 continue
-            akind, path, duration, meta = self.assets[u]
+            akind, path, duration, meta, created = self.assets[u]
             if kind and not (akind == kind or (kind == "video" and akind == "poster")):
+                continue
+            if date and not (created or "").startswith(date):
                 continue
             v, seg, vrank = vec.get(u, (0, None, None))
             rrf = sum(1 / (self.RRF_K + r) for r in (vrank, kw_rank.get(u)) if r is not None)
             t0, t1, src = self.seg_span[seg] if seg is not None else (None, None, None)
             out.append(dict(uuid=u, kind=akind, path=path, duration=duration, score=round(rrf * 1000, 2),
-                            visual=round(v, 3), keyword=u in kw, meta=meta,
+                            visual=round(v, 3), keyword=u in kw, meta=meta, created=created,
                             moment=dict(t0=t0, t1=t1) if src == "scene" else None))
         out.sort(key=lambda h: -h["score"])
         return out[:k]

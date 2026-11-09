@@ -83,21 +83,25 @@
       </div>
     </div>
     <section id="ask-view" class="k-ask" hidden>
-      <h1>What should we remember today?</h1>
-      <form class="k-askform" id="ask-form">
-        <input id="ask-q" autocomplete="off" spellcheck="false" maxlength="4000" placeholder="Make a 30 second reel of the beach day, or find sunsets from the car" aria-label="Ask Kioku">
-        <button type="submit" class="primary">Ask</button>
-      </form>
-      <p class="k-hint">Start with make, cut or recap to have Claude edit a video. Anything else searches your library.</p>
-      <div class="k-sugg" id="ask-sugg"></div>
-      <div class="k-live" id="ask-live"></div>
+      <div class="k-hero k-card">
+        <h1>Find a moment, or make a video</h1>
+        <form class="k-askform" id="ask-form">
+          <input id="ask-q" autocomplete="off" spellcheck="false" maxlength="4000" placeholder="Make a 30 second reel of the beach day, or find sunsets from the car" aria-label="Ask Kioku">
+          <button type="submit" class="primary">Ask</button>
+        </form>
+        <p class="k-hint">Start with make, cut or recap to have Claude edit a video. Anything else searches your library.</p>
+        <div class="k-sugg chips" id="ask-sugg" role="group" aria-label="Try one of these"></div>
+      </div>
+      <section class="k-card k-latest" id="ask-live" aria-labelledby="ask-live-h" hidden></section>
       <div class="k-board">
-        <div>
-          <h2 class="k-h2">Projects</h2>
-          <ul class="k-list" id="board-projects"></ul>
-          <h2 class="k-h2">Recent asks</h2>
+        <section class="k-card k-projs" aria-labelledby="board-projects-h">
+          <div class="k-card-head"><h2 id="board-projects-h">Projects</h2><button type="button" class="link" data-tab="projects" aria-label="See all projects">See all</button></div>
+          <div id="board-projects"></div>
+        </section>
+        <section class="k-card k-asks" aria-labelledby="board-asks-h">
+          <div class="k-card-head"><h2 id="board-asks-h">Recent asks</h2><button type="button" class="link" data-tab="history" aria-label="See all asks in History">See all</button></div>
           <ul class="k-list" id="board-asks"></ul>
-        </div>
+        </section>
         <div class="k-facts" id="board-facts"></div>
       </div>
     </section>
@@ -139,6 +143,10 @@
     <div id="libbar" class="k-libbar" hidden>
       <div class="k-seg" role="group" aria-label="Show">
         <button type="button" data-kind="">All</button><button type="button" data-kind="image">Photos</button><button type="button" data-kind="video">Videos</button>
+      </div>
+      <div class="k-dates" role="group" aria-label="Date">
+        <select id="f-year" aria-label="Year"><option value="">All years</option></select>
+        <select id="f-month" aria-label="Month" disabled><option value="">All months</option></select>
       </div>
       <label class="search">
         <span class="sr">Search your library</span>
