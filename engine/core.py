@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from functools import cache, lru_cache
 from pathlib import Path
@@ -83,27 +84,57 @@ create index if not exists ask_runs_c on ask_runs(collection_id, started);
 _wal = set()  # db paths already switched to WAL by this process
 
 
+_pool: dict = {}  # (path, key) -> idle connections. Never closed while the process runs: see Conn.close
+_pool_lock = threading.Lock()
+
+
 class Conn(sqlite3.Connection):
-    """`with core.connect() as c:` commits (or rolls back) AND closes. Plain sqlite3 only commits, which left
-    connections open until garbage collection and ran the engine out of file handles."""
+    """`with core.connect() as c:` commits (or rolls back) AND gives the connection back. Plain sqlite3 only
+    commits, which left connections open until garbage collection and ran the engine out of file handles.
+    close() returns the connection to a pool instead of closing it: SQLite 3.51 (SQLCipher) deadlocked the
+    engine when one thread closed a WAL connection while another opened the same file (2026-11-09), and
+    opening per request was the only reason connections ever closed. One holder at a time, so
+    check_same_thread is off; the pool is bounded by the number of threads that use the db at once."""
+    _path = None
+    _out = False
+
     def __exit__(self, *exc):
         try:
             return super().__exit__(*exc)
         finally:
             self.close()
 
+    def close(self):
+        if not self._out:  # already back in the pool (double close) or never handed out
+            return
+        self._out = False
+        try:
+            self.rollback()  # drop anything uncommitted, exactly as a real close would
+        except sqlite3.Error:
+            return super().close()  # broken connection: really close it, don't pool it
+        with _pool_lock:
+            _pool.setdefault(self._path, []).append(self)
+
 
 def connect(path=DB_PATH):
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     key = db_key()  # before connect(): connecting creates the file, and db_key() treats an existing file as an index
-    db = sqlite3.connect(path, timeout=30, factory=Conn)  # the indexer may be writing; wait instead of failing
+    with _pool_lock:
+        idle = _pool.get((path, key))
+        db = idle.pop() if idle else None
+    if db is not None:
+        db._out = True
+        return db
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # the indexer may be writing; wait instead of failing
+    db = sqlite3.connect(path, timeout=30, factory=Conn, check_same_thread=False)
+    db._path, db._out = (path, key), True
     # raw hex key (no passphrase KDF needed: it's already 256 random bits). Must be the first statement.
     db.execute(f"pragma key = \"x'{key}'\"")
     db.execute("pragma temp_store = memory")  # sorts and temp tables never touch disk unencrypted
     try:
         db.execute("select count(*) from sqlite_master").fetchone()
     except sqlite3.DatabaseError as e:
-        db.close()
+        sqlite3.Connection.close(db)  # really close: a connection that can't read the db must never be pooled
         if isinstance(e, sqlite3.OperationalError):  # busy/locked: the caller's usual retry handling applies
             raise
         raise RuntimeError(f"cannot open {path}: wrong key, or an unencrypted index ({e})") from e

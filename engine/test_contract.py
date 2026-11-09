@@ -36,15 +36,18 @@ except ValueError:
 assert media.RUNNING == 0
 print("ok")
 
-# connections from core.connect() close when their `with` block ends (they used to leak until the engine ran out of files)
-from core import sqlite3 as _sq  # noqa: E402
+# connections from core.connect() go back to the pool when their `with` block ends (they used to leak until the
+# engine ran out of files), are reused instead of reopened, and a double close never hands one out twice
 with core.connect() as _c:
-    _c.execute("select 1")
-try:
-    _c.execute("select 1")
-    raise AssertionError("connection still open after with-block")
-except _sq.ProgrammingError:
-    pass
+    _c.execute("create table if not exists _t(x)")
+    _c.execute("insert into _t values (1)")
+assert not _c._out
+_d = core.connect()
+assert _d is _c and _d._out  # reused, not reopened
+_d.execute("insert into _t values (2)")
+_d.close(); _d.close()  # double close: pooled once
+assert core.connect() is _c and core.connect() is not _c  # second checkout gets a fresh connection
+assert core.connect().execute("select count(*) from _t").fetchone()[0] == 1  # close without commit rolled back
 print("connection close ok")
 
 # the search index streams vectors into one preallocated matrix (fetchall + join used to hold every vector twice)
