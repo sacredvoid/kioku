@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Kioku app icon: the tree-ring mark on a neutral squircle, one accent (Sunflower) -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#F6F3EE"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#2A2622" stroke-opacity=".08"/>
+  <g transform="translate(232 232) scale(5.6)">
+    <ellipse cx="50" cy="50" rx="45" ry="43" fill="none" stroke="#2A2622" stroke-width="6"/>
+    <ellipse cx="53" cy="47" rx="32" ry="30" fill="none" stroke="#A8691C" stroke-width="4.5"/>
+    <ellipse cx="55.5" cy="45" rx="20" ry="19" fill="none" stroke="#2A2622" stroke-width="4"/>
+    <ellipse cx="57" cy="44" rx="9.5" ry="9" fill="none" stroke="#A8691C" stroke-width="3.5"/>
+    <circle cx="58" cy="43.5" r="3.2" fill="#2A2622"/>
+    <path d="M61 47 L73 64 L76 78" fill="none" stroke="#2A2622" stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+</svg>
