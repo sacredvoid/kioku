@@ -443,7 +443,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     const win = kind === "preview" && !ev?.shiftKey && timeline.mounted(c.id);
     const t = timeline.time(), start = Math.max(0, t - 5);
     previewStart = win ? start : 0;
-    try { await api(`/collections/${c.id}/render`, "POST", win ? { mode: kind, start, end: t + 5 } : { mode: kind }); pollJob(c.id, kind, out, btn); }
+    try { await api(`/collections/${c.id}/render`, "POST", win ? { mode: kind, start, end: t + 5 } : { mode: kind }); pollJob(c.id, kind, out, btn); out.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
     catch (e) { out.className = "ask-out failed"; out.textContent = `Couldn't start the ${kind === "final" ? "render" : "preview"}: ${errMsg(e)}`; }
   };
   prevBtn.onclick = startRender("preview", prevOut, prevBtn);
@@ -491,7 +491,10 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   claude.append(askOut, runs);
 
   const audio = el("section", "audio");
-  project.replaceChildren(brief, ask, claude, meta, expOut, tlHost, capStyle, audio, capOut, prevOut, finOut);
+  // job status (render, preview, export, captions) sits above the player, where you look, not under the audio section
+  const jobs = el("div", "proj-jobs");
+  jobs.append(finOut, prevOut, expOut, capOut);
+  project.replaceChildren(brief, ask, claude, meta, jobs, tlHost, capStyle, audio);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
