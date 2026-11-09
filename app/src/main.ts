@@ -315,15 +315,49 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   project.hidden = false;
   const total = items.reduce((s, it) => s + clipLen(it), 0);
 
-  const brief = document.createElement("textarea");
-  brief.id = "brief";
-  brief.className = "brief";
-  brief.rows = 2;
-  brief.placeholder = "Brief: what should this video feel like? Length, pace, music, who it's for…";
-  brief.value = c.brief;
-  brief.addEventListener("blur", () => {
-    if (brief.value !== c.brief) api(`/collections/${c.id}`, "PATCH", { brief: brief.value }).then(() => { c.brief = brief.value; toast("Brief saved"); }).catch(fail("save the brief"));
-  });
+  // the brief: what Claude aims for on every edit. Read-only until Edit, so it isn't changed by a stray click.
+  const brief = el("section", "brief-box");
+  brief.setAttribute("aria-labelledby", "brief-h");
+  const briefH = el("h3", "k-h2", "Brief");
+  briefH.id = "brief-h";
+  const briefBody = el("div", "brief-body");
+  const showBrief = () => {
+    const text = el("p", c.brief.trim() ? "brief-text" : "brief-text empty",
+      c.brief.trim() || "No brief yet. Add one so Claude knows the length, mood and who the video is for.");
+    const edit = el("button", "link", c.brief.trim() ? "Edit" : "Add brief") as HTMLButtonElement;
+    edit.type = "button";
+    edit.onclick = editBrief;
+    briefBody.replaceChildren(text, edit);
+  };
+  const editBrief = () => {
+    const ta = document.createElement("textarea");
+    ta.className = "brief";
+    ta.rows = 3;
+    ta.value = c.brief;
+    ta.placeholder = "Length, pace, music, who it's for…";
+    ta.setAttribute("aria-labelledby", "brief-h");
+    const save = el("button", "primary", "Save") as HTMLButtonElement, cancel = el("button", "ghost", "Cancel") as HTMLButtonElement;
+    save.type = cancel.type = "button";
+    const done = () => { showBrief(); briefBody.querySelector<HTMLButtonElement>("button")?.focus(); };
+    cancel.onclick = done;
+    save.onclick = () => {
+      if (ta.value === c.brief) return done();
+      save.disabled = true;
+      api(`/collections/${c.id}`, "PATCH", { brief: ta.value })
+        .then(() => { c.brief = ta.value; toast("Brief saved"); done(); })
+        .catch((e) => { save.disabled = false; fail("save the brief")(e); });  // keep the edit open so nothing typed is lost
+    };
+    ta.onkeydown = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); }
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save.click(); }
+    };
+    const acts = el("div", "brief-acts");
+    acts.append(el("span", "hint", "⌘↩ to save, Esc to cancel"), cancel, save);
+    briefBody.replaceChildren(ta, acts);
+    ta.focus();
+  };
+  brief.append(briefH, el("p", "hint brief-hint", "What Claude works toward whenever it edits this project."), briefBody);
+  showBrief();
 
   const ask = el("form", "ask") as HTMLFormElement;
   const askIn = document.createElement("input");
