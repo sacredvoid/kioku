@@ -1207,14 +1207,17 @@ class Editor {
       const t = this.tracks().find((x) => x.id === sel.id);
       if (t) {
         const head = el("div", "tl-ih");
-        head.append(el("strong", "", "Voiceover"), el("span", "muted tl-in", base(t.path)));
+        head.append(el("strong", "", "Audio"), el("span", "muted tl-in", base(t.path)));
         f.append(head);
         const put = (body: Flat, label: string) => this.putAudio(t.id, body, Object.fromEntries(Object.keys(body).map((k) => [k, (t as unknown as Flat)[k]])), label);
         f.append(row("Volume", range(0, 2, .05, t.volume, (v) => put({ volume: v }, "Change audio volume"), (v) => `${Math.round(v * 100)}%`)));
         f.append(row("Fade in", range(0, Math.max(.1, t.out - t.in), .1, t.fade_in, (v) => put({ fade_in: v }, "Fade in"), (v) => `${v.toFixed(1)}s`)));
         f.append(row("Fade out", range(0, Math.max(.1, t.out - t.in), .1, t.fade_out, (v) => put({ fade_out: v }, "Fade out"), (v) => `${v.toFixed(1)}s`)));
         const acts = el("div", "tl-acts");
-        acts.append(btn("Remove", "ghost danger", () => this.removeAudio(t)));
+        acts.append(btn("Cut start here", "", () => this.markInOut(true), "Cut the start of this audio at the playhead (I)"),
+          btn("Cut end here", "", () => this.markInOut(false), "Cut the end of this audio at the playhead (O)"),
+          btn("End with video", "", () => this.endAudioWithVideo(t), "Cut the end where the video ends"),
+          btn("Remove", "ghost danger", () => this.removeAudio(t)));
         f.append(acts);
       }
     } else {
@@ -1284,7 +1287,30 @@ class Editor {
     }
     return false;
   }
+  /** I / O on a selected audio track: cut its start or end at the playhead (same undo path as dragging an edge). */
+  audioInOut(id: string, isIn: boolean): boolean {
+    const t = this.tracks().find((x) => x.id === id);
+    if (!t) return false;
+    const p = this.player.time, end = t.start + (t.out - t.in);
+    if (p <= t.start + 0.05 || p >= end - 0.05) { this.deps.toast("Move the playhead inside the selected audio"); return true; }
+    const snap = this.snapshot(), body: Flat = {}, old: Flat = {};
+    if (isIn) { old.in = t.in; old.start = t.start; t.in = round2(t.in + (p - t.start)); t.start = round2(p); body.in = t.in; body.start = t.start; }
+    else { old.out = t.out; t.out = round2(t.in + (p - t.start)); body.out = t.out; }
+    this.placeAudio();
+    this.putAudio(id, body, old, isIn ? "Cut audio start" : "Cut audio end", snap);
+    return true;
+  }
+  endAudioWithVideo(t: { id: string; start: number; in: number; out: number }) {
+    if (t.start + (t.out - t.in) <= this.dur + 0.05) return this.deps.toast("This audio already ends before the video does");
+    if (this.dur - t.start < 0.1) return this.deps.toast("This audio starts after the video ends");
+    const snap = this.snapshot(), old = { out: t.out };
+    t.out = round2(t.in + (this.dur - t.start));
+    this.placeAudio();
+    this.putAudio(t.id, { out: t.out }, old, "End audio with video", snap);
+  }
+
   markInOut(isIn: boolean): boolean {
+    if (this.sel?.kind === "audio") return this.audioInOut(this.sel.id, isIn);
     if (this.sel?.kind !== "clip") return false;
     const id = this.sel.id, k = this.items.findIndex((i) => i.item_id === id), it = this.items[k];
     if (!it) return false;
