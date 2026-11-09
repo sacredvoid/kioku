@@ -1,0 +1,131 @@
+/* Timeline editor: player + inspector on top, lanes below. Uses the theme tokens from styles.css only. */
+.ico-pause { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='3.5' y='2.5' width='3.2' height='11' rx='1'/%3E%3Crect x='9.3' y='2.5' width='3.2' height='11' rx='1'/%3E%3C/svg%3E") }
+
+.tl { display: flex; flex-direction: column; gap: 10px; min-height: calc(100vh - 230px); opacity: .6; transition: opacity .3s var(--ease) }
+.tl.ready { opacity: 1 }
+.tl-top { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; align-items: start }
+@media (max-width: 1100px) { .tl-top { grid-template-columns: minmax(0, 1fr) } }
+.tl-left { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; box-shadow: var(--shadow) }
+.tl-stage { position: relative; aspect-ratio: 16 / 9; max-height: 44vh; width: 100%; margin: 0 auto; background: #0d0c1c; color: #fff; display: grid; place-items: center; overflow: hidden }
+.tl-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-top: 1px solid var(--line-soft) }
+.tl-tc { font: 12.5px var(--mono); color: var(--text-2); margin-left: 8px }
+.tl-play { background: var(--accent-fill) !important; color: var(--on-accent) }
+.tl-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--surface-2) }
+.tl-seg button { border: 0; background: none; padding: 2px 11px; border-radius: 999px; font-size: 12px; color: var(--text-2); transition: background .2s var(--ease), color .2s var(--ease) }
+.tl-seg button[aria-pressed="true"] { background: var(--surface-solid); color: var(--accent); font-weight: 620; box-shadow: var(--shadow) }
+.tl-pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); opacity: 0; transform: translateY(2px); transition: opacity .3s var(--ease), transform .3s var(--ease); pointer-events: none }
+.tl-pill.on { opacity: 1; transform: none }
+
+/* inspector */
+.tl-insp { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); max-height: 44vh; overflow: auto;
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px) }
+.tl-ih { display: flex; flex-direction: column; line-height: 1.25; margin-bottom: 2px }
+.tl-in { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.tl-f { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px }
+.tl-fl { color: var(--text-2) }
+.tl-fv { font: 11.5px var(--mono); color: var(--text-3); min-width: 38px; text-align: right }
+.tl-fn { grid-column: 2 / -1; margin-top: -4px; font-size: 11.5px }
+.tl-f select { width: 100%; grid-column: 2 / -1 }
+.tl-f input[type="range"] { width: 100%; accent-color: var(--accent) }
+.tl-f input[type="checkbox"] { justify-self: start; accent-color: var(--accent) }
+.tl-adj summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); margin-bottom: 6px }
+.tl-adj { display: flex; flex-direction: column; gap: 6px }
+.tl-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px }
+.tl-hint { font-size: 12px; margin: 4px 0 0 }
+
+/* lanes */
+.tl-wrap { position: relative; display: flex; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow); overflow: hidden }
+.tl-labels { flex: none; width: 36px; border-right: 1px solid var(--line-soft); background: var(--surface-2) }
+.tl-label { display: grid; place-items: center; font: 600 11px var(--mono); color: var(--text-3) }
+.tl-scroll { position: relative; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden }
+.tl-canvas { position: relative; min-width: 100% }
+.tl-ruler { position: relative; height: 26px; border-bottom: 1px solid var(--line-soft); cursor: col-resize; touch-action: none }
+.tl-tick { position: absolute; top: 0; height: 100%; padding: 6px 0 0 5px; border-left: 1px solid var(--line); font: 10.5px var(--mono); color: var(--text-3); pointer-events: none }
+.tl-lane { position: relative; border-bottom: 1px solid var(--line-soft) }
+.tl-v { height: 68px }
+.tl-a { height: 44px; transition: background .2s var(--ease) }
+.tl-a.hot { background: var(--accent-soft); outline: 2px dashed var(--accent); outline-offset: -3px }
+.tl-c { height: 30px; border-bottom: 0 }
+.tl-v.empty::after { content: attr(data-empty); position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-3); font-size: 12.5px; pointer-events: none }
+.tl-aempty, .tl-cempty { position: sticky; left: 10px; display: block; width: max-content; font-size: 11.5px; line-height: 44px; color: var(--text-3); white-space: nowrap; pointer-events: none }
+.tl-cempty { line-height: 30px }
+
+.tl-clip { position: absolute; top: 4px; height: 60px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-solid); overflow: hidden; cursor: grab; touch-action: none; user-select: none;
+  transition: transform .25s var(--ease), box-shadow .2s var(--ease), opacity .2s var(--ease); box-shadow: 0 1px 2px rgba(40, 32, 90, .06) }
+.tl-clip:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)) }
+.tl-clip.sel, .tl-aud.sel { box-shadow: 0 0 0 2px var(--accent) }
+.tl-clip.dragging { opacity: .6; z-index: 5; cursor: grabbing; transition: none; box-shadow: var(--shadow-lg) }
+.tl-clip.trimming { transition: none; z-index: 4 }
+.tl-img { position: absolute; inset: 0; background-repeat: no-repeat; background-color: var(--surface-2) }
+.tl-clip::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0, 0, 0, .45), transparent 42%, transparent 70%, rgba(0, 0, 0, .35)); pointer-events: none }
+.tl-name, .tl-len { position: absolute; left: 8px; right: 8px; z-index: 1; color: #fff; font-size: 11.5px; line-height: 1.2; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none }
+.tl-name { top: 5px; font-weight: 620 }
+.tl-len { bottom: 4px; font: 10.5px var(--mono) }
+.tl-tip { position: absolute; top: 3px; z-index: 12; padding: 1px 8px; border-radius: 6px; background: var(--text); color: var(--bg); font: 11px/18px var(--mono); pointer-events: none; white-space: nowrap }
+.tl-h { position: absolute; top: 0; bottom: 22px; width: 8px; z-index: 2; cursor: ew-resize; opacity: 0; transition: opacity .15s var(--ease); background: var(--accent) }
+.tl-h.l { left: 0; border-radius: 8px 0 0 8px }
+.tl-h.r { right: 0; border-radius: 0 8px 8px 0 }
+.tl-clip:hover .tl-h, .tl-aud:hover .tl-h, .tl-clip.trimming .tl-h, .tl-clip:focus-visible .tl-h { opacity: .85 }
+.tl-clip:focus-visible, .tl-aud:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+
+.tl-seam { position: absolute; bottom: 6px; width: 13px; height: 13px; padding: 0; translate: -50% 0; rotate: 45deg; z-index: 3; border-radius: 4px; border: 1.5px solid var(--accent);
+  background: var(--surface-solid); opacity: 0; transition: opacity .15s var(--ease), scale .15s var(--ease) }
+.tl-v:hover .tl-seam, .tl-seam:focus-visible, .tl-seam.has { opacity: .95 }
+.tl-seam.has { background: var(--accent) }
+.tl-seam:hover { scale: 1.2 }
+
+.tl-aud { position: absolute; top: 4px; height: 36px; border-radius: 8px; border: 1px solid var(--line); overflow: hidden; cursor: grab; touch-action: none; user-select: none;
+  background: color-mix(in srgb, var(--sky) 30%, var(--surface-solid)); transition: box-shadow .2s var(--ease) }
+.tl-aud.dragging { cursor: grabbing; box-shadow: var(--shadow-lg) }
+.tl-aud canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none }
+.tl-aud .tl-h { bottom: 0 }
+.tl-aud .tl-name { color: var(--text); text-shadow: none; top: 2px; font-size: 11px }
+
+.tl-cue { position: absolute; top: 4px; height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--peach) 25%, var(--surface-solid)); color: var(--text); font-size: 11.5px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.tl-cue:hover { background: color-mix(in srgb, var(--peach) 45%, var(--surface-solid)) }
+
+.tl-ph { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--accent); z-index: 6; pointer-events: none; will-change: transform }
+.tl-ph-cap { position: absolute; top: 0; left: -5px; width: 12px; height: 12px; background: var(--accent); clip-path: polygon(0 0, 100% 0, 50% 100%) }
+.tl-snapline { display: none; position: absolute; top: 0; bottom: 0; left: 0; width: 0; border-left: 2px dotted var(--accent); z-index: 5; pointer-events: none }
+.tl-caret { display: none; position: absolute; top: 26px; height: 68px; left: 0; width: 3px; margin-left: -1px; border-radius: 2px; background: var(--accent); z-index: 5; pointer-events: none }
+
+.tl-pop { position: absolute; z-index: 30; width: 288px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-solid); box-shadow: var(--shadow-lg); animation: pop .18s var(--ease) }
+.tl-chips { display: flex; flex-wrap: wrap; gap: 5px }
+.tl-chips .chip[aria-checked="true"] { background: var(--accent-fill); color: var(--on-accent); border-color: transparent }
+.tl-pop-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 11.5px }
+.tl-pop-row input { flex: 1; accent-color: var(--accent) }
+.tl-pop-note { font-size: 11.5px; margin-top: 8px }
+
+.tl-tools { display: flex; align-items: center; gap: 8px; padding: 2px 2px }
+.tl-tools .ico { margin-right: 2px }
+.tl-tools button.on { color: var(--accent); background: var(--accent-soft) }
+.tl-tools input[type="range"] { width: 120px; accent-color: var(--accent) }
+.tl-totals { font-size: 12px; margin-left: 6px }
+
+.tl-panel { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-solid); box-shadow: var(--shadow-lg); padding: 10px 12px }
+.tl-panel.rise { animation: rise .25s var(--ease) }
+.tl-panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px }
+.tl-q { flex: 0 1 320px; min-width: 120px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2) }
+.tl-panel-body { display: flex; flex-direction: column; gap: 6px }
+.tl-row-title { font-size: 11.5px }
+.tl-row { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; min-height: 40px; align-items: flex-start }
+.tl-tile { flex: none; width: 120px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); overflow: hidden; text-align: left; transition: transform .2s var(--ease), box-shadow .2s var(--ease) }
+.tl-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow) }
+.tl-tile.on { box-shadow: 0 0 0 2px var(--accent) }
+.tl-tile-img { display: block; width: 120px; height: 68px; background-repeat: no-repeat; background-color: var(--surface-3) }
+.tl-tile-len { display: block; padding: 3px 6px; font: 10.5px var(--mono); color: var(--text-2) }
+
+.tl-footer { margin-top: 2px }
+.tl-footer > * { margin: 0 }
+
+/* buttons inside the editor share the app's pill look */
+.tl-tools button, .tl-acts button, .tl-panel button:not(.tl-tile):not(.chip), .tl-pop button:not(.chip) {
+  border: 1px solid var(--line); background: var(--surface-solid); padding: 6px 13px; border-radius: 999px; font-weight: 520;
+  transition: background-color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease) }
+.tl-tools button:hover, .tl-acts button:hover { background: var(--surface-2) }
+.tl-tools button.ghost, .tl-acts button.ghost, .tl-panel button.ghost { background: transparent }
+.tl-tools button.icon, .tl-panel button.icon, .tl-bar button.icon { padding: 0; border-color: transparent }
+.tl-tools button.primary, .tl-panel button.primary { background: var(--accent-fill); border-color: transparent; color: var(--on-accent); font-weight: 620 }
+.tl-tools button.danger, .tl-acts button.danger { color: var(--danger) }
+.tl-panel .chip { padding: 5px 12px; cursor: pointer }
+.tl-chips .chip { padding: 5px 11px; cursor: pointer }
