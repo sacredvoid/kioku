@@ -52,6 +52,19 @@
   </header>
 
   <div class="main">
+    <div id="boot" class="boot">
+      <svg class="boot-art" viewBox="-50 -50 100 100" aria-hidden="true">
+        <circle class="boot-ring" r="47"/>
+        <g class="boot-spin"><polygon class="boot-guide" points="47,0 23.5,40.7 -23.5,40.7 -47,0 -23.5,-40.7 23.5,-40.7"/></g>
+        <g class="boot-spin rev"><polygon class="boot-guide" points="0,-47 40.7,23.5 -40.7,23.5"/></g>
+        <g class="boot-spin slow"><path id="boot-line" class="boot-line" pathLength="1"/></g>
+        <circle class="boot-core" r="1.6"/>
+      </svg>
+      <div role="status" aria-live="polite">
+        <p class="boot-title">Starting engine</p>
+        <p class="boot-sub">Loading the search model and your library index</p>
+      </div>
+    </div>
     <section id="ask-view" class="k-ask" hidden>
       <h1>What should we remember today?</h1>
       <form class="k-askform" id="ask-form">

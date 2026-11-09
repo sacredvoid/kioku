@@ -135,6 +135,7 @@ function newCollection(kind: "album" | "project", box: Element, then?: (c: Colle
 let lastKey = "";
 async function go(v: View, search = q.value.trim()) {
   view = v;
+  if (!$("boot").hidden) return; // still booting: remember the choice, bootDone() opens it
   const my = ++seq;
   // content settles in on navigation only; a live refresh of the same view must not replay it
   const key = `${v.type}:${v.type === "lib" ? v.kind : v.type === "page" ? v.page : v.type === "ask" ? "" : v.id}:${search}`;
@@ -887,6 +888,22 @@ setInterval(() => { if (ready && !document.hidden) pollActivity(); }, 1500);
 // ---------- engine status
 const dot = $("engine");
 let ready = false;
+
+// first-boot loader: a damped two-pendulum harmonograph that traces itself in, shown only until the first /health.
+// Each axis mixes a 2 and a 5 swing a hair out of tune, so the petals precess while the decay pulls them inward.
+$("boot-line").setAttribute("d", Array.from({ length: 2001 }, (_, i) => {
+  const t = i * 0.05, a = 20 * Math.exp(-0.012 * t), q = Math.PI / 2;
+  const x = a * (Math.sin(2 * t) + Math.sin(5.01 * t + q));
+  const y = a * (Math.sin(2.003 * t + q) + Math.sin(5 * t));
+  return `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
+}).join(""));
+function bootDone() {
+  const boot = $("boot");
+  if (boot.hidden) return go(view);
+  boot.classList.add("out");
+  // let the fade finish before the view settles in where the loader was
+  setTimeout(() => { boot.hidden = true; go(view); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 450);
+}
 async function heartbeat() {
   try {
     const h = await api<{ assets: number; reindex: string }>("/health");
@@ -894,7 +911,7 @@ async function heartbeat() {
     const failed = h.reindex.startsWith("failed");
     $("engine-text").textContent = `${h.assets.toLocaleString()} indexed${h.reindex === "running" ? " · indexing" : failed ? " · indexing failed" : ""}`;
     dot.title = failed ? h.reindex : "Search index details";
-    if (!ready) { ready = true; syncCollections(); go(view); }
+    if (!ready) { ready = true; syncCollections(); bootDone(); }
     $<HTMLButtonElement>("settings-btn").disabled = false;
   } catch {
     dot.className = "engine wait";
