@@ -259,13 +259,17 @@ def fmt_srt(t):
     return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
 
 
-def write_srt(cues, path: Path, shift: float = 0.0):
+def write_srt(cues, path: Path, shift: float = 0.0, end: float | None = None):
+    """Cues shifted by -shift; those outside 0..end (the rendered window's length) are dropped or clipped."""
     blocks, n = [], 0
     for c in cues:
-        if c.t1 - shift <= 0:
+        t0, t1 = c.t0 - shift, c.t1 - shift
+        if end is not None:
+            t1 = min(t1, end)
+        if t1 <= 0 or t1 <= t0:
             continue
         n += 1
-        blocks.append(f"{n}\n{fmt_srt(c.t0 - shift)} --> {fmt_srt(c.t1 - shift)}\n{c.text}\n")
+        blocks.append(f"{n}\n{fmt_srt(t0)} --> {fmt_srt(t1)}\n{c.text}\n")
     path.write_text("\n".join(blocks), encoding="utf-8")
 
 

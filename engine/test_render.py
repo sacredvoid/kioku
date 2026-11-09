@@ -181,6 +181,7 @@ render.run_ffmpeg = spy
 def go(cid, mode="preview", **kw):
     before = render.SEG_RUNS
     r = render.render(cid, mode, **kw)
+    assert f"render:{cid}:{mode}" not in media.ACTIVE, "a finished render must leave no activity entry behind"
     return r, render.SEG_RUNS - before
 
 
@@ -256,7 +257,7 @@ fake = types.ModuleType("captions")
 fake.ensure_transcripts = lambda uuids, on_progress=None, errors=None: {u: [] for u in uuids}
 fake.map_cues = lambda tl, tr: [types.SimpleNamespace(t0=0.5, t1=1.5, text="a", ), types.SimpleNamespace(t0=1.8, t1=2.8, text="b")]
 fake.build = lambda tl, style, dims, cues, workdir, window: types.SimpleNamespace(cues=cues, list_file=cd / "cues.txt")
-fake.write_srt = lambda cues, path, shift=0.0: Path(path).write_text(f"srt shift {shift}")
+fake.write_srt = lambda cues, path, shift=0.0, end=None: Path(path).write_text(f"srt shift {shift}")
 fake.cached = lambda uuid: None
 sys.modules["captions"] = fake
 PLAN[5] = mk([("G", "video", 0, 6, 1, None)])

@@ -648,12 +648,12 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         assert target.resolve().parent == (rdir if mode == "preview" else folder).resolve()
         srt = target.with_suffix(".srt")
         if all_cues:  # the unsplit cues; write_srt shifts them by the window start
-            captions.write_srt(all_cues, srt, win[0] / fps if win else 0.0)
+            captions.write_srt(all_cues, srt, win[0] / fps if win else 0.0, (win[1] - win[0]) / fps if win else None)
         else:
             srt = None
             if mode == "preview":
                 target.with_suffix(".srt").unlink(missing_ok=True)
-        prog.stage("Contact sheet")
+        state["stage"] = "Contact sheet"  # not prog.stage: the activity entry was cleared with the slot
         sheet = _sheet(target, sel, win, fps, rdir / f"{mode}-sheet.jpg")
         prog.state["progress"] = 1.0
         _gc_cache()
