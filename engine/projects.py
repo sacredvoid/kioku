@@ -91,6 +91,10 @@ def job(cid, kind):
 
 # ---------- export
 
+PHOTOS_DENIED = ("Kioku has no Photos access, so it can't download originals from iCloud. Quit and reopen Kioku "
+                 "and click Allow when macOS asks, or turn Kioku on in System Settings > Privacy & Security > Photos.")
+
+
 def originals(uuids, dest):
     """uuid -> local original file in dest; downloads only what isn't there yet."""
     dest.mkdir(parents=True, exist_ok=True)
@@ -105,8 +109,7 @@ def originals(uuids, dest):
                            capture_output=True, text=True, timeout=settings.get().download_seconds * len(need))
         ufile.unlink(missing_ok=True)
         if "authorization" in (r.stdout + r.stderr).lower():
-            raise RuntimeError("No Photos access for the process running the engine. Grant it in System Settings > "
-                               "Privacy & Security > Photos (the app or terminal that started Kioku).")
+            raise RuntimeError(PHOTOS_DENIED)
         have = {f.stem: f for f in dest.iterdir() if f.is_file() and not f.name.startswith(".")}
         if any(u not in have for u in need):
             log.warning("export: %d of %d downloads missing; osxphotos said: %s", sum(u not in have for u in need),

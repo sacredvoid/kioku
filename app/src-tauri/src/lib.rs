@@ -32,6 +32,26 @@ fn uv_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("uv"))
 }
 
+/// Ask macOS for Photos access from the app itself. The engine (a child process) downloads iCloud originals
+/// through PhotoKit, but a background process can't raise the permission prompt, and the Photos pane in
+/// System Settings has no "+" to add an app by hand. Only asks while the status is "not determined".
+#[cfg(target_os = "macos")]
+fn request_photos_access() {
+    use block2::RcBlock;
+    use objc2::{class, msg_send};
+    #[link(name = "Photos", kind = "framework")]
+    unsafe extern "C" {}
+    const READ_WRITE: isize = 2; // PHAccessLevelReadWrite
+    let status: isize = unsafe { msg_send![class!(PHPhotoLibrary), authorizationStatusForAccessLevel: READ_WRITE] };
+    if status != 0 {
+        return; // already granted, limited, denied or restricted: nothing to ask
+    }
+    let handler = RcBlock::new(|_status: isize| {});
+    unsafe {
+        let _: () = msg_send![class!(PHPhotoLibrary), requestAuthorizationForAccessLevel: READ_WRITE, handler: &*handler];
+    }
+}
+
 fn start_engine() -> Option<Child> {
     if engine_running() {
         return None;
@@ -70,6 +90,8 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            request_photos_access();
             app.manage(Engine(Mutex::new(start_engine())));
             enable_login_item_once(app);
             Ok(())

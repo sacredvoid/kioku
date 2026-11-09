@@ -1640,6 +1640,8 @@ dependencies = [
 name = "kioku"
 version = "0.1.0"
 dependencies = [
+ "block2",
+ "objc2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

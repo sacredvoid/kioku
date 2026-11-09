@@ -709,6 +709,8 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 errors.append(f"{media.label_for(s.uuid)} ({msg[:120]})")
         if cancel.is_set():
             raise RuntimeError("Cancelled")
+        if errors and any(projects.PHOTOS_DENIED[:40] in e for e in errors):
+            raise RuntimeError(projects.PHOTOS_DENIED)  # one cause for every clip: say it once
         if errors:
             raise RuntimeError(f"{len(errors)} clips could not be fetched: {'; '.join(errors)}. "
                                "Finished segments are kept; try again.")
