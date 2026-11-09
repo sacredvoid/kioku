@@ -1,0 +1,31 @@
+/* Live player stage (player.ts). The host element passed to mount() must have a definite size; the frame letterboxes
+   inside it to the project aspect. Cue and look styling mirrors engine/captions.py and engine/edit.py. */
+.lp-root { position: relative; width: 100%; height: 100%; display: grid; place-items: center; container-type: size }
+.lp-frame {
+  --lp-ar: 16 / 9; --lp-arn: 1.7778;
+  position: relative; overflow: hidden; background: #000; border-radius: 12px; box-shadow: var(--shadow);
+  aspect-ratio: var(--lp-ar); width: min(100cqw, calc(100cqh * var(--lp-arn))); container-type: size;
+}
+.lp-layers, .lp-slot, .lp-exact { position: absolute; inset: 0 }
+.lp-slot { isolation: isolate; background: #000 }
+.lp-slot video, .lp-slot img, .lp-exact { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000 }
+.lp-exact { object-fit: contain }
+.lp-tint { position: absolute; inset: 0; mix-blend-mode: soft-light; pointer-events: none }
+[hidden].lp-slot, [hidden].lp-layers, [hidden].lp-exact, [hidden].lp-cap, [hidden].lp-pill, [hidden].lp-tint { display: none }
+
+.lp-cap { position: absolute; left: 0; right: 0; display: flex; justify-content: center; padding: 0 5%; pointer-events: none; text-align: center }
+.lp-cap[data-pos="middle"] { top: 50%; transform: translateY(-50%) }
+.lp-cap[data-pos="top"] { top: 15% }
+.lp-cap[data-pos="bottom"] { bottom: 20% }
+.lp-frame[data-land="1"] .lp-cap[data-pos="top"] { top: 8% }
+.lp-frame[data-land="1"] .lp-cap[data-pos="bottom"] { bottom: 8% }
+.lp-cap-line { font-weight: 700; line-height: 1.2; max-width: 100%; overflow-wrap: anywhere; paint-order: stroke fill }
+.lp-cap-line[data-style="bold"] { -webkit-text-stroke: .07em #000 }
+.lp-cap-line[data-style="pop"] { -webkit-text-stroke: .1em #000; font-weight: 800 }
+.lp-cap-line[data-style="box"] { background: rgba(0, 0, 0, .55); padding: .15em .33em; border-radius: .33em }
+
+.lp-pill {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 5px 12px; border-radius: 999px;
+  font-size: 12px; color: var(--text-2); background: var(--surface); border: 1px solid var(--line-soft);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); pointer-events: none
+}
