@@ -4,6 +4,7 @@
 import { API, api, errMsg, thumb, type Collection, type Item } from "./api";
 import type { AudioTrack, ClipFx, Cue, CaptionClip, CuesReply, Edit, Model, Peaks, Player, RenderStatus, Scene, SearchHit, TransitionType } from "./edit-types";
 import { LivePlayer } from "./player";
+import { soundsPanel, stopPreview, type Sound } from "./sounds";
 
 export type Deps = {
   toast: (msg: string, error?: boolean) => void;
@@ -115,6 +116,7 @@ class Editor {
   foot = el("div", "tl-footer");
   strip = el("div", "tl-panel");
   pop = el("div", "tl-pop");
+  snd!: HTMLElement;
   blocks = new Map<number, HTMLElement>();
   seams = new Map<number, HTMLElement>();
   auds = new Map<string, HTMLElement>();
@@ -418,10 +420,25 @@ class Editor {
     this.sel = null;
     return this.act("Remove audio", () => api(url, "DELETE"), () => api(url, "PUT", full));
   }
+  roomForAudio() {
+    const max = this.model.edit.options.max_audio ?? 3;
+    if (this.tracks().length < max) return true;
+    this.deps.toast(`At most ${max} audio tracks: remove one first`, true);
+    return false;
+  }
+  /** A free sound (engine downloads and checks it) as a new track at the playhead. */
+  addSound(s: Sound) {
+    if (!this.roomForAudio()) return Promise.resolve();
+    const id = uid(), start = Math.max(0, this.player.time);
+    this.laneOf.set(id, this.tracks().length);
+    const url = `/collections/${this.cid}/edit/audio/${id}`;
+    return this.act(`Add ${s.title}`, () => api(`/sounds/${s.id}/add`, "POST", { cid: this.cid, start, track_id: id }), () => api(url, "DELETE"))
+      .then(() => { if (this.tracks().some((t) => t.id === id)) { this.sel = { kind: "audio", id }; this.renderSel(); this.deps.toast(s.needs_credit ? `Added. Credit: ${s.attribution}` : "Added"); } });
+  }
   addAudio(path: string, start: number, lane: number) {
     const ext = path.split(".").pop()?.toLowerCase() ?? "", ok = this.model.edit.options.audio_ext.map((e) => e.replace(/^\./, "").toLowerCase());
     if (ok.length && !ok.includes(ext)) return this.deps.toast(`${base(path)}: use ${ok.join(", ")}`, true);
-    if (this.tracks().length >= (this.model.edit.options.max_audio ?? 3)) return this.deps.toast(`At most ${this.model.edit.options.max_audio ?? 3} audio tracks`, true);
+    if (!this.roomForAudio()) return;
     const id = uid();
     this.laneOf.set(id, lane);
     const url = `/collections/${this.cid}/edit/audio/${id}`;
@@ -480,11 +497,26 @@ class Editor {
     this.zoomIn.type = "range"; this.zoomIn.min = "0"; this.zoomIn.max = "100"; this.zoomIn.step = "1";
     this.zoomIn.setAttribute("aria-label", "Zoom");
     this.zoomIn.oninput = () => (this.autoFit = false, this.setZoom(4 * Math.pow(60, Number(this.zoomIn.value) / 100), this.player.time, null));
-    this.tools.append(add, el("span", "spacer"), this.snapB, btn("−", "ghost icon", () => zoom(0.8), "Zoom out"), this.zoomIn, btn("+", "ghost icon", () => zoom(1.25), "Zoom in"), btn("Fit", "ghost", () => { this.autoFit = true; this.fit(); }, "Fit the whole edit"), this.totals);
+    const snd = btn("", "", () => {
+      const open = this.snd.hidden;
+      this.snd.hidden = !open;
+      snd.setAttribute("aria-expanded", String(open));
+      if (open) this.snd.querySelector<HTMLInputElement>(".snd-q")?.focus(); else stopPreview();
+    });
+    snd.append(icon("music"), document.createTextNode(" Music & sounds"));
+    snd.title = "Find free music and sound effects, or your own ~/Music";
+    snd.setAttribute("aria-expanded", "false");
+    this.snd = soundsPanel({
+      addFree: (s) => this.addSound(s),
+      addMine: (s) => this.addAudio(s.path!, Math.max(0, this.player.time), this.tracks().length) ?? Promise.resolve(),
+      toast: (m, bad) => this.deps.toast(m, bad),
+    });
+    this.snd.hidden = true;
+    this.tools.append(add, snd, el("span", "spacer"), this.snapB, btn("−", "ghost icon", () => zoom(0.8), "Zoom out"), this.zoomIn, btn("+", "ghost icon", () => zoom(1.25), "Zoom in"), btn("Fit", "ghost", () => { this.autoFit = true; this.fit(); }, "Fit the whole edit"), this.totals);
     this.strip.hidden = true;
     this.strip.setAttribute("role", "region");
     this.strip.setAttribute("aria-label", "Clip picker");
-    r.append(top, this.wrap, this.tools, this.strip, this.foot);
+    r.append(top, this.wrap, this.tools, this.strip, this.snd, this.foot);
     if (this.deps.footer) this.foot.append(this.deps.footer);
     this.renderSnap();
     this.renderPlay();
@@ -1266,6 +1298,7 @@ class Editor {
   }
 
   destroy() {
+    stopPreview();
     this.stopShuttle();
     this.offs.forEach((f) => f());
     this.player.destroy();
