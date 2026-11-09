@@ -31,6 +31,12 @@ Status words: **live** = on main and running in the installed app; **built** = c
 | 15 | Render/download status sits at the bottom of the project page; must scroll to see it | FIXED 9938eac: status stack above the player, scrolls into view on start (WebKit checked) |
 | 16 | "Downloading originals: 0 of 10 · 0%" did not move | likely 13 and/or 14 (both fixed); retest after installing |
 
+## Added later
+| # | Request / bug | Status |
+|---|---|---|
+| 20 | App attaches to a frozen leftover engine (port open, no answer) | open: check /health, offer restart |
+| 21 | How to chop an audio track | built 3faee96: Cut start/end here (I/O), End with video; in the 15:25 DMG; not checked in the installed app |
+
 ## Waiting on Sam
 | # | Decision | Ask |
 |---|---|---|
