@@ -379,24 +379,7 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
 .prog-row progress { flex: 1; min-width: 80px; height: 8px; accent-color: var(--accent) }
 .prog-row button { padding: 4px 12px }
 .preview-video { display: block; width: 100%; max-width: 560px; max-height: 60vh; border-radius: var(--r); background: #000 }
-.clips { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px }
-.clip { display: grid; grid-template-columns: 22px 112px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 7px 10px 7px 8px;
-  background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px;
-  transition: border-color .2s var(--ease), box-shadow .25s var(--ease), background-color .2s var(--ease) }
-.clip:hover { background: var(--surface-solid); border-color: var(--line); box-shadow: var(--shadow) }
-.clip-n { font-size: 12.5px; color: var(--text-3); text-align: right }
-.clip img { width: 112px; height: 63px; object-fit: cover; border-radius: 9px; cursor: zoom-in; background: var(--surface-3); transition: transform .3s var(--ease) }
-.clip img:hover { transform: scale(1.03) }
-.clip-info { display: flex; flex-direction: column; min-width: 0 }
 .clip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 520 }
-.range { display: flex; gap: 8px }
-.range label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3) }
-.range input { width: 66px; background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; font-size: 13px; color: var(--text); outline: 0;
-  transition: border-color .2s, box-shadow .2s }
-.range input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft) }
-.clip-actions { display: flex; gap: 2px }
-.clip-actions button { color: var(--text-3) }
-.clip-actions button:hover { color: var(--text) }
 
 /* ---------- Claude's history: one compact line that opens into every past run */
 .claude:has(> .ask-out:empty):has(> .runs[hidden]) { display: none }
@@ -590,11 +573,6 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
   .main { padding: 0 14px 120px }
   .bar { position: static; padding: 10px 14px; margin: 0 -14px }
   .view-head h1 { font-size: 28px }
-  .clip { grid-template-columns: 84px minmax(0, 1fr) auto; gap: 8px 12px }
-  .clip-n { display: none }
-  .clip img { width: 84px; height: 48px }
-  .range { grid-column: 2 / -1; grid-row: 2 }
-  .clip-actions { grid-column: 3; grid-row: 1 }
   .selbar { left: 50%; bottom: 12px; max-width: calc(100vw - 16px); padding-left: 14px; gap: 8px; flex-wrap: wrap; justify-content: center; border-radius: 22px }
   .viewer { grid-template-columns: 1fr; grid-template-rows: 58vh auto; overflow-y: auto }
   .stage { height: 58vh; padding: 44px 12px 26px }
@@ -628,4 +606,3 @@ button.engine:focus-visible { outline: 2px solid var(--accent); outline-offset: 
 .track label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3) }
 .track label input { width: 66px; background: var(--surface-solid); border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; font-size: 13px; color: var(--text); outline: 0 }
 .track input[type=range], .cap-toggle input[type=range] { accent-color: var(--accent); width: 110px }
-.clip-actions button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent) }

@@ -10,6 +10,7 @@ export type Deps = {
   fail: (what: string) => (e: unknown) => void;
   go: (...a: any[]) => unknown;
   viewer: { start(items: Item[], i: number): unknown };
+  onCaptions?: () => void;   // a clip's captions flag changed: let main.ts start its transcription poll
   footer?: HTMLElement;   // the project's render row (Captions / Preview / Render / Export)
 };
 
@@ -76,6 +77,7 @@ class Editor {
   scenesReq = new Set<string>();
   peaksReq = new Set<string>();
   stripOk = new Set<string>();
+  stripImg = new Map<string, HTMLImageElement>();
   stripNo = new Set<string>();
   stripWant: string[] = [];
   stripBusy = 0;
@@ -84,6 +86,8 @@ class Editor {
   shuttle = { dir: 0, rate: 1, iv: 0 };
   lastTc = 0;
   playedTo = false;
+  work = 0;   // queued/running commands of our own: sync() must not mistake their writes for Claude
+  gen = 0;    // bumped on every refresh
 
   // dom
   stage = el("div", "tl-stage");
@@ -184,6 +188,7 @@ class Editor {
     this.model.edit = edit;
     if (cues) { this.model.cues = cues.cues; this.capClips = cues.clips; }
     this.optimistic = false;
+    this.gen++;
     if (this.sel?.kind === "clip" && !this.item(this.sel.id)) this.sel = null;
     if (this.sel?.kind === "audio" && !this.tracks().some((t) => t.id === (this.sel as { id: string }).id)) this.sel = null;
     this.placeAll(true);
@@ -202,9 +207,11 @@ class Editor {
   async sync() {
     if (!this.ready) return;
     if (this.busy) { setTimeout(() => this.sync(), 2000); return; }
+    if (this.work) return;
+    const g = this.gen;
     let hash: string;
     try { hash = (await api<Edit>(`/collections/${this.cid}/edit`)).edit_hash; } catch { return; }
-    if (hash === this.model.edit.edit_hash) return;
+    if (this.work || g !== this.gen || hash === this.model.edit.edit_hash) return;
     try { await this.refresh(); } catch { return; }
     if (this.undoS.length || this.redoS.length) { this.undoS = []; this.redoS = []; this.deps.toast("Claude changed the edit, so undo history was reset"); }
     this.pill.textContent = "Updated by Claude";
@@ -214,6 +221,7 @@ class Editor {
 
   // ---------- commands (undo stack keyed on edit_hash)
   act(label: string, redo: () => Promise<unknown>, undo: () => Promise<unknown>, o: { opt?: () => void; snap?: Snap; ids?: boolean } = {}) {
+    this.work++;
     this.chain = this.chain.then(async () => {
       const snap = o.snap ?? this.snapshot();
       const before = this.model.edit.edit_hash;
@@ -230,10 +238,11 @@ class Editor {
         this.deps.fail(label.toLowerCase())(e);
         await this.refresh().catch(() => {});
       }
-    });
+    }).finally(() => this.work--);
     return this.chain;
   }
   doUndo() {
+    this.work++;
     this.chain = this.chain.then(async () => {
       try {
         await this.refresh();
@@ -248,9 +257,10 @@ class Editor {
         this.redoS.push(cmd);
         this.deps.toast(`Undid: ${cmd.label}`);
       } catch (e) { this.deps.fail("undo")(e); await this.refresh().catch(() => {}); }
-    });
+    }).finally(() => this.work--);
   }
   doRedo() {
+    this.work++;
     this.chain = this.chain.then(async () => {
       try {
         await this.refresh();
@@ -264,7 +274,7 @@ class Editor {
         this.undoS.push(cmd);
         this.deps.toast(`Redid: ${cmd.label}`);
       } catch (e) { this.deps.fail("redo")(e); await this.refresh().catch(() => {}); }
-    });
+    }).finally(() => this.work--);
   }
 
   inverse(id: number, body: Flat): Flat {
@@ -295,9 +305,11 @@ class Editor {
   }
   patchClip(id: number, body: Flat, label: string) {
     const inv = this.inverse(id, body);
-    return this.act(label, () => api(`/collections/${this.cid}/edit/clips/${this.rid(id)}`, "PATCH", body),
+    const r = this.act(label, () => api(`/collections/${this.cid}/edit/clips/${this.rid(id)}`, "PATCH", body),
       () => api(`/collections/${this.cid}/edit/clips/${this.rid(id)}`, "PATCH", inv),
       { opt: "speed" in body ? () => { const e = (this.spec.clips[String(id)] ??= {}); e.speed = body.speed as number; } : undefined });
+    if ("captions" in body) r.then(() => this.deps.onCaptions?.());
+    return r;
   }
   patchEdit(body: Flat, label: string, inv: Flat) {
     return this.act(label, () => api(`/collections/${this.cid}/edit`, "PATCH", body), () => api(`/collections/${this.cid}/edit`, "PATCH", inv));
@@ -633,12 +645,22 @@ class Editor {
     this.seams.forEach((s, id) => { if (!seamSeen.has(id)) { s.remove(); this.seams.delete(id); } });
   }
   paintImg(b: HTMLElement, it: Item, id: number) {
-    const img = b.querySelector(".tl-img") as HTMLElement, v = this.speedOf(id);
-    if (it.video && this.stripOk.has(it.uuid)) {
-      img.style.backgroundImage = `url(${API}/media/${it.uuid}/strip)`;
-      img.style.backgroundSize = `${(it.dur * this.pps) / v}px 100%`;
-      img.style.backgroundPosition = `${(-(it.t0 ?? 0) * this.pps) / v}px 0`;
+    const img = b.querySelector(".tl-img") as HTMLElement, cv = img.firstElementChild as HTMLCanvasElement, strip = this.stripImg.get(it.uuid);
+    void id;
+    if (it.video && strip && it.dur > 0) {
+      // aspect-correct frames: one 16:9 slot per ~107 px, each showing the tile for that moment (the strip is one tile per second)
+      const w = parseFloat(b.style.width) || 1, h = H.v - 8, slots = Math.max(1, Math.round(w / (h * 16 / 9))), n = Math.max(1, Math.round(strip.naturalWidth / 160));
+      const bw = Math.min(4096, Math.ceil(w)), sw = bw / slots, t0 = it.t0 ?? 0, len = this.srcLen(it);
+      if (cv.width !== bw || cv.height !== h) { cv.width = bw; cv.height = h; }
+      const g = cv.getContext("2d");
+      if (g) for (let i = 0; i < slots; i++) {
+        const tile = clamp(Math.floor(((t0 + ((i + .5) / slots) * len) / it.dur) * n), 0, n - 1);
+        g.drawImage(strip, tile * 160, 0, 160, 90, i * sw, 0, sw + 1, h);
+      }
+      cv.hidden = false;
+      img.style.backgroundImage = "none";
     } else {
+      cv.hidden = true;
       img.style.backgroundImage = `url(${thumb(it.uuid)})`;
       img.style.backgroundSize = "cover";
       img.style.backgroundPosition = "center";
@@ -650,7 +672,9 @@ class Editor {
     b.setAttribute("role", "button");
     const hl = el("span", "tl-h l"), hr = el("span", "tl-h r");
     hl.dataset.h = "l"; hr.dataset.h = "r";
-    b.append(el("div", "tl-img"), el("span", "tl-name"), el("span", "tl-len"), hl, hr);
+    const img = el("div", "tl-img");
+    img.append(el("canvas"));
+    b.append(img, el("span", "tl-name"), el("span", "tl-len"), hl, hr);
     const id = it.item_id;
     b.onpointerdown = (e) => this.clipDown(e, b, id);
     b.onfocus = () => { if (!(this.sel?.kind === "clip" && this.sel.id === id) && !b.matches(":active")) this.setSel({ kind: "clip", id }); };
@@ -753,7 +777,7 @@ class Editor {
         if (ok) this.items.forEach((it) => { if (it.uuid === uuid) { const b = this.blocks.get(it.item_id); if (b) this.paintImg(b, it, it.item_id); } });
         this.pumpStrips();
       };
-      im.onload = () => done(true);
+      im.onload = () => { this.stripImg.set(uuid, im); done(true); };
       im.onerror = () => done(false);  // no proxy yet (404): keep the thumbnail
       im.src = `${API}/media/${uuid}/strip`;
     }
@@ -1032,9 +1056,10 @@ class Editor {
           const len = Math.max(0.2, s.t1 - s.t0), w = 120;
           const t = btn("", "tl-tile");
           const im = el("span", "tl-tile-img");
-          im.style.backgroundImage = this.stripOk.has(swapIt.uuid) ? `url(${API}/media/${swapIt.uuid}/strip)` : `url(${thumb(swapIt.uuid)})`;
-          im.style.backgroundSize = this.stripOk.has(swapIt.uuid) ? `${(swapIt.dur / len) * w}px 100%` : "cover";
-          im.style.backgroundPosition = this.stripOk.has(swapIt.uuid) ? `${-(s.t0 / len) * w}px 0` : "center";
+          const sImg = this.stripImg.get(swapIt.uuid), n = sImg ? Math.max(1, Math.round(sImg.naturalWidth / 160)) : 1;
+          im.style.backgroundImage = sImg ? `url(${API}/media/${swapIt.uuid}/strip)` : `url(${thumb(swapIt.uuid)})`;
+          im.style.backgroundSize = sImg ? `${n * w}px 68px` : "cover";
+          im.style.backgroundPosition = sImg ? `${-clamp(Math.floor(((s.t0 + len / 2) / (swapIt.dur || 1)) * n), 0, n - 1) * w}px 0` : "center";
           t.append(im, el("span", "tl-tile-len", `${s.t0.toFixed(1)}s · ${fmtS(len)}`));
           t.setAttribute("aria-label", `Use the moment at ${s.t0.toFixed(1)} seconds`);
           t.onclick = () => { this.closeStrip(); this.swap(swapId, { t0: s.t0, t1: s.t1 }); };

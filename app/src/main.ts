@@ -3,6 +3,7 @@ import { API, api, ApiError, errMsg, fmtDur, isVideo, thumb, type Captions, type
 import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 import * as review from "./review";
+import { timeline } from "./timeline";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -123,6 +124,7 @@ async function go(v: View, search = q.value.trim()) {
   main.classList.remove("enter");
   if (key !== lastKey) { void main.offsetWidth; main.classList.add("enter"); }
   lastKey = key;
+  if (!(v.type === "col" && timeline.mounted(v.id))) timeline.unmount();
   empty.hidden = true;
   project.hidden = true;
   review.hide();
@@ -280,7 +282,6 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   const renderRow = el("div", "proj-meta render-row");
   renderRow.append(capLabel, el("span", "spacer"), prevBtn, rendBtn);
   // caption style row: only while captions are on
-  capRows.clear();
   const capStyle = el("div", "cap-style");
   capStyle.hidden = true;
   const capInputs: Record<string, HTMLInputElement | HTMLSelectElement> = {};
@@ -312,8 +313,12 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   capIn("uppercase", "Uppercase", "checkbox");
   capIn("max_words", "Words/line", "number");
   const capOut = el("div", "ask-out"), prevOut = el("div", "ask-out"), finOut = el("div", "ask-out");
-  const startRender = (kind: "preview" | "final", out: HTMLElement, btn: HTMLButtonElement) => async () => {
-    try { await api(`/collections/${c.id}/render`, "POST", { mode: kind }); pollJob(c.id, kind, out, btn); }
+  const startRender = (kind: "preview" | "final", out: HTMLElement, btn: HTMLButtonElement) => async (ev?: MouseEvent) => {
+    // Preview renders a 10 s window around the playhead (shift-click: the whole edit)
+    const win = kind === "preview" && !ev?.shiftKey && timeline.mounted(c.id);
+    const t = timeline.time(), start = Math.max(0, t - 5);
+    previewStart = win ? start : 0;
+    try { await api(`/collections/${c.id}/render`, "POST", win ? { mode: kind, start, end: t + 5 } : { mode: kind }); pollJob(c.id, kind, out, btn); }
     catch (e) { out.className = "ask-out failed"; out.textContent = `Couldn't start the ${kind === "final" ? "render" : "preview"}: ${errMsg(e)}`; }
   };
   prevBtn.onclick = startRender("preview", prevOut, prevBtn);
@@ -331,13 +336,8 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
       const v = (s.config as unknown as Record<string, unknown>)[k];
       if (inp instanceof HTMLInputElement && inp.type === "checkbox") inp.checked = !!v; else inp.value = String(v);
     }
-    for (const x of s.clips) {
-      const r = capRows.get(x.item_id);
-      if (r) { r.box.checked = x.selected; r.note.textContent = x.speech === "speech" ? `speech · ${x.lang ?? "?"}` : x.speech; }
-    }
     if (s.on && s.pending && !capBusy) api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollCaps(); }).catch(() => {});
   }).catch(() => {});
-  capSync = syncCaptions;
   capBox.onchange = async () => {
     capBox.disabled = true;
     try {
@@ -349,8 +349,11 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     syncCaptions();
   };
 
-  const strip = el("ol", "clips");
-  items.forEach((it, i) => strip.append(clipRow(c.id, it, i, items)));
+  const tlHost = el("div", "tl-host");
+
+  // the editor replaces the clip list; the render row (captions, preview, render) becomes its footer
+  if (items.length) timeline.mount(tlHost, c.id, c, items, { toast, fail, go: () => go(view), viewer, footer: renderRow, onCaptions: () => syncCaptions() });
+  else { timeline.unmount(); tlHost.append(renderRow); }
 
   const meta = el("div", "proj-meta");
   meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), exp);
@@ -363,7 +366,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   claude.append(askOut, runs);
 
   const audio = el("section", "audio");
-  project.replaceChildren(brief, ask, claude, meta, expOut, renderRow, capStyle, audio, capOut, prevOut, finOut, strip);
+  project.replaceChildren(brief, ask, claude, meta, expOut, tlHost, capStyle, audio, capOut, prevOut, finOut);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
@@ -372,103 +375,25 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   }).catch(() => loadRuns(c.id, runs));
   api<Job>(`/collections/${c.id}/export`).then((j) => { if (j.status !== "idle") pollJob(c.id, "export", expOut, exp); }).catch(() => {});
   syncCaptions();
-  loadAudio(c.id, audio, strip);
+  loadAudio(c.id, audio);
   for (const [kind, out, btn] of [["preview", prevOut, prevBtn], ["final", finOut, rendBtn]] as const)
     api<Job>(`/collections/${c.id}/render/${kind}`).then((j) => { if (j.status !== "idle") pollJob(c.id, kind, out, btn); }).catch(() => {});
   api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollCaps(); }).catch(() => {});
 }
 
-const capRows = new Map<number, { box: HTMLInputElement; note: HTMLElement }>();
-let capSync: () => void = () => {};
+let previewStart = 0;  // output second where the last preview file starts
 const clipLen = (it: Item) => it.video ? ((it.t1 ?? it.dur) - (it.t0 ?? 0)) : (it.t1 != null ? it.t1 - (it.t0 ?? 0) : 3);
 
-function clipRow(cid: number, it: Item, i: number, items: Item[]): HTMLElement {
-  const li = el("li", "clip");
-  const img = document.createElement("img");
-  img.src = thumb(it.uuid);
-  img.alt = "";
-  img.onclick = () => viewer.start(items, i);
-  const info = el("div", "clip-info");
-  info.append(el("span", "clip-title", (it.meta || "").split(" ; ").slice(0, 3).join(", ") || (it.video ? "Video" : "Photo")));
-  info.append(el("span", "muted", it.video ? `${fmtDur(it.dur)} source` : "Photo · 3s"));
-  if (it.video && it.item_id != null) {  // per-clip captions: only picked clips are transcribed and drawn
-    const pick = el("label", "cap-pick");
-    pick.title = "Caption this clip (needs Captions on above)";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    const note = el("span", "muted");
-    pick.append(box, document.createTextNode(" Caption "), note);
-    box.onchange = async () => {
-      box.disabled = true;
-      try { await api(`/collections/${cid}/edit/clips/${it.item_id}`, "PATCH", { captions: box.checked }); }
-      catch (e) { fail("change this clip's captions")(e); box.checked = !box.checked; }
-      box.disabled = false;
-      capSync();
-    };
-    capRows.set(it.item_id, { box, note });
-    info.append(pick);
-  }
-  const range = el("div", "range");
-  const mk = (label: string, val: number | null | undefined, key: "t0" | "t1") => {
-    const w = el("label", "", label);
-    const n = document.createElement("input");
-    n.type = "number"; n.step = "0.1"; n.min = "0";
-    if (it.video) n.max = String(it.dur);
-    n.value = val != null ? String(val) : "";
-    n.placeholder = key === "t0" ? "0" : it.video ? String(it.dur) : "3";
-    n.addEventListener("change", async () => {
-      try {
-        const r = await api<{ t0: number; t1: number }>(`/collections/${cid}/items/${it.item_id}`, "PATCH", { [key]: n.value === "" ? null : Number(n.value) });
-        it.t0 = r.t0; it.t1 = r.t1;
-        toast("Trim saved");
-      } catch (e) { fail("save the trim")(e); n.value = it[key] != null ? String(it[key]) : ""; }
-    });
-    w.append(n);
-    return w;
-  };
-  range.append(mk("In", it.t0, "t0"), mk("Out", it.t1, "t1"));
-  const actions = el("div", "clip-actions");
-  const btn = (ico: string, label: string, fn: () => void) => {
-    const b = el("button", "ghost icon") as HTMLButtonElement;
-    b.append(icon(ico));
-    b.type = "button"; b.setAttribute("aria-label", label); b.title = label; b.onclick = fn; return b;
-  };
-  const move = (to: number) => async () => {
-    const other = items[to];
-    if (!other) return;
-    // swap positions by giving this clip a position just past its neighbour
-    const pos = to < i ? (items[to - 1] ? ((posOf(items[to - 1]) + posOf(other)) / 2) : posOf(other) - 1)
-                       : (items[to + 1] ? ((posOf(other) + posOf(items[to + 1])) / 2) : posOf(other) + 1);
-    await api(`/collections/${cid}/items/${it.item_id}`, "PATCH", { pos }).catch(fail("move the clip"));
-    go(view);
-  };
-  li.dataset.item = String(it.item_id);
-  const mute = el("button", "ghost", "Mute") as HTMLButtonElement;
-  mute.type = "button"; mute.title = "Silence this clip's own sound"; mute.setAttribute("aria-pressed", "false");
-  mute.onclick = async () => {
-    const on = mute.getAttribute("aria-pressed") !== "true";
-    try { await api(`/collections/${cid}/edit/clips/${it.item_id}`, "PATCH", { mute: on }); mute.setAttribute("aria-pressed", String(on)); }
-    catch (e) { fail("change the clip's sound")(e); }
-  };
-  actions.append(mute, btn("up", "Move earlier", move(i - 1)), btn("down", "Move later", move(i + 1)),
-    btn("close", "Remove from project", async () => { await api(`/collections/${cid}/items/${it.item_id}`, "DELETE").catch(fail("remove the clip")); go(view); loadCollections(); }));
-  li.append(el("span", "clip-n", String(i + 1)), img, info, range, actions);
-  return li;
-}
-const posOf = (it: any) => it.pos as number;
 
 // ---------- audio: voiceover / music tracks (at most 3), clip sound level, mute marks on the clip list
 type Track = { id: string; path: string; start: number; in: number; out: number; volume: number; fade_in: number; fade_out: number };
 type EditAudio = { spec: { audio: Track[]; clip_volume: number; duck: boolean; clips: Record<string, { mute?: boolean }> }; options: { max_audio: number } };
 
-async function loadAudio(cid: number, box: HTMLElement, strip: HTMLElement) {
+async function loadAudio(cid: number, box: HTMLElement) {
   let ed: EditAudio;
   try { ed = await api<EditAudio>(`/collections/${cid}/edit`); } catch { return; }  // the edit panel is optional: no engine, no panel
-  const { audio, clip_volume, duck, clips } = ed.spec;
-  strip.querySelectorAll<HTMLElement>("li[data-item]").forEach((li) => {
-    if (clips[li.dataset.item!]?.mute) li.querySelector("button[aria-pressed]")?.setAttribute("aria-pressed", "true");
-  });
-  const refresh = () => loadAudio(cid, box, strip);
+  const { audio, clip_volume, duck } = ed.spec;
+  const refresh = () => loadAudio(cid, box).then(() => timeline.sync());
   const put = (id: string, body: object) => api(`/collections/${cid}/edit/audio/${encodeURIComponent(id)}`, "PUT", body).then(refresh).catch((e) => { fail("save the audio")(e); refresh(); });
   const head = el("div", "proj-meta");
   head.append(el("strong", "", "Audio"), el("span", "muted", audio.length ? `${audio.length} of ${ed.options.max_audio}` : "voiceover or music"), el("span", "spacer"));
@@ -599,6 +524,9 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
       r.type = "button";
       r.onclick = () => api(`/collections/${cid}/reveal`, "POST").catch(fail("open Finder"));
       out.append(r);
+    } else if (kind === "preview" && j.status === "done" && timeline.mounted(cid)) {
+      out.replaceChildren(...renderNotes(j));
+      if (!j.stale) timeline.previewDone(previewStart);
     } else if (kind === "preview" && j.status === "done") {
       const v = document.createElement("video");
       v.controls = true;
@@ -854,6 +782,7 @@ document.addEventListener("keydown", (e) => {
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); q.focus(); q.select(); }
   if (view.type === "draft") return; // the review screen handles its own keys (review.ts)
+  if (view.type === "col" && timeline.mounted(view.id) && timeline.handleKey(e)) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") { e.preventDefault(); grid.selectAll(); }
   if (e.key === "Escape") grid.clearSelection();
 });
@@ -875,9 +804,12 @@ async function syncCollections() {
     const now = cols.find((c) => c.id === (view as { id: number }).id);
     const typing = (document.activeElement as HTMLElement | null)?.matches("input, textarea, [contenteditable]");
     if ((!now || before.get(now.id) !== now.updated) && !typing && !viewer.open) {
-      const y = window.scrollY; // a live refresh (Claude adding clips) shouldn't jump you back to the top
-      await go(view);
-      window.scrollTo(0, y);
+      if (now && timeline.mounted(now.id)) await timeline.sync();  // keep the player running; the editor reloads itself
+      else {
+        const y = window.scrollY; // a live refresh (Claude adding clips) shouldn't jump you back to the top
+        await go(view);
+        window.scrollTo(0, y);
+      }
     }
   }
 }
