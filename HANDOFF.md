@@ -62,6 +62,14 @@ A local Mac app for the user's Photos library (58,396 items; 54k iCloud-only):
 - Still needs Sam: `brew install whisper-cpp` + ggml-small.bin into data/models/, then confirm whisper-cli flags with `whisper-cli -h`; one real iPhone HLG portrait clip through preview + final, compare in QuickTime; try the review screen; test_media.py once by hand.
 - Known nit: preview contact sheet leaves wide gaps for portrait tiles.
 
+## Evening 2026-11-08: audio, captions 2, timeline editor
+- Merged: feat/render-audio (batch originals, fades, stronger looks, up to 3 audio tracks, mute/clip_volume/duck), feat/captions-2 (per-clip captions, caption_language setting default en, hallucination filter, styles, word highlight, pop), PR #7 audit, issues #8 #9, preview reuse across restarts.
+- Timeline editor (notes/timeline-design.md): app/src/edit-types.ts (contract), player.ts (LivePlayer), timeline.ts; engine routes strip, PUT item, split, pos insert, captions/cues, audio file/peaks (test_timeline_api.py). Integrated 465ac70.
+- Proxies re-encoded in place with -g 30 (data/proxies 39 to 84 MB); new proxies get it from media.ensure_proxy.
+- Engine now runs in iTerm on /dev/ttys002 (Mac restarted 15:44).
+- Rule: rebuild the DMG after every merge to main (cd app && npx tauri build --bundles dmg).
+- Untested: Finder voiceover drop (Tauri only), Exact round trip, photos on the timeline. Gaps: drag search tile onto V lane, reframe slider shown on every clip.
+
 ## Next up (in order)
 
 1. When the Fall 2026 edit (project 3) finishes, restart the engine in iTerm to load everything above. Then check that a new Ask analyzes several videos at once (sidebar activity panel).
