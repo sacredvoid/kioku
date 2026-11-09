@@ -185,6 +185,34 @@ function newCollection(kind: "album" | "project", box: Element, then?: (c: Colle
 
 // ---------- views
 let lastKey = "";
+// ---------- year / month filter for the library (browse and search). "" = any date, "2024" or "2024-10"
+let dateFilter = "";
+const fYear = $<HTMLSelectElement>("f-year"), fMonth = $<HTMLSelectElement>("f-month");
+const monthName = new Intl.DateTimeFormat(undefined, { month: "long" });
+let dateCounts: Record<string, number> = {}, datesKind: string | null = null;
+async function loadDates(kind: string) {
+  if (datesKind === kind) return;
+  try { dateCounts = await api<Record<string, number>>(`/dates${kind ? `?kind=${kind}` : ""}`); datesKind = kind; } catch { return; }
+  const years = new Map<string, number>();
+  for (const [ym, n] of Object.entries(dateCounts)) years.set(ym.slice(0, 4), (years.get(ym.slice(0, 4)) ?? 0) + n);
+  const keep = fYear.value;
+  fYear.replaceChildren(new Option("All years", ""), ...[...years].sort((a, b) => b[0].localeCompare(a[0])).map(([y, n]) => new Option(`${y} (${n.toLocaleString()})`, y)));
+  fYear.value = years.has(keep) ? keep : "";
+  fillMonths();
+}
+function fillMonths() {
+  const y = fYear.value, keep = fMonth.value;
+  const months = Object.entries(dateCounts).filter(([ym]) => ym.startsWith(`${y}-`)).sort((a, b) => a[0].localeCompare(b[0]));
+  fMonth.replaceChildren(new Option("All months", ""), ...months.map(([ym, n]) => new Option(`${monthName.format(new Date(`${ym}-15T12:00:00`))} (${n.toLocaleString()})`, ym)));
+  fMonth.disabled = !y;
+  fMonth.value = months.some(([ym]) => ym === keep) ? keep : "";
+  dateFilter = fMonth.value || y;
+}
+fYear.onchange = () => { fMonth.value = ""; fillMonths(); go(view); };
+fMonth.onchange = () => { dateFilter = fMonth.value || fYear.value; go(view); };
+const dateLabel = () => !dateFilter ? "" : dateFilter.length === 4 ? dateFilter
+  : `${monthName.format(new Date(`${dateFilter}-15T12:00:00`))} ${dateFilter.slice(0, 4)}`;
+
 async function go(v: View, search = q.value.trim()) {
   view = v;
   if (!$("boot").hidden) return; // still booting: remember the choice, bootDone() opens it
@@ -228,18 +256,22 @@ async function go(v: View, search = q.value.trim()) {
       summary.textContent = "Searching…";
       const kind = v.type === "lib" ? v.kind : "";
       head.append(el("h1", "", "Search"));
-      const hits = await api<any[]>(`/search?q=${encodeURIComponent(search)}&k=300${kind ? `&kind=${kind}` : ""}`);
+      loadDates(kind);
+      const hits = await api<any[]>(`/search?q=${encodeURIComponent(search)}&k=300${kind ? `&kind=${kind}` : ""}${dateFilter ? `&date=${dateFilter}` : ""}`);
       if (my !== seq) return;
       grid.set(hits.map((h) => ({ ...h, video: isVideo(h.kind), dur: h.duration || 0, created: h.created || "" })), { months: false, badges: true });
       const kw = hits.filter((h) => h.keyword).length;
-      summary.textContent = hits.length ? `${hits.length} matches for “${search}” · ${kw} by labels, people, place or your tags` : "";
-      if (!hits.length) showEmpty(`Nothing for “${search}”. Try fewer words, or describe what's in the picture.`);
+      const when = dateLabel() ? ` in ${dateLabel()}` : "";
+      summary.textContent = hits.length ? `${hits.length} matches for “${search}”${when} · ${kw} by labels, people, place or your tags` : "";
+      if (!hits.length) showEmpty(`Nothing for “${search}”${when}. Try fewer words${when ? ", another date, or All years" : ""}, or describe what's in the picture.`);
     } else if (v.type === "lib") {
       const t = await api<{ uuid: string[]; video: boolean[]; dur: number[]; created: string[] }>(`/timeline${v.kind ? `?kind=${v.kind}` : ""}`);
       if (my !== seq) return;
-      grid.set(t.uuid.map((uuid, i) => ({ uuid, video: t.video[i], dur: t.dur[i], created: t.created[i] })), { months: true, badges: false });
+      loadDates(v.kind);
+      const all = t.uuid.map((uuid, i) => ({ uuid, video: t.video[i], dur: t.dur[i], created: t.created[i] }));
+      grid.set(dateFilter ? all.filter((it) => it.created.startsWith(dateFilter)) : all, { months: true, badges: false });
       head.append(el("h1", "", { "": "Library", image: "Photos", video: "Videos" }[v.kind] ?? "Library"));
-      summary.textContent = `${grid.items.length.toLocaleString()} items`;
+      summary.textContent = `${grid.items.length.toLocaleString()} items${dateLabel() ? ` · ${dateLabel()}` : ""}`;
       // first index: the one other blocking wait, so it gets the big loader too
       if (!grid.items.length) indexRow ? showEmpty("Indexing your library. Photos show up here as they're indexed; progress is under Activity, top right.", "index")
                                        : showEmpty("Nothing indexed yet. Run the indexer, then reopen Kioku.");

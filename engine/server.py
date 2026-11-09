@@ -209,10 +209,21 @@ def index_info():
 
 @app.get("/search")
 def search(q: str = Query(min_length=1, max_length=500), k: int = Query(60, ge=1, le=500),
-           kind: str | None = None):
+           kind: str | None = None, date: str | None = Query(None, pattern=r"^\d{4}(-\d{2})?$")):
     if kind and kind not in KINDS:
         raise HTTPException(422, f"kind must be one of {sorted(KINDS)}")
-    return fresh_index().search(q, k, kind)
+    return fresh_index().search(q, k, kind, date)
+
+
+@app.get("/dates")
+def dates(kind: str | None = None):
+    """Items per month ('YYYY-MM' -> count), for the year and month filters. Undated items are left out."""
+    if kind and kind not in KINDS:
+        raise HTTPException(422, f"kind must be one of {sorted(KINDS)}")
+    kinds = {"image": ("image",), "video": ("video", "poster")}.get(kind, ("image", "video", "poster"))
+    rows = one(f"select substr(created, 1, 7), count(*) from assets where kind in ({','.join('?' * len(kinds))}) "
+               "and created is not null and created != '' group by 1 order by 1 desc", kinds)
+    return {ym: n for ym, n in rows}
 
 
 @app.get("/recent")

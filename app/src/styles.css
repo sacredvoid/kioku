@@ -109,7 +109,7 @@ input, textarea { caret-color: var(--accent) }
 #art { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none }
 
 /* ---------- top bar: wordmark, nav with a hairline under the current page, status, background picker */
-.k-top { position: sticky; top: 0; z-index: 7; display: flex; align-items: center; gap: 20px; height: 56px; padding: 0 20px 0 84px; /* clear of the traffic lights */
+.k-top { position: sticky; top: 0; z-index: 7; display: flex; align-items: center; gap: 20px; height: 56px; padding: 0 20px 0 96px; /* clear of the traffic lights, which tauri.conf.json centres in this 56px bar */
   background: color-mix(in oklch, var(--bg) 84%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line) }
 .k-brand { display: flex; align-items: center; gap: 9px; background: none; border: 0; padding: 4px; color: var(--text) }
 .k-word { font: 700 19px/1 var(--display); letter-spacing: -.03em; display: flex; align-items: center }
@@ -658,3 +658,9 @@ button.engine:focus-visible { outline: 2px solid var(--accent); outline-offset: 
 .credits { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 0 }
 .credits ul { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2) }
 .audio-more summary { cursor: pointer; font-size: 12.5px; color: var(--text-3) }
+
+/* library year / month filter, next to All / Photos / Videos */
+.k-dates { display: flex; gap: 6px }
+.k-dates select { height: 34px; padding: 0 28px 0 12px; border-radius: 9px; border: 1px solid var(--line); background-color: var(--surface-2); color: var(--text); font: inherit; font-size: 13px }
+.k-dates select:disabled { color: var(--text-3) }
+.k-dates select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px }

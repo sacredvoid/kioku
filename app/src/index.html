@@ -83,7 +83,7 @@
       </div>
     </div>
     <section id="ask-view" class="k-ask" hidden>
-      <h1>What should we remember today?</h1>
+      <h1>Find a moment, or make a video</h1>
       <form class="k-askform" id="ask-form">
         <input id="ask-q" autocomplete="off" spellcheck="false" maxlength="4000" placeholder="Make a 30 second reel of the beach day, or find sunsets from the car" aria-label="Ask Kioku">
         <button type="submit" class="primary">Ask</button>
@@ -139,6 +139,10 @@
     <div id="libbar" class="k-libbar" hidden>
       <div class="k-seg" role="group" aria-label="Show">
         <button type="button" data-kind="">All</button><button type="button" data-kind="image">Photos</button><button type="button" data-kind="video">Videos</button>
+      </div>
+      <div class="k-dates" role="group" aria-label="Date">
+        <select id="f-year" aria-label="Year"><option value="">All years</option></select>
+        <select id="f-month" aria-label="Month" disabled><option value="">All months</option></select>
       </div>
       <label class="search">
         <span class="sr">Search your library</span>
