@@ -559,7 +559,8 @@ class Editor {
     this.canvas.append(this.ruler, this.tlane, this.vlane, this.alanes, this.clane, this.snapLine, this.caret, this.tipEl, this.ph);
     this.ph.append(el("div", "tl-ph-cap"));
     this.scroll.append(this.canvas);
-    this.wrap.append(this.labels, this.scroll, this.pop);
+    this.wrap.append(this.labels, this.scroll);
+    document.body.append(this.pop);  // fixed popover lives on body: .tl-host's entrance animation leaves translate set, which offset it and let later panels paint over it
     this.pop.hidden = true;
     this.tipEl.hidden = true;
     this.pop.setAttribute("role", "dialog");
@@ -577,7 +578,9 @@ class Editor {
       this.autoFit = false;
       this.setZoom(this.pps * Math.exp(-e.deltaY * 0.01), t, e.clientX - this.scroll.getBoundingClientRect().left);
     }, { passive: false });
-    this.scroll.onscroll = () => { if (!this.pop.hidden) this.pop.hidden = true; };
+    const unpop = () => { if (!this.pop.hidden) this.pop.hidden = true; };  // any scroll: the fixed popover would drift off its seam
+    addEventListener("scroll", unpop, true);
+    this.offs.push(() => removeEventListener("scroll", unpop, true));
 
     // tools
     const add = btn("", "", () => this.openStrip("add"));
@@ -1178,9 +1181,10 @@ class Editor {
     this.pop.replaceChildren(chips, el("div", "tl-pop-row"), sndRow, warn ? el("div", "tl-pop-note muted", warn) : el("span"));
     (this.pop.children[1] as HTMLElement).append(el("span", "muted", "0.2"), slider, el("span", "muted", "2"), val);
     this.pop.hidden = false;
-    const w = this.wrap.getBoundingClientRect(), s = seam.getBoundingClientRect();
-    this.pop.style.left = `${clamp(s.left - w.left + s.width / 2 - 140, 8, Math.max(8, w.width - 296))}px`;
-    this.pop.style.top = `${s.bottom - w.top + 6}px`;
+    // fixed, in window space: inside .tl-wrap (overflow hidden) the lower rows, length and sound were cut off
+    const s = seam.getBoundingClientRect(), h = this.pop.offsetHeight;
+    this.pop.style.left = `${clamp(s.left + s.width / 2 - 144, 8, Math.max(8, innerWidth - 296))}px`;
+    this.pop.style.top = `${s.bottom + 6 + h <= innerHeight - 8 ? s.bottom + 6 : Math.max(8, s.top - 6 - h)}px`;
     (chips.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus();
   }
 
@@ -1535,6 +1539,7 @@ class Editor {
     this.io.disconnect();
     clearTimeout(this.peakTimer);
     this.unDrop?.();
+    this.pop.remove();
     this.root.remove();
   }
 }
