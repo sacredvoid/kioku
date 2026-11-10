@@ -593,6 +593,66 @@ def gaps(ref, mine, top=4):
     return [line for _, line in sorted(out, key=lambda t: -t[0])[:top]]
 
 
+# ---------- links (YouTube and anything else yt-dlp reads)
+
+YTDLP_PATHS = ("/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp", str(Path.home() / ".local/bin/yt-dlp"))
+
+
+def ytdlp_bin():
+    import shutil
+    import glob
+    # the app starts the engine with a bare PATH, so also look where Homebrew, pipx and python.org installs put it
+    extra = sorted(glob.glob("/Library/Frameworks/Python.framework/Versions/*/bin/yt-dlp"), reverse=True)
+    return shutil.which("yt-dlp") or next((p for p in (*YTDLP_PATHS, *extra) if Path(p).is_file()), None)
+
+
+def is_link(s):
+    from urllib.parse import urlparse
+    u = urlparse(s.strip())
+    return u.scheme in ("http", "https") and bool(u.netloc)
+
+
+def fetch_link(url):
+    """Download a reference link once (at most 1080p, 15 min) into DATA/references/src and return the local path.
+    The user asked for this video as a style reference; it never leaves this Mac."""
+    url = url.strip()
+    if not is_link(url):
+        raise ValueError("a reference link must start with http:// or https://")
+    exe = ytdlp_bin()
+    if not exe:
+        raise ValueError("links need yt-dlp: run `brew install yt-dlp`, or save the video and give its file instead")
+    out = REFS / "src" / f"{hashlib.sha1(url.encode()).hexdigest()[:16]}.mp4"
+    if out.is_file():
+        return str(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmpl = str(out.with_suffix("")) + ".part-dl.%(ext)s"
+    try:
+        r = subprocess.run([exe, "--no-playlist", "--no-progress", "--max-filesize", "800M",
+                            "--match-filter", f"duration <= {MAX_SECONDS}",
+                            "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b[height<=1080]/b",
+                            "--merge-output-format", "mp4", "-o", tmpl, "--", url],
+                           capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("downloading the reference took over 15 minutes")
+    got = sorted(out.parent.glob(out.stem + ".part-dl.*"), key=lambda f: f.stat().st_size, reverse=True)
+    vid = next((f for f in got if f.suffix.lower() in VIDEO_EXT), None)
+    if r.returncode != 0 or not vid:
+        for f in got:
+            f.unlink(missing_ok=True)
+        why = (r.stderr.strip().splitlines() or ["no video was downloaded (longer than 15 min, or not a video page?)"])[-1]
+        if "403" in r.stderr or "JavaScript runtime" in r.stderr:  # YouTube changes often; old yt-dlp builds get blocked
+            why = "the site refused this yt-dlp (it is out of date or has no JavaScript runtime). Run `brew install yt-dlp deno`, then try again"
+        raise ValueError(f"could not download the reference: {why[:300]}")
+    vid.replace(out)
+    for f in got:
+        f.unlink(missing_ok=True)
+    return str(out)
+
+
+def local(path_or_link):
+    return fetch_link(path_or_link) if is_link(path_or_link) else path_or_link
+
+
 # ---------- routes
 
 class AnalyzeBody(BaseModel):
@@ -617,7 +677,7 @@ def _run(fn, *a, **kw):
 
 @router.post("/references/analyze")
 def analyze_route(body: AnalyzeBody):
-    prof = _run(analyze_reference, body.path)
+    prof = _run(lambda: analyze_reference(local(body.path)))
     plan = plan_from_profile(prof, max(prof["pacing"]["shots"], 1))
     return {"id": prof["id"], "profile": prof, "plan": plan, "summary": summarize(prof, plan), "sheet": f"/references/{prof['id']}/sheet"}
 
@@ -646,7 +706,7 @@ def compare_route(body: CompareBody):
     j = render.render_status(body.collection_id, "preview")
     if j.get("status") != "done" or not j.get("path"):
         raise HTTPException(409, "no finished preview render for this project; call render_preview first")
-    ref = _run(analyze_reference, body.path, sheet=False)
+    ref = _run(lambda: analyze_reference(local(body.path), sheet=False))
     mine = _run(analyze_reference, j["path"], sheet=False, cube=False)
     return {"gaps": gaps(ref, mine), "reference_id": ref["id"], "stale": bool(j.get("stale")),
             "mine": {"shots": mine["pacing"]["shots"], "median_seconds": mine["pacing"]["seconds"]["p50"],

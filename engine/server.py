@@ -40,6 +40,7 @@ import edit
 import moments
 import sounds
 import reference
+import direction
 import render
 
 log = logging.getLogger("kioku")
@@ -166,6 +167,7 @@ app.include_router(captions.router)
 app.include_router(albums.router)
 app.include_router(sounds.router)
 app.include_router(reference.router)
+app.include_router(direction.router)
 app.add_exception_handler(RequestValidationError, library.validation_error)
 
 
