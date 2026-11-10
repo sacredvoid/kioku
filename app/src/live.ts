@@ -165,6 +165,52 @@ export function renderLive(out: HTMLElement, j: Job, motif: Element, media: Medi
     const errEl = row.querySelector(".live-err");
     if (e.error && !errEl) row.append(h("span", "live-err", cleanErr(e.error)));
   });
+  updatePill(out, p.root, title, last?.label ?? "Reading the brief", clock(nowS - start));
   if (!trace.length && !p.log.childElementCount) p.log.append(h("li", "", "Reading the brief…"));
   else p.log.querySelector("li:not([data-state])")?.remove();
+}
+
+// ---------- the floating pill: the panel scrolls away under the timeline, so while an edit runs a small bar stays on
+// screen (bottom centre) saying what Claude is doing, with a button back to the panel. Hidden while the panel is visible.
+let pill: HTMLElement | null = null, pillFor: HTMLElement | null = null, watched: Element | null = null, panelSeen = true;
+let io: IntersectionObserver | null = null;
+const pillParts = { phase: h("strong"), what: h("span", "pill-what"), time: h("span", "live-time") };
+
+function pillEl() {
+  if (pill) return pill;
+  pill = h("div", "edit-pill");
+  pill.setAttribute("role", "status");
+  pill.hidden = true;
+  const show = h("button", "pill-show", "Show") as HTMLButtonElement;
+  show.type = "button";
+  show.onclick = () => watched?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  pill.append(h("span", "live-spin"), h("span", "pill-kicker", "Claude is editing"), pillParts.phase, pillParts.what, pillParts.time, show);
+  document.body.append(pill);
+  return pill;
+}
+
+function updatePill(out: HTMLElement, root: Element, phase: string, what: string, time: string) {
+  const el = pillEl();
+  pillFor = out;
+  if (watched !== root) {  // a rebuilt panel: watch the new one
+    io?.disconnect();
+    io = new IntersectionObserver(([e]) => { panelSeen = e.isIntersecting; if (pill && pillFor) pill.hidden = panelSeen; }, { threshold: 0.15 });
+    io.observe(root);
+    watched = root;
+  }
+  pillParts.phase.textContent = phase;
+  pillParts.what.textContent = what;
+  pillParts.time.textContent = time;
+  el.hidden = panelSeen;
+  document.body.classList.add("claude-editing");
+}
+
+/** The edit finished or its panel left the page: drop the pill and the editing glow. */
+export function endLive(out: HTMLElement) {
+  if (pillFor !== out) return;
+  pillFor = null;
+  io?.disconnect();
+  io = null; watched = null; panelSeen = true;
+  if (pill) pill.hidden = true;
+  document.body.classList.remove("claude-editing");
 }

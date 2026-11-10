@@ -8,7 +8,7 @@ import { timeline } from "./timeline";
 import { openComposer, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
-import { renderLive, type MediaAct } from "./live";
+import { endLive, renderLive, type MediaAct } from "./live";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -18,6 +18,19 @@ const el = (tag: string, cls = "", text = "") => {
   return e;
 };
 const icon = (name: string) => { const s = el("span", `ico ico-${name}`); s.setAttribute("aria-hidden", "true"); return s; };
+
+// ---------- uncaught errors go to the engine log (~/Kioku/engine.log): a release build has no console to read
+let errsSent = 0;
+function where() {
+  try { return JSON.stringify(view).slice(0, 200); } catch { return "starting"; }  // view isn't declared yet during startup
+}
+function reportError(message: string, stack = "") {
+  if (++errsSent > 20) return;  // a looping error must not flood the log
+  fetch(`${API}/client-log`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: message.slice(0, 2000), stack: stack.slice(0, 8000), where: where() }) }).catch(() => {});
+}
+addEventListener("error", (e) => reportError(e.message, e.error?.stack));
+addEventListener("unhandledrejection", (e) => reportError(String(e.reason?.message ?? e.reason), e.reason?.stack));
 
 // ---------- appearance: light / dark / follow the system (per device), plus the background art that sets the accent
 const THEMES = ["light", "dark"];
@@ -433,7 +446,28 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     briefBody.replaceChildren(ta, acts);
     ta.focus();
   };
-  brief.append(briefH, el("p", "hint brief-hint", "What Claude works toward whenever it edits this project."), briefBody);
+  // collapsible: open by default until the project has clips, then folded to one line; your choice is remembered per project
+  const foldKey = `kioku.brief.${c.id}`;
+  let open = !items.length;
+  try { const v = localStorage.getItem(foldKey); if (v !== null) open = v === "1"; } catch { /* default */ }
+  const fold = el("button", "brief-fold") as HTMLButtonElement;
+  fold.type = "button";
+  fold.setAttribute("aria-controls", `brief-${c.id}`);
+  const peek = el("span", "brief-peek", c.brief.trim().split("\n")[0]);
+  fold.append(icon("chev"), briefH, peek);
+  const briefMore = el("div", "brief-more");
+  briefMore.id = `brief-${c.id}`;
+  briefMore.append(el("p", "hint brief-hint", "What Claude works toward whenever it edits this project."), briefBody);
+  const setOpen = (o: boolean, remember = true) => {
+    open = o;
+    brief.classList.toggle("folded", !o);
+    fold.setAttribute("aria-expanded", String(o));
+    briefMore.hidden = !o;
+    if (remember) try { localStorage.setItem(foldKey, o ? "1" : "0"); } catch { /* this session only */ }
+  };
+  fold.onclick = () => setOpen(!open);
+  brief.append(fold, briefMore);
+  setOpen(open, false);
   showBrief();
 
   const ask = el("form", "ask") as HTMLFormElement;
@@ -724,7 +758,7 @@ const polling = new WeakSet<HTMLElement>();
 async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean; textContent?: string | null }) {
   if (polling.has(out)) return;  // one poll per box: a second would fight the first over the button label
   polling.add(out);
-  try { await pollLoop(cid, kind, out, btn); } finally { polling.delete(out); }
+  try { await pollLoop(cid, kind, out, btn); } finally { polling.delete(out); if (kind === "ask") endLive(out); }
 }
 async function pollLoop(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean; textContent?: string | null }) {
   btn.disabled = true;
@@ -750,7 +784,7 @@ async function pollLoop(cid: number, kind: PollKind, out: HTMLElement, btn: { di
     if (j.status === "running") {
       // a drawing bug must not stop the poll: the edit keeps running and the next tick may draw fine
       if (kind === "ask") {
-        try { renderSteps(out, j, await mediaActivity()); } catch (e) { console.warn("live panel:", e); }
+        try { renderSteps(out, j, await mediaActivity()); } catch (e) { console.warn("live panel:", e); reportError(`live panel: ${errMsg(e)}`, (e as Error)?.stack); }
       }
       else if (kind !== "export") renderProgress(out, j, cid, kind);
       await sleep(kind === "ask" || kind === "export" ? 1500 : 1000);
