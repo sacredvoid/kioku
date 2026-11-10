@@ -185,6 +185,8 @@ class Editor {
   }
   cutTimes() { return [...new Set(this.lay.flatMap((l) => [l.start, l.end]))].sort((a, b) => a - b); }
   tracks(): AudioTrack[] { return this.spec.audio ?? []; }
+  trackTitles = new Map<string, string>();
+  trackName(t: AudioTrack) { return this.trackTitles.get(t.id) ?? base(t.path); }  // searched music is saved under a uuid filename
   snapshot(): Snap { return { items: this.items.map((i) => ({ ...i })), spec: clone(this.spec) }; }
   restore(s: Snap) { this.model.items = s.items; this.model.edit.spec = s.spec; this.optimistic = false; this.placeAll(true); this.renderInspector(); }
   posBetween(prev: number | null, next: number | null) {
@@ -201,7 +203,9 @@ class Editor {
     this.model.items = col.items.map((r) => ({ item_id: r.item_id, uuid: r.uuid, pos: r.pos, t0: r.t0, t1: r.t1, kind: r.kind, video: r.kind !== "image", dur: r.duration, meta: r.meta, created: r.created })) as TItem[];
   }
   async refresh() {
-    const [, edit, cues] = await Promise.all([this.loadItems(), api<Edit>(`/collections/${this.cid}/edit`), api<CuesReply>(`/collections/${this.cid}/captions/cues`).catch(() => null)]);
+    const [, edit, cues, cr] = await Promise.all([this.loadItems(), api<Edit>(`/collections/${this.cid}/edit`), api<CuesReply>(`/collections/${this.cid}/captions/cues`).catch(() => null),
+      api<{ credits: { track_id: string; title: string }[] }>(`/collections/${this.cid}/credits`).catch(() => null)]);
+    this.trackTitles = new Map((cr?.credits ?? []).map((x) => [x.track_id, x.title]));
     this.model.edit = edit;
     if (cues) { this.model.cues = cues.cues; this.capClips = cues.clips; }
     this.optimistic = false;
@@ -831,8 +835,8 @@ class Editor {
       if (b.parentElement !== lane) lane.append(b);
       b.style.left = `${t.start * this.pps}px`;
       b.style.width = `${Math.max(4, (t.out - t.in) * this.pps)}px`;
-      (b.querySelector(".tl-name") as HTMLElement).textContent = base(t.path);
-      b.setAttribute("aria-label", `Voiceover ${base(t.path)}, starts at ${t.start.toFixed(1)} seconds, ${fmtS(t.out - t.in)} long`);
+      (b.querySelector(".tl-name") as HTMLElement).textContent = this.trackName(t);
+      b.setAttribute("aria-label", `Voiceover ${this.trackName(t)}, starts at ${t.start.toFixed(1)} seconds, ${fmtS(t.out - t.in)} long`);
       b.classList.toggle("sel", this.sel?.kind === "audio" && this.sel.id === t.id);
     }
     this.auds.forEach((b, id) => { if (!seen.has(id)) { b.remove(); this.auds.delete(id); } });
@@ -1371,7 +1375,7 @@ class Editor {
       const t = this.tracks().find((x) => x.id === sel.id);
       if (t) {
         const head = el("div", "tl-ih");
-        head.append(el("strong", "", "Audio"), el("span", "muted tl-in", base(t.path)));
+        head.append(el("strong", "", "Audio"), el("span", "muted tl-in", this.trackName(t)));
         f.append(head);
         const put = (body: Flat, label: string) => this.putAudio(t.id, body, Object.fromEntries(Object.keys(body).map((k) => [k, (t as unknown as Flat)[k]])), label);
         f.append(row("Volume", range(0, 2, .05, t.volume, (v) => put({ volume: v }, "Change audio volume"), (v) => `${Math.round(v * 100)}%`)));
@@ -1405,7 +1409,7 @@ class Editor {
       const st = document.createElement("select");
       st.setAttribute("aria-label", "Cut to the beat of");
       st.append(new Option("Off", "none"));
-      this.tracks().forEach((t) => st.append(new Option(base(t.path), t.id)));
+      this.tracks().forEach((t) => st.append(new Option(this.trackName(t), t.id)));
       st.value = sy.track ?? "none";
       st.onchange = () => this.patchEdit({ sync_track: st.value }, "Change beat sync", { sync_track: sy.track ?? "none" });
       sBeat.append(row("Cut to", st, this.tracks().length ? "" : "add music first"));
