@@ -94,6 +94,8 @@ assert L["band"] == "bottom" and L["hit"] > .25                                 
 assert placed("big-number", avoid=(low,))[0]["band"] == "middle"
 assert placed("lower-third", avoid=(low,))[0]["band"] == "top"
 assert placed("location-tag", avoid=((.05, .05, .5, .3, 1.0, True),))[0]["band"] == "bottom"
+# a long place in 9:16 spreads to the safe width instead of shrinking to an unreadable size
+assert titles.layout("location-tag", "Essex Street Pedestrian Mall, Salem", "inter", (1080, 1920), "auto", False)["size"] >= .8 * titles.SIZE["location-tag"] * 1080  # was 28 of 45
 sal = (.2, .6, .8, .8, titles.SALIENT_W, False)  # a salient region tips the choice, but counts as no face
 L = placed(avoid=(sal,))[0]
 assert L["band"] == "top" and L["hit"] == 0

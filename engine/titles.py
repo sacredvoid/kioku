@@ -365,6 +365,9 @@ def layout(template, text, fkey, dims, position, avoid_bottom, avoid=()):
         if ((template == "word-on-beat" or len(lines) <= max_lines) and max(f.getlength(ln) for ln in lines) <= width) \
                 or size <= 10:
             break
+        if template == "location-tag" and width < (wide := sx1 - sx0 - 4.2 * size):  # long place in 9:16: grow to the
+            width = wide                     # safe width less pill and pin (cap * 4) before shrinking (was 28 px, not 45)
+            continue
         size = max(10, int(size * .92))
     cap = -f.getbbox("H", anchor="ls")[1]
     pitch = cap * (1.32 if fkey == "anton" else 1.55)
