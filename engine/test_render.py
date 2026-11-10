@@ -299,7 +299,12 @@ assert abs(duration(p1) - PLAN[6].duration) <= 1 / 30 + 1e-3 and not any(s.get("
 body = p1.read_bytes()
 r2, ran2 = go(6, "final")
 p2 = Path(r2["path"])
-assert p2 != p1 and p1.read_bytes() == body and ran2 == 0, (p1, p2)
+assert p2 == p1 and r2.get("reused") and p1.read_bytes() == body and ran2 == 0, (p1, p2, r2)  # unchanged: the same file back
+with open(p1, "ab") as fh:  # the user touched the file: render again (segments still cached), never overwrite it
+    fh.write(b"x")
+r2, ran2 = go(6, "final")
+p2 = Path(r2["path"])
+assert p2 != p1 and not r2.get("reused") and ran2 == 0, (p1, p2)
 assert_clean()
 
 # still photo: orientation baked (landscape 400x300 with EXIF 6 becomes portrait) and a missing clip fails before any ffmpeg
@@ -681,4 +686,11 @@ res, n = go(77)
 assert n == 3 and abs(duration(res["path"]) - PLAN[77].duration) < 0.1, (res, duration(res["path"]))
 assert any("whoosh.wav" in " ".join(map(str, cmd)) and "hit.wav" in " ".join(map(str, cmd)) for cmd in RUNS), "seam sounds not mixed"
 assert_clean()
+# Export for Resolve: clips already on disk are cloned in, only the rest is downloaded (and a rerun re-copies nothing)
+asked = []
+projects.originals = lambda uuids, dest: (asked.append(list(uuids)), {})[1]
+xd = root / "export-media"
+got = projects.export_sources([{"uuid": "A", "kind": "video"}, {"uuid": "A", "kind": "video"}, {"uuid": "V1", "kind": "video"}], xd)
+assert set(got) == {"A"} and got["A"].read_bytes() == (fx / "A.mp4").read_bytes() and asked == [["V1"]], (got, asked)
+assert not list(xd.glob("*.part"))
 print("render checks passed")

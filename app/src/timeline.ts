@@ -604,6 +604,11 @@ class Editor {
     r.append(top, this.tools, this.wrap, this.strip, this.snd);
     this.renderSnap();
     this.renderPlay();
+    // click anywhere that isn't a clip, an audio block or a control that acts on the selection: deselect (FCP/Resolve)
+    const keep = ".tl-clip, .tl-aud, .tl-insp, .tl-pop, .tl-panel, .tl-seam, .tl-ruler, .tl-ph, .tl-bar, .tl-tools, dialog";
+    const deselect = (e: PointerEvent) => { if (this.sel && !(e.target as HTMLElement | null)?.closest?.(keep)) this.setSel(null); };
+    document.addEventListener("pointerdown", deselect);
+    this.offs.push(() => document.removeEventListener("pointerdown", deselect));
     this.root.addEventListener("pointerdown", (e) => { if (!this.pop.hidden && !this.pop.contains(e.target as Node) && !(e.target as HTMLElement).closest(".tl-seam")) this.pop.hidden = true; });
   }
 

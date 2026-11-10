@@ -147,7 +147,8 @@ def originals(uuids, dest):
     if need:
         ufile = dest / ".uuids.txt"
         ufile.write_text("\n".join(need))
-        r = subprocess.run([str(Path(sys.executable).parent / "osxphotos"), "export", str(dest),
+        # --update: an export database left in dest by an earlier run otherwise stops osxphotos at a y/N prompt
+        r = subprocess.run([str(Path(sys.executable).parent / "osxphotos"), "export", str(dest), "--update",
                             "--uuid-from-file", str(ufile), "--download-missing", "--use-photokit",
                             "--skip-edited", "--skip-live", "--skip-raw", "--filename", "{uuid}", "--no-progress"],
                            capture_output=True, text=True, timeout=settings.get().download_seconds * len(need))
@@ -194,6 +195,43 @@ def build_timeline(name, clips, rate):
     return tl
 
 
+def clone_into(dest, uuid, src):
+    """dest/<uuid><ext> as an APFS clone of src (instant, no extra space; plain copy elsewhere). Returns the path."""
+    dst = dest / f"{uuid}{src.suffix}"
+    if dst.is_file() and dst.stat().st_size == src.stat().st_size:
+        return dst
+    part = dst.with_name(dst.name + ".part")
+    part.unlink(missing_ok=True)
+    if subprocess.run(["cp", "-c", str(src), str(part)], capture_output=True).returncode != 0:
+        shutil.copy2(src, part)
+    os.replace(part, dst)
+    return dst
+
+
+def export_sources(items, dest):
+    """uuid -> original in dest. Videos already on disk (in Photos or kept by an earlier render) are cloned in;
+    only the rest is downloaded."""
+    import render  # late: render imports this module
+    dest.mkdir(parents=True, exist_ok=True)
+    files, rest = {}, []
+    for it in items:
+        u = it["uuid"]
+        if u in files or u in rest:
+            continue
+        try:
+            src = (media.local_original(u) if it["kind"] != "image" else None) or render.cached_original(u)
+        except HTTPException:
+            src = None
+        try:
+            if src:
+                files[u] = clone_into(dest, u, src)
+                continue
+        except OSError as e:
+            log.warning("export: could not copy %s, downloading it instead: %s", src, e)
+        rest.append(u)
+    return files | (originals(rest, dest) if rest else {})
+
+
 def do_export(cid):
     import opentimelineio as otio
     col = library.get_collection(cid)
@@ -203,7 +241,7 @@ def do_export(cid):
         raise RuntimeError("project has no clips")
     out = EXPORTS / slug(col["name"])
     try:
-        files = originals([i["uuid"] for i in col["items"]], out / "media")
+        files = export_sources(col["items"], out / "media")
     except subprocess.TimeoutExpired:
         raise RuntimeError("iCloud downloads timed out. Try again (finished files are kept), or raise the "
                            "iCloud download timeout in Settings.")

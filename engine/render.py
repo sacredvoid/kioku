@@ -731,6 +731,15 @@ def saved_preview(cid):
     return meta if Path(meta.get("path", "")).is_file() else None
 
 
+def saved_final(cid):
+    """The last finished final render, if its file is still there unchanged (same size), else None."""
+    try:
+        meta = json.loads((RENDERS / str(cid) / "final.json").read_text())
+        return meta if Path(meta["path"]).stat().st_size == meta.get("size") else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def render(cid, mode, start=None, end=None, codec="hevc"):
     """Job target for projects.start_job(cid, mode, render.render, start, end, codec). Returns the result dict."""
     global SEG_RUNS, _active
@@ -767,6 +776,11 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         meta = saved_preview(cid)
         if meta and meta.get("key") == key:
             return {**meta, "rendered": 0, "message": "Unchanged since the last preview, so it was reused"}
+    else:  # same for finals, as long as the file is still there and untouched
+        key = f"{preview_key(tl, spec, None)}|{codec}"
+        meta = saved_final(cid)
+        if meta and meta.get("key") == key:
+            return {**meta, "rendered": 0, "reused": True, "message": "Nothing changed since the last render, so that video was kept"}
     jkey = (cid, mode)
     cancel = CANCEL[jkey] = threading.Event()
     state = projects.jobs.setdefault(jkey, {})
@@ -982,9 +996,11 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 "srt": str(srt) if srt else None, "sheet": str(sheet) if sheet else None, "edit_hash": tl.edit_hash,
                 "rendered": len(todo), "cached": hits, "warnings": warnings,
                 "message": f"{out_s:.0f}s, {len(todo)} clips rendered, {hits} reused"}
-        if mode == "preview":
-            result["key"] = key
-            (rdir / "preview.json").write_text(json.dumps(result))
+        result["key"] = key
+        if mode == "final":
+            result["size"] = target.stat().st_size
+        rdir.mkdir(parents=True, exist_ok=True)
+        (rdir / f"{mode}.json").write_text(json.dumps(result))
         return result
     finally:
         for p in parts:
