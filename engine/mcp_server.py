@@ -357,22 +357,43 @@ def set_text(collection_id: int, text_id: str, template: str = "", text: str = "
 @server.tool()
 def set_audio(collection_id: int, track_id: str, path: str = "", start: float | None = None, source_in: float | None = None,
               source_out: float | None = None, volume: float | None = None, fade_in: float | None = None,
-              fade_out: float | None = None, remove: bool = False) -> dict:
+              fade_out: float | None = None, remove: bool = False, fit: bool = False,
+              target_seconds: float | None = None, drop_at: float | None = None) -> dict:
     """Add, change or remove an audio track (voiceover or music): at most 3 per project, mixed with the clips' own
     sound and normalized to -14 LUFS, in previews and finals. track_id: any short name (letters, digits, - _); a new id
     adds a track and needs path, an existing id changes only the arguments you pass. path: a local mp3, m4a, wav, aac,
     aiff or caf file. start: seconds on the output timeline where it begins. source_in / source_out: the part of the
     file to use (seconds; default all). volume 0 to 2. fade_in / fade_out: seconds. remove=true deletes the track.
-    While any track plays, clip sound is lowered under it (set_edit duck=false turns that off). Returns the edit."""
+    While any track plays, clip sound is lowered under it (set_edit duck=false turns that off).
+    fit=true fits the track to the edit from its music map: it picks source_in and source_out on bar lines, puts the
+    track's drop drop_at seconds into the video (default 35% of the length, when the track has a drop), starts at 0 and
+    fades out over the last bar; arguments you pass explicitly win. target_seconds: the length to fill (default the
+    edit's current length). Returns the edit plus `fit`: in, out, drop_out_s (output seconds where the drop lands, put
+    the hero shot there), music_end_s (where the music ends: end the edit there) and notes."""
     p = f"/collections/{collection_id}/edit/audio/{track_id}"
     if remove:
         return call("DELETE", p)
-    body = drop_unset(path=path or None, start=start, out=source_out, volume=volume, fade_in=fade_in, fade_out=fade_out)
+    body = drop_unset(path=path or None, start=start, out=source_out, volume=volume, fade_in=fade_in, fade_out=fade_out,
+                      target_seconds=target_seconds, drop_at=drop_at)
+    if fit:
+        body["fit"] = True
     if source_in is not None:
         body["in"] = source_in
     if not body:
         return {"error": "Nothing to change: pass a path for a new track, or at least one setting."}
     return call("PUT", p, body)
+
+
+@server.tool(annotations=READ_ONLY)
+def analyze_music(collection_id: int, track_id: str) -> dict:
+    """The music map of an audio track on the project (add it first); you cannot hear it, this is what it sounds like.
+    Returns tempo, bar_s (seconds per bar), bars (bar start times in the FILE, seconds), energy (one digit 0 to 9 per bar,
+    loudness and bass mixed; raw numbers, overrule the guesses below when they look wrong), sections
+    [{start, end, bar, bars, level}], drop_s (file seconds of the biggest bass jump on a bar start, or null: no clear drop)
+    and drop_bar. vocals is always null (not detected). The first call takes a few seconds, then it is cached.
+    Use it to put the hero shot on the drop, long calm shots on low-energy bars and 1 to 2 beat shots on high ones.
+    get_edit gives each clip the same 0 to 9 digit for the bar under it. set_audio(fit=true) picks the part of the file."""
+    return call("GET", f"/collections/{collection_id}/edit/audio/{urllib.parse.quote(track_id, safe='')}/map", timeout=300)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -393,17 +414,22 @@ def search_sounds(query: str, kind: str = "music", max_duration: float | None = 
 
 @server.tool()
 def add_sound(collection_id: int, sound_id: str, start: float = 0, track_id: str = "", volume: float | None = None,
-              fade_in: float | None = None, fade_out: float | None = None) -> dict:
+              fade_in: float | None = None, fade_out: float | None = None, fit: bool = False,
+              target_seconds: float | None = None, drop_at: float | None = None) -> dict:
     """Put a sound from search_sounds on the project's audio as a new track (at most 3). sound_id: the id of a free
     result, or the path of a "mine" result. start: seconds on the output timeline. The free file is downloaded once
     and checked. When the result has a "credit", say that credit line to the user: CC BY music must be credited
     where the video is posted (Kioku also writes credits.txt next to final renders and exports). Use set_audio to
-    trim, fade or move the track afterwards."""
+    trim, fade or move the track afterwards. fit=true, target_seconds and drop_at fit the track to the edit like
+    set_audio (see there); the result then has `fit`."""
     if sound_id.startswith("/"):
         return set_audio(collection_id, track_id or f"m{int(time.time()) % 100000}", path=sound_id, start=start,
-                         volume=volume, fade_in=fade_in, fade_out=fade_out)
+                         volume=volume, fade_in=fade_in, fade_out=fade_out, fit=fit, target_seconds=target_seconds,
+                         drop_at=drop_at)
     body = drop_unset(cid=collection_id, start=start, track_id=track_id or None, volume=volume, fade_in=fade_in,
-                      fade_out=fade_out)
+                      fade_out=fade_out, target_seconds=target_seconds, drop_at=drop_at)
+    if fit:
+        body["fit"] = True
     return call("POST", f"/sounds/{urllib.parse.quote(sound_id, safe='')}/add", body)
 
 
