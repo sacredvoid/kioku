@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.14.1 (2026-11-10)
+
+- Long location tags widen before shrinking in 9:16 (28 px -> 37 px at 1080)
+- Music tracks show their title, not the uuid filename
+- Project header shows clip count only (summed clip lengths said 1:28 for a 57 s edit)
+- Exact playback works after an engine restart (preview file 404'd)
+
 ## v0.14.0 (2026-11-10)
 
 - Colour match across clips and a finish layer (roadmap #10, X7 + X8)
