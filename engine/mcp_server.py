@@ -250,7 +250,7 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
              caption_highlight_color: str = "", caption_highlight: bool | None = None, caption_uppercase: bool | None = None,
              caption_max_words: int = -1, fade_in: float = -1, fade_out: float = -1,
              clip_volume: float = -1, duck: bool | None = None, sync_track: str = "", sync_grid: str = "",
-             sync_lead: int = -1) -> dict:
+             sync_lead: int = -1, text_style: str = "") -> dict:
     """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
     stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop). size: short side 720, 1080 or 2160.
     fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
@@ -270,7 +270,12 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
     Beat sync: sync_track = the audio track id of the music (add it first with add_sound / set_audio), "none" turns it off.
     Every cut then lands on the music's beat grid; get_edit returns `grid` (beat times on the output timeline).
     sync_grid: beat (default), half (every 2nd beat, calmer) or downbeat (bar starts, slowest). sync_lead 0 to 3 frames the
-    cut lands before the beat (default 1; it reads as on time). Set each clip's length in beats with set_clip_fx(beats=)."""
+    cut lands before the beat (default 1; it reads as on time). Set each clip's length in beats with set_clip_fx(beats=).
+    text_style: one look for every title, "none" to clear: clean (Space Grotesk, white, expo ease; suits title-slide,
+    letter-rise, typewriter), bold (Anton, white and yellow, back ease; title-pop, word-on-beat, big-number,
+    text-behind), editorial (Playfair serif, warm white and gold, expo; tracking-in, title-slide, lower-third), playful
+    (Anton, white and pink, spring; title-pop, word-on-beat). It fills only what a text leaves at its default (font auto,
+    white, default accent, ease auto), so pick it once and don't set fonts or colours per text."""
     body = drop_unset(aspect=aspect or None, size=size or None, fps=fps or None, look_strength=None if look_strength < 0 else look_strength,
                       captions=captions, caption_style=caption_style or None, caption_clips=caption_clips,
                       caption_position=caption_position or None, caption_font=caption_font or None, caption_size=caption_size or None,
@@ -279,7 +284,8 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
                       caption_max_words=None if caption_max_words < 0 else caption_max_words,
                       fade_in=None if fade_in < 0 else fade_in, fade_out=None if fade_out < 0 else fade_out,
                       clip_volume=None if clip_volume < 0 else clip_volume, duck=duck,
-                      sync_grid=sync_grid or None, sync_lead=None if sync_lead < 0 else sync_lead)
+                      sync_grid=sync_grid or None, sync_lead=None if sync_lead < 0 else sync_lead,
+                      text_style=text_style or None)
     if sync_track:
         body["sync_track"] = None if sync_track.lower() == "none" else sync_track
     if look:
@@ -341,22 +347,32 @@ def set_transition(collection_id: int, after_item_id: int, type: str, duration: 
 
 @server.tool()
 def set_text(collection_id: int, text_id: str, template: str = "", text: str = "", start: float | None = None,
-             dur: float | None = None, position: str = "", font: str = "", color: str = "", accent: str = "") -> dict:
+             dur: float | None = None, position: str = "", font: str = "", color: str = "", accent: str = "",
+             ease: str = "") -> dict:
     """Add, change or remove an animated title. text_id: any short name; a new id needs template and text, an existing id
     changes only what you pass; template="none" removes it. template: title-pop (big opener), title-slide (clean
     subtitle-style title), word-stagger (words appear one by one), lower-third (name or caption on a bar),
-    location-tag (small pin label, top-left), big-number (a year or count that counts up). text: at most 80 characters,
-    best under 6 words. start / dur: output seconds (start snaps to the beat when synced; dur 0.5 to 15).
+    location-tag (small pin label, top-left), big-number (a year or count that counts up), word-on-beat (one big word
+    at a time, each landing on the next beat when the edit is synced; 3 to 5 word hooks, at most 8), letter-rise
+    (letters rise in one by one: calm, cinematic), tracking-in (letter spacing closes while it fades in: calm,
+    editorial), typewriter (letters appear one at a time: dates and places only), text-behind (a big 1 to 2 word title
+    the subject stands in front of, cut out per frame with Apple Vision; once per edit, at most 4 s, inside one shot
+    with one clear subject and sky or space above it; drawn as a plain title, with a warning, when that fails).
+    Restraint: one text on screen at a time, under 6 words, one animation family per edit.
+    text: at most 80 characters. Tokens {place}, {date} (e.g. "Oct 12, 2024") and {year} are filled from the Photos
+    metadata of the clip under the text's start, so never type a place or date you have not seen; an error means that
+    clip has none. start / dur: output seconds (start snaps to the beat when synced; dur 0.5 to 15).
     position: auto (default: at render, the band covering the fewest faces and subjects, the template's usual place
     when free, middle only as a last resort), top, middle, bottom (kept as asked; the render warns if it covers a face).
     9:16 text keeps clear of the app's buttons and caption area. Readability is automatic (shadow, or a soft scrim or
     box on bright or busy footage), so don't change color for it. font: auto, inter, anton, playfair, grotesk.
-    color / accent: #RRGGBB (accent colours the bar, rule or pin). Returns the edit."""
+    color / accent: #RRGGBB (accent colours the bar, rule or pin). ease: the entrance curve, auto (the template's or the
+    text_style's), cubic (smooth), expo (fast then soft), back (small overshoot), spring (bouncy). Returns the edit."""
     p = f"/collections/{collection_id}/edit/texts/{text_id}"
     if template.lower() == "none":
         return call("DELETE", p)
     body = drop_unset(template=template or None, text=text or None, start=start, dur=dur, position=position or None,
-                      font=font or None, color=color or None, accent=accent or None)
+                      font=font or None, color=color or None, accent=accent or None, ease=ease or None)
     if not body:
         return {"error": "Nothing to change: pass template and text for a new title, or at least one setting."}
     return call("PUT", p, body)

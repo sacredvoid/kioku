@@ -67,7 +67,7 @@ for dims in ((540, 960), (960, 540), (540, 540)):
             ml, mt, mr, mb = titles.safe_area(dims)  # 9:16 keeps clear of app UI: more at the bottom and sides
             assert box[0] >= W * ml - 2 and box[2] <= W * (1 - mr) + 2 and box[1] >= H * mt - 2 and box[3] <= H * (1 - mb) + 2, \
                 (t, pos, dims, box)
-            if t != "big-number" and pos == "auto":  # auto never sits on the middle of the frame
+            if t not in ("big-number", "word-on-beat") and pos == "auto":  # auto never sits on the middle of the frame
                 assert not (box[1] < H * .45 and box[3] > H * .55), (t, dims, box)
 assert titles.safe_area((540, 960))[3] >= .2 and titles.safe_area((960, 540)) == titles.safe_area((540, 540)) == (.1,) * 4
 # first in-frame is empty or nearly (things animate in), last frame is gone
@@ -254,4 +254,156 @@ assert "teal-orange" in g["options"]["looks"] and g["texts"][0] == {"id": "a", "
 assert cl.delete(f"{u}/a").status_code == 200 and cl.delete(f"{u}/a").status_code == 404
 assert cl.patch(f"/collections/{cid}/edit", json={"look": "warm-film"}).status_code == 200
 assert cl.patch(f"/collections/{cid}/edit", json={"look": "sepia"}).status_code == 422
+
+# ================= text pack (roadmap #6)
+# ---------- easings: every curve starts at 0 and lands exactly on 1; spring overshoots and settles
+for fn in titles.EASE.values():
+    assert abs(fn(0)) < 1e-9 and fn(1) == 1 and fn(2) == 1, fn
+sp = [titles.ease_out_spring(x) for x in xs]
+assert max(sp) > 1.05 and abs(sp[-2] - 1) < .02
+ex = [titles.ease_out_expo(x) for x in xs]
+assert all(q >= p_ for p_, q in zip(ex, ex[1:])) and titles.ease_out_expo(.3) > titles.ease_out_cubic(.3)
+assert titles._ease({"ease": "spring"}, titles.ease_out_back) is titles.ease_out_spring
+assert titles._ease({}, titles.ease_out_back) is titles.ease_out_back
+
+# ---------- subpixel: a half-pixel move lands between the two whole-pixel positions; still things stay sharp
+dot = Image.new("RGBA", (4, 4), (255, 255, 255, 255))
+
+
+def col_alpha(x, sub):
+    cv = Image.new("RGBA", (12, 6), (0, 0, 0, 0))
+    titles.put(cv, dot, x, 1, sub=sub)
+    return np.asarray(cv)[2, :, 3]
+
+
+assert list(col_alpha(3.5, True)[2:9]) != list(col_alpha(3, True)[2:9]) != list(col_alpha(4, True)[2:9])
+assert 0 < col_alpha(3.5, True)[3] < 255 and np.asarray(col_alpha(3.5, True)).sum() > 900
+assert set(col_alpha(3.4, False)) == {0, 255}  # sub=False rounds as before
+assert np.array_equal(col_alpha(3, True), col_alpha(3, False))
+
+# ---------- light motion blur on fast entrances only; holds and slow templates are drawn exactly as before
+x = tx("title-pop", "Lisbon")
+L = titles.place(x, V)
+assert np.asarray(titles.frame(x, V, 1, 9, FPS)).tobytes() != np.asarray(titles._draw(x, *L, V, 1 / FPS, 9 / FPS)).tobytes()
+ti, to = titles.phase_frames(x, 90, FPS)
+assert np.asarray(titles.frame(x, V, ti, to, FPS)).tobytes() == np.asarray(titles._draw(x, *L, V, ti / FPS, to / FPS)).tobytes()
+xs_ = tx("word-stagger", "Summer in Lisbon")
+assert np.asarray(titles.frame(xs_, V, 3, 9, FPS)).tobytes() == \
+    np.asarray(titles._draw(xs_, *titles.place(xs_, V), V, 3 / FPS, 9 / FPS)).tobytes()
+blur = titles._average([Image.new("RGBA", (4, 4), (255, 255, 255, 255)), Image.new("RGBA", (4, 4), (0, 0, 0, 0))])
+assert blur.getpixel((1, 1)) == (255, 255, 255, 128)  # premultiplied: half alpha, no grey fringe
+
+
+def ink(im):
+    return int((np.asarray(im)[..., 3] > 128).sum())
+
+
+# ---------- per-letter templates: letters arrive over the in-animation, then the whole line holds
+for t in ("letter-rise", "tracking-in", "typewriter"):
+    x = tx(t, "Summer in Lisbon")
+    ti, to = titles.phase_frames(x, 90, FPS)
+    seq = [ink(titles.frame(x, V, a, to, FPS)) for a in (0, ti // 3, 2 * ti // 3, ti)]
+    assert seq[0] < seq[-1] and seq[-1] > 500, (t, seq)
+    if t != "tracking-in":
+        assert seq == sorted(seq), (t, seq)  # letters only ever appear
+assert titles.in_seconds(tx("typewriter", "Oct 12, 2024")) < 1.3 and titles.in_seconds(tx("letter-rise", "x" * 80)) < 1.1
+
+# ---------- word-on-beat: words land on the beats inside the text, else an even cadence; one word on screen
+wb = tx("word-on-beat", "This is the day", 75, dur=2.5, beats=(.5, 1.0, 1.5, 2.0))
+assert titles.word_times(wb) == [0.0, .5, 1.0, 1.5]
+assert titles.word_times({**wb, "beats": ()}) == [0, .5, 1.0, 1.5]  # unsynced: even, at most 0.5 s apart
+even = titles.word_times(tx("word-on-beat", "a b c", 60, dur=2.0))
+assert even[0] == 0 and even[1] - even[0] == even[2] - even[1] and even[-1] <= 2.0 - titles.OUT
+assert titles.word_times({**wb, "beats": (2.4,)})[-1] <= 2.5 - titles.OUT  # too few beats: even, inside the text
+L = titles.place(wb, V)[0]
+assert L["lines"] == ("THIS", "IS", "THE", "DAY") and L["rows"] == 1 and L["band"] == "middle"
+ti, to = titles.phase_frames(wb, 75, FPS)
+on_beat = titles.frame(wb, V, 15, to, FPS)  # the frame "IS" lands on shows it at once
+assert ink(on_beat) > 100 and ink(on_beat) < ink(titles.frame(wb, V, 5, to, FPS))  # "IS" is narrower than "THIS"
+
+# ---------- style presets fill only what a text leaves at its default
+b = {**titles.DEFAULT, "template": "title-slide", "text": "Hi"}
+s_ = titles.styled(b, "editorial")
+assert (s_["font"], s_["color"], s_["accent"], s_["ease"]) == ("playfair", "#F6F1E7", "#C9A46A", "expo")
+assert titles.styled({**b, "template": "lower-third"}, "editorial")["font"] == "inter"
+own = titles.styled({**b, "font": "anton", "color": "#FF0000", "ease": "cubic"}, "editorial")
+assert (own["font"], own["color"], own["ease"]) == ("anton", "#FF0000", "cubic")
+assert titles.styled(b, None) is b and titles.styled(b, "nope") is b
+assert all(set(v["templates"]) <= set(titles.TEMPLATES) and v["display"] in titles.FONTS for v in titles.STYLES.values())
+s = edit.default_spec()
+s["texts"] = [{**titles.DEFAULT, "id": "w", "template": "word-on-beat", "text": "go go go", "start": 1.0, "dur": 2.0}]
+s["format"]["text_style"] = "bold"
+tlw = edit.compute_timeline([item(1), item(2)], s)
+assert tlw.texts[0]["font"] == "anton" and tlw.texts[0]["ease"] == "back" and "beats" not in tlw.texts[0]
+s["audio"] = [{"id": "m", "path": "/x.wav", "start": 0, "in": 0, "out": 60, "volume": 1, "fade_in": 0, "fade_out": 0}]
+s["sync"] = {"track": "m", "grid": "beat", "lead": 0}
+tlw = edit.compute_timeline([item(1), item(2)], s, [i * 0.5 for i in range(40)])
+assert tlw.texts[0]["beats"] == (0.5, 1.0, 1.5), tlw.texts[0]["beats"]
+
+# ---------- text-behind: the subject's mask is cut out of the text, per frame; plain text when it cannot work
+fig = Image.new("RGB", (360, 640))
+d_ = __import__("PIL.ImageDraw", fromlist=["x"]).Draw(fig)
+for yy in range(640):
+    d_.line((0, yy, 360, yy), fill=(120 + yy // 8, 170 + yy // 14, 230))
+d_.ellipse((130, 220, 230, 320), fill=(200, 150, 120))
+d_.rounded_rectangle((100, 310, 260, 640), 40, fill=(180, 40, 40))
+fig.save(W / "fig.png")
+subj = W / "subj.mov"
+subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-loop", "1", "-i", str(W / "fig.png"), "-t", "2", "-r", "30",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(subj)], check=True)
+xb = tx("text-behind", "Lisbon", 45)
+tlb = types.SimpleNamespace(fps=FPS, duration=2.0, texts=(xb,))
+warn = []
+lst = titles.build(tlb, (360, 640), T / "wb", None, None, at=lambda f: (str(subj), f), warnings=warn)
+masks, top = titles.behind_plan(xb, lambda f: (str(subj), f))
+if masks is None:  # no Vision here (CI, old macOS): it must fall back with a reason, not fail
+    assert warn and "drawn in front" in warn[0], warn
+    print("text-behind: Vision unavailable, fallback checked")
+else:
+    assert not warn and .3 < top < .38, (warn, top)  # the head's top, about 220 / 640
+    names = [r.split("'")[1] for r in lst.read_text().splitlines() if r.startswith("file")]
+    held = np.asarray(Image.open(T / "wb" / names[30]))
+    head = held[235:300, 150:210, 3]  # text over the head is cut away, text beside it stays
+    L = titles.behind_layout(titles.place(xb, (360, 640))[0], top, (360, 640))
+    assert held[..., 3].max() == 255 and head.max() < 40, head.max()
+    assert L["top"] + L["cap"] > 220 and L["top"] < 220  # the last line straddles the subject's top
+# a flat clip has no subject: drawn in front, with a warning
+warn = []
+titles.build(tlb, (360, 640), T / "wb2", None, None, at=lambda f: (str(bright), f), warnings=warn)
+assert warn and "drawn in front" in warn[0], warn
+assert titles.behind_plan(xb, lambda f: None) == (None, None)
+cutw = types.SimpleNamespace(fps=FPS, duration=2.0, texts=(xb,))
+warn = []
+titles.build(cutw, (360, 640), T / "wb3", None, None, at=lambda f: (str(subj if f < 20 else src), f), warnings=warn)
+assert warn and "one shot" in warn[0], warn
+assert titles.distinct_frames(tlb) == 45  # one PNG per frame: the subject moves
+
+# ---------- API: ease, text_style, tokens from Photos metadata, caps on the new templates
+db.execute("insert into asset_info(uuid, place) values ('V', 'Alfama, Lisbon, Portugal')")
+db.execute("insert into assets(uuid, kind, duration, meta, created) values ('N','video',12.0,'','')")
+db.commit()
+cid2 = cl.post("/collections", json={"name": "p2", "kind": "project"}).json()["id"]
+cl.post(f"/collections/{cid2}/items", json={"uuids": ["V", "N"]})
+u2 = f"/collections/{cid2}/edit/texts"
+r = cl.put(f"{u2}/p", json={"template": "location-tag", "text": "{place}", "ease": "spring"})
+t = r.json()["spec"]["texts"][0]
+assert (t["text"], t["tokens"], t["ease"]) == ("Alfama, Lisbon", "{place}", "spring"), t
+r = cl.put(f"{u2}/d", json={"template": "typewriter", "text": "{date} in {place}"})
+assert r.json()["spec"]["texts"][1]["text"] == "Nov 1, 2026 in Alfama, Lisbon", r.json()
+assert cl.put(f"{u2}/d", json={"start": 13.0}).status_code == 422          # moved onto the clip with no place or date
+assert cl.put(f"{u2}/d", json={"text": "Day one"}).json()["spec"]["texts"][1].get("tokens") is None
+assert cl.put(f"{u2}/x", json={"template": "title-pop", "text": "{weather}"}).status_code == 422
+assert cl.put(f"{u2}/x", json={"template": "title-pop", "text": "{year}", "start": 13.0}).status_code == 422
+assert cl.put(f"{u2}/p", json={"ease": "auto"}).json()["spec"]["texts"][0].get("ease") is None
+assert cl.put(f"{u2}/w", json={"template": "word-on-beat", "text": " ".join(["go"] * 9)}).status_code == 422
+r = cl.put(f"{u2}/b", json={"template": "text-behind", "text": "Lisbon", "dur": 8})
+assert r.status_code == 200 and r.json()["spec"]["texts"][-1]["dur"] == titles.BEHIND_MAX
+assert cl.put(f"{u2}/b2", json={"template": "text-behind", "text": "Again"}).status_code == 422  # one per edit
+assert cl.put(f"{u2}/b", json={"template": "text-behind", "dur": 3}).status_code == 200            # itself is fine
+assert cl.put(f"{u2}/x", json={"template": "title-pop", "text": "Hi", "ease": "wobble"}).status_code == 422
+assert cl.patch(f"/collections/{cid2}/edit", json={"text_style": "editorial"}).json()["spec"]["format"]["text_style"] == "editorial"
+assert cl.patch(f"/collections/{cid2}/edit", json={"text_style": "neon"}).status_code == 422
+g = cl.get(f"/collections/{cid2}/edit").json()
+assert "editorial" in g["options"]["text_styles"] and "{place}" in g["options"]["text_tokens"] and "spring" in g["options"]["text_eases"]
+assert "text_style" not in cl.patch(f"/collections/{cid2}/edit", json={"text_style": "none"}).json()["spec"]["format"]
 print("titles checks passed")

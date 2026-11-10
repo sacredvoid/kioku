@@ -3,6 +3,7 @@
 The spec is plain JSON (enums and numbers only, never ffmpeg strings or paths) in the lazily created
 edit_specs table. compute_timeline is pure and works in whole frames; render and captions only read Timeline.
 """
+import datetime
 import hashlib
 import json
 import math
@@ -359,7 +360,10 @@ def compute_timeline(items, spec, grid=None):
         if n < round(0.3 * fps):
             warnings.append(f"text {t['id']!r} starts after the edit ends and is not shown")
             continue
-        texts.append({**titles.DEFAULT, **t, "start_frame": f0, "frames": n})
+        tx = {**titles.DEFAULT, **titles.styled(t, spec["format"].get("text_style")), "start_frame": f0, "frames": n}
+        if G and t["template"] == "word-on-beat":  # seconds after its start of each grid point inside it
+            tx["beats"] = tuple((g - f0) / fps for g in G if f0 < g < f0 + n)
+        texts.append(tx)
     ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items], G],
                        sort_keys=True, separators=(",", ":"))
     return Timeline(fps=fps, aspect=spec["format"]["aspect"], size=spec["format"]["size"], segs=tuple(segs),
@@ -457,6 +461,7 @@ class EditPatch(BaseModel):
     sync_track: str | None = None      # audio track id whose beat the cuts follow; null or "none" turns sync off
     sync_grid: Literal["beat", "half", "downbeat"] = "beat"
     sync_lead: int = Field(1, ge=0, le=3)   # frames each cut lands before its beat
+    text_style: Literal["none", *titles.STYLES] = "none"   # fonts, colours and easing for every text left at its default
 
 
 class AudioPut(BaseModel):
@@ -581,7 +586,10 @@ def get_edit(cid: int):
                         "motions": list(MOTIONS), "ramps": ["none", *RAMPS], "sfx": ["none", *SFX],
                         "sync_grids": ["beat", "half", "downbeat"], "text_templates": list(titles.TEMPLATES),
                         "text_fonts": ["auto", *titles.FONTS], "text_positions": list(titles.POSITIONS),
-                        "max_texts": titles.MAX_TEXTS},
+                        "text_eases": list(titles.EASES),
+                        "text_styles": {k: {"fonts": [v["display"], v["label"]], "templates": list(v["templates"])}
+                                        for k, v in titles.STYLES.items()},
+                        "text_tokens": [f"{{{k}}}" for k in TOKENS], "max_texts": titles.MAX_TEXTS},
             "texts": [{"id": t["id"], "start": t["start_frame"] / tl.fps, "end": (t["start_frame"] + t["frames"]) / tl.fps}
                       for t in tl.texts]}
 
@@ -619,6 +627,11 @@ def patch_edit(cid: int, body: EditPatch):
         for k in ("fade_in", "fade_out"):
             if k in given:
                 spec["format"][k] = _clamp(notes, k, getattr(body, k), 0, MAX_FADE)
+        if "text_style" in given:
+            if body.text_style == "none":
+                spec["format"].pop("text_style", None)
+            else:
+                spec["format"]["text_style"] = body.text_style
         if "clip_volume" in given:
             spec["clip_volume"] = _clamp(notes, "clip_volume", body.clip_volume, 0, 1)
         if "duck" in given:
@@ -766,16 +779,52 @@ class TextPut(BaseModel):
     """One animated text. On an existing id only the fields you send change; a new id needs template and text."""
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     template: Literal[*titles.TEMPLATES] | None = None
-    text: str | None = Field(None, max_length=titles.MAX_CHARS)
+    text: str | None = Field(None, max_length=titles.MAX_CHARS)   # may hold {place}, {date}, {year} (TOKENS)
     start: F | None = None             # output seconds; snaps to the beat grid when synced
     dur: F | None = None
     position: Literal[*titles.POSITIONS] | None = None
     font: Literal["auto", *titles.FONTS] | None = None
     color: str | None = Field(None, pattern=HEX)
     accent: str | None = Field(None, pattern=HEX)
+    ease: Literal[*titles.EASES] | None = None   # entrance curve; auto = the template's (or the text style's)
 
 
 MAX_TEXT_DUR = 15.0
+TOKENS = ("place", "date", "year")
+TOKEN = re.compile(r"\{(\w+)\}")
+
+
+def fill_tokens(raw, items, tl, at):
+    """raw with {place}, {date} and {year} filled from the Photos metadata of the clip playing at output second `at`,
+    so a place or date is never made up. 422 for an unknown token or a clip without that metadata."""
+    names = set(TOKEN.findall(raw))
+    if not names:
+        return raw
+    if names - set(TOKENS):
+        raise HTTPException(422, f"unknown token {{{sorted(names - set(TOKENS))[0]}}}; tokens: "
+                                 + ", ".join(f"{{{k}}}" for k in TOKENS))
+    f = round(at * tl.fps)
+    seg = next((s for s in tl.segs if s.start_frame <= f < s.start_frame + s.frames), tl.segs[-1] if tl.segs else None)
+    item = seg and next((i for i in items if i["item_id"] == seg.item_id), None)
+    if not item:
+        raise HTTPException(422, "add clips first; tokens are filled from the clip under the text")
+    vals = {}
+    if "place" in names:
+        with library.conn() as c:
+            row = c.execute("select place from asset_info where uuid = ?", (item["uuid"],)).fetchone()
+        if not row or not (row[0] or "").strip():
+            raise HTTPException(422, f"the clip at {at:.1f}s has no place in Photos; type the place instead of {{place}}")
+        vals["place"] = ", ".join(x.strip() for x in row[0].split(",")[:2])  # "Alfama, Lisbon, Portugal" -> "Alfama, Lisbon"
+    if names & {"date", "year"}:
+        try:
+            d = datetime.datetime.fromisoformat(str(item.get("created") or ""))
+        except ValueError:
+            raise HTTPException(422, f"the clip at {at:.1f}s has no date in Photos; type the date instead") from None
+        vals["date"], vals["year"] = f"{d:%b} {d.day}, {d.year}", str(d.year)
+    out = TOKEN.sub(lambda m: vals[m[1]], raw)
+    if len(out) > titles.MAX_CHARS:
+        raise HTTPException(422, f"filled text is {len(out)} characters ({out!r}); at most {titles.MAX_CHARS}")
+    return out
 
 
 @router.put("/collections/{cid}/edit/texts/{text_id}")
@@ -790,7 +839,14 @@ def put_text(cid: int, text_id: str, body: TextPut):
     col = library.get_collection(cid)
     _require_project(col)
     spec0, _ = load(cid)
-    D = timeline_for(col["items"], spec0)[0].duration  # before the write lock: it may read the beat cache
+    tl0 = timeline_for(col["items"], spec0)[0]  # before the write lock: it may read the beat cache
+    D = tl0.duration
+    old0 = next((t for t in spec0["texts"] if t["id"] == text_id), None)
+    raw = text if text is not None else (old0 or {}).get("tokens")  # tokens refill when the text or its start moves
+    filled = None
+    if raw and TOKEN.search(raw) and (text is not None or body.start is not None):
+        at = body.start if body.start is not None else (old0 or {}).get("start", 0.0)
+        filled = fill_tokens(raw, col["items"], tl0, min(max(at, 0), max(D - 0.5, 0)))
 
     def fn(spec, col):
         old = next((t for t in spec["texts"] if t["id"] == text_id), None)
@@ -805,12 +861,26 @@ def put_text(cid: int, text_id: str, body: TextPut):
         for k in ("template", "position", "font", "color", "accent"):
             if getattr(body, k) is not None:
                 t[k] = getattr(body, k)
+        if body.ease == "auto":
+            t.pop("ease", None)
+        elif body.ease is not None:
+            t["ease"] = body.ease
         if text is not None:
             t["text"] = text
+            t.pop("tokens", None)
+        if filled is not None:
+            t["text"], t["tokens"] = filled, raw
+        if t["template"] == "word-on-beat" and len(t["text"].split()) > titles.BEAT_WORDS:
+            raise HTTPException(422, f"word-on-beat shows one word per beat: at most {titles.BEAT_WORDS} words")
+        longest = MAX_TEXT_DUR
+        if t["template"] == "text-behind":
+            if any(x["template"] == "text-behind" and x["id"] != text_id for x in spec["texts"]):
+                raise HTTPException(422, "one text-behind per edit; use title-pop or title-slide for this one")
+            longest = titles.BEHIND_MAX
         notes = []
         t["start"] = round(_clamp(notes, "start", body.start if body.start is not None else t["start"], 0, D - 0.5), 3)
         t["dur"] = round(_clamp(notes, "dur", body.dur if body.dur is not None else t["dur"], 0.5,
-                                min(MAX_TEXT_DUR, D - t["start"])), 3)
+                                min(longest, D - t["start"])), 3)
         spec["texts"] = [t if x["id"] == text_id else x for x in spec["texts"]] if old else [*spec["texts"], t]
         return notes
 

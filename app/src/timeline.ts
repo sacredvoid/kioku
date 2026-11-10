@@ -47,7 +47,9 @@ const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const TR_LABEL: Record<string, string> = { cut: "Cut", dissolve: "Dissolve", "fade-black": "Fade black", "wipe-left": "Wipe left", "wipe-right": "Wipe right", "slide-left": "Slide left",
   "slide-up": "Slide up", "zoom-in": "Zoom in", "whip-left": "Whip left", "whip-right": "Whip right", "whip-up": "Whip up", "whip-down": "Whip down", "flash-white": "Flash", blur: "Blur", circle: "Circle", squeeze: "Squeeze" };
 const TEMPLATE_LABEL: Record<string, string> = { "title-pop": "Pop title", "title-slide": "Slide title", "word-stagger": "Word by word",
-  "lower-third": "Lower third", "location-tag": "Location tag", "big-number": "Big number" };
+  "lower-third": "Lower third", "location-tag": "Location tag", "big-number": "Big number", "word-on-beat": "Word on beat",
+  "letter-rise": "Letter rise", "tracking-in": "Tracking in", typewriter: "Typewriter", "text-behind": "Behind subject" };
+const EASE_LABEL: Record<string, string> = { auto: "Auto", cubic: "Smooth", expo: "Fast, soft landing", back: "Overshoot", spring: "Spring" };
 const MOTION_LABEL: Record<string, string> = { none: "None", push: "Push in", pull: "Pull out", "drift-left": "Drift left", "drift-right": "Drift right", punch: "Punch on beats" };
 const RAMP_LABEL: Record<string, string> = { none: "None", "slow-mid": "Fast, slow, fast", "fast-in": "Fast start", "slow-out": "Slow finish" };
 const SFX_LABEL: Record<string, string> = { none: "No sound", whoosh: "Whoosh", hit: "Hit", riser: "Riser" };
@@ -457,7 +459,7 @@ class Editor {
     form.method = "dialog";
     const field = (label: string, ctl: HTMLElement) => { const l = el("label", "tl-f"); l.append(el("span", "tl-fl", label), ctl); return l; };
     const text = document.createElement("input");
-    text.type = "text"; text.maxLength = 80; text.required = true; text.value = cur.text; text.placeholder = "Title text";
+    text.type = "text"; text.maxLength = 80; text.required = true; text.value = cur.tokens ?? cur.text; text.placeholder = "Title text, {place} or {date}";
     const pick = (vals: string[], labels: Record<string, string>, v: string) => {
       const s = document.createElement("select");
       vals.forEach((x) => s.append(new Option(labels[x] ?? x[0].toUpperCase() + x.slice(1), x)));
@@ -466,6 +468,7 @@ class Editor {
     };
     const tpl = pick(o.text_templates ?? [cur.template], TEMPLATE_LABEL, cur.template);
     const pos = pick(o.text_positions ?? ["auto"], {}, cur.position ?? "auto");
+    const ease = pick(o.text_eases ?? ["auto"], EASE_LABEL, cur.ease ?? "auto");
     const num = (v: number, min: number, max: number) => {
       const n = document.createElement("input");
       n.type = "number"; n.step = "0.1"; n.min = String(min); n.max = String(max); n.value = String(v); n.required = true;
@@ -477,18 +480,19 @@ class Editor {
     const save = el("button", "primary", t ? "Save" : "Add title") as HTMLButtonElement;
     save.type = "submit";
     acts.append(el("span", "spacer"), btn("Cancel", "ghost", () => dlg.close()), save);
-    form.append(el("h3", "", t ? "Edit title" : "New title"), text, field("Style", tpl), field("Position", pos),
+    form.append(el("h3", "", t ? "Edit title" : "New title"), text, field("Style", tpl), field("Position", pos), field("Motion", ease),
       field("Starts at (s)", start), field("Length (s)", dur), acts);
     form.onsubmit = (e) => {
       e.preventDefault();
       const v = text.value.trim();
       if (!v) { text.focus(); return; }
-      const next: Flat = { text: v, template: tpl.value, position: pos.value,
+      const next: Flat = { text: v, template: tpl.value, position: pos.value, ease: ease.value,
         start: round2(clamp(Number(start.value) || 0, 0, Math.max(0, this.dur))), dur: round2(clamp(Number(dur.value) || 2, 0.5, 15)) };
       dlg.close();
       if (!t) { this.putText(uid(), next, null, "Add title"); return; }
       const body: Flat = {}, old: Flat = {};
-      for (const [k, val] of Object.entries(next)) if ((t as unknown as Flat)[k] !== val) { body[k] = val; old[k] = (t as unknown as Flat)[k]; }
+      const prev: Flat = { ...t, text: t.tokens ?? t.text, ease: t.ease ?? "auto" };  // as typed, so tokens refill on undo
+      for (const [k, val] of Object.entries(next)) if (prev[k] !== val) { body[k] = val; old[k] = prev[k]; }
       if (Object.keys(body).length) this.putText(t.id, body, old, "Edit title");
     };
     dlg.append(form);

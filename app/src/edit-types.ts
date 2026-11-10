@@ -46,16 +46,20 @@ export type AudioTrack = {
   volume: number; fade_in: number; fade_out: number;
 };
 
-export type TextTemplate = "title-pop" | "title-slide" | "word-stagger" | "lower-third" | "location-tag" | "big-number";
+export type TextTemplate = "title-pop" | "title-slide" | "word-stagger" | "lower-third" | "location-tag" | "big-number"
+  | "word-on-beat" | "letter-rise" | "tracking-in" | "typewriter" | "text-behind";
 // An animated title; start / dur are output seconds as entered (start snaps to the beat grid in the render when synced)
 export type TextSpec = {
   id: string; template: TextTemplate; text: string; start: number; dur: number;
   position: "auto" | "top" | "middle" | "bottom"; font: string; color: string; accent: string;
+  ease?: "cubic" | "expo" | "back" | "spring";   // absent = auto (the template's or the text style's)
+  tokens?: string;   // the text as typed with {place} / {date} / {year}; `text` holds it filled from Photos
 };
 
 export type Spec = {
   version: 1;
-  format: { aspect: "16:9" | "9:16" | "1:1" | "4:5"; size: 720 | 1080 | 2160; fps: 24 | 25 | 30 | 60; fade_in: number; fade_out: number };
+  format: { aspect: "16:9" | "9:16" | "1:1" | "4:5"; size: 720 | 1080 | 2160; fps: 24 | 25 | 30 | 60; fade_in: number; fade_out: number;
+    text_style?: string };   // a key of EditOptions.text_styles; absent = none
   audio: AudioTrack[];                                 // up to Edit.options.max_audio
   clip_volume: number;                                 // 0..1
   duck: boolean;
@@ -77,6 +81,7 @@ export type EditOptions = {
   audio_ext: string[]; max_audio: number; max_fade: number;
   motions: Motion[]; ramps: Ramp[]; sfx: ("none" | Sfx)[]; sync_grids: string[];
   text_templates: TextTemplate[]; text_fonts: string[]; text_positions: string[]; max_texts: number;
+  text_eases: string[]; text_styles: Record<string, { fonts: string[]; templates: TextTemplate[] }>; text_tokens: string[];
 };
 
 // GET /collections/{cid}/edit
