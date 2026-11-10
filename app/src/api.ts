@@ -16,7 +16,7 @@ export type Item = {
   t1?: number | null;
 };
 
-export type Collection = { id: number; name: string; kind: "album" | "project"; count: number; cover: string | null };
+export type Collection = { id: number; name: string; kind: "album" | "project"; count: number; cover: string | null; covers: string[] };
 
 export type Asset = {
   uuid: string; kind: string; duration: number; meta: string; created: string;
