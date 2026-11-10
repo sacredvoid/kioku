@@ -686,6 +686,19 @@ res, n = go(77)
 assert n == 3 and abs(duration(res["path"]) - PLAN[77].duration) < 0.1, (res, duration(res["path"]))
 assert any("whoosh.m4a" in " ".join(map(str, cmd)) and "hit.m4a" in " ".join(map(str, cmd)) for cmd in RUNS), "seam sounds not mixed"
 assert_clean()
+# seamfx transitions: a seam clip is drawn once, joined frame exact, then reused from the cache
+import seamfx  # noqa: E402
+PLAN[78] = mk([("A", "video", 0, 1.5, 1, ("lightleak", 9)), ("G", "video", 0, 1.5, 1, ("glitch", 6)), ("E", "photo", 0, 1, 1, None)])
+db.execute("insert into collections(id, name, kind, created, updated) values (78,'P78','project',1.0,1.0)")
+db.commit()
+before = seamfx.RUNS
+res, _ = go(78)
+assert seamfx.RUNS == before + 2 and len(list((render.CACHE / "preview").glob("seam-*.mov"))) >= 2, seamfx.RUNS
+assert abs(duration(res["path"]) - PLAN[78].duration) < 0.05 and PLAN[78].total_frames == 45 + 45 + 30 - 15, res
+PLAN[78] = tlx(PLAN[78])  # new hash, same segments: the seams come from the cache
+go(78)
+assert seamfx.RUNS == before + 2, seamfx.RUNS
+assert_clean()
 # Export for Resolve: clips already on disk are cloned in, only the rest is downloaded (and a rerun re-copies nothing)
 asked = []
 projects.originals = lambda uuids, dest: (asked.append(list(uuids)), {})[1]

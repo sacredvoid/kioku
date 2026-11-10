@@ -45,7 +45,8 @@ const MIN_LEN = 0.2;
 const STILL = 3;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const TR_LABEL: Record<string, string> = { cut: "Cut", dissolve: "Dissolve", "fade-black": "Fade black", "wipe-left": "Wipe left", "wipe-right": "Wipe right", "slide-left": "Slide left",
-  "slide-up": "Slide up", "zoom-in": "Zoom in", "whip-left": "Whip left", "whip-right": "Whip right", "whip-up": "Whip up", "whip-down": "Whip down", "flash-white": "Flash", blur: "Blur", circle: "Circle", squeeze: "Squeeze" };
+  "slide-up": "Slide up", "zoom-in": "Zoom in", "whip-left": "Whip left", "whip-right": "Whip right", "whip-up": "Whip up", "whip-down": "Whip down", "flash-white": "Flash", blur: "Blur", circle: "Circle", squeeze: "Squeeze",
+  "zoom-through": "Zoom through", "light-leak": "Light leak", "luma-fade": "Luma fade", glitch: "Glitch" };
 const TEMPLATE_LABEL: Record<string, string> = { "title-pop": "Pop title", "title-slide": "Slide title", "word-stagger": "Word by word",
   "lower-third": "Lower third", "location-tag": "Location tag", "big-number": "Big number", "word-on-beat": "Word on beat",
   "letter-rise": "Letter rise", "tracking-in": "Tracking in", typewriter: "Typewriter", "text-behind": "Behind subject" };

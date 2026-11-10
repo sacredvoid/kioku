@@ -47,9 +47,14 @@ CAPTIONS_DEFAULT = {"on": False, "style": "bold", "position": "bottom", "font": 
 XFADE = {"dissolve": "fade", "fade-black": "fadeblack", "wipe-left": "wipeleft",
          "wipe-right": "wiperight", "slide-left": "slideleft", "slide-up": "slideup", "zoom-in": "zoomin",
          "whip-left": "whipleft", "whip-right": "whipright", "whip-up": "whipup", "whip-down": "whipdown",
-         "flash-white": "fadewhite", "blur": "hblur", "circle": "circleopen", "squeeze": "squeezeh"}  # whip*: render.WHIPS
+         "flash-white": "fadewhite", "blur": "hblur", "circle": "circleopen", "squeeze": "squeezeh",  # whip*: render.WHIPS
+         # drawn in numpy by seamfx (not xfade), same overlap semantics
+         "zoom-through": "zoomthrough", "light-leak": "lightleak", "luma-fade": "lumafade", "glitch": "glitch"}
 MAX_WHIP = 0.35         # seconds; a longer whip is a slow blurry slide
 WHIP_EVERY = 8.0        # at most one whip per this many output seconds before get_edit warns
+FX_DUR = {"zoom-through": (0.25, 0.6), "light-leak": (0.4, 1.5), "luma-fade": (0.4, 1.5), "glitch": (0.2, 0.4)}  # seconds
+FX_EVERY = 10.0         # effect transitions (FX_DUR): about one per this many output seconds before get_edit warns
+FX_MAX = 3              # and never more than this many in one edit (put_transition refuses)
 SYNC_DEFAULT = {"track": None, "grid": "beat", "lead": 1}
 MOTIONS = ("none", "push", "pull", "drift-left", "drift-right", "punch")
 MAX_ZOOM = 0.3          # motion_amount 1 = 1.3x; sources go soft past that
@@ -61,7 +66,7 @@ SFX = ("whoosh", "swish", "hit", "riser", "swell", "pop", "shutter")  # curated 
 # sfx="auto" on a seam picks by transition type. Anything not listed (cut, dissolve, squeeze) stays silent: a sound is a choice.
 AUTO_SFX = {"whip-left": "whoosh", "whip-right": "whoosh", "whip-up": "whoosh", "whip-down": "whoosh", "zoom-in": "whoosh", "slide-left": "swish", "slide-up": "swish",
             "wipe-left": "swish", "wipe-right": "swish", "blur": "swish", "circle": "swish", "flash-white": "hit",
-            "fade-black": "swell"}
+            "fade-black": "swell", "zoom-through": "whoosh", "glitch": "hit"}
 MAX_BEATS = 32
 MIN_TRANS_FRAMES = 3
 SHORT_CLIP = 0.2
@@ -366,6 +371,15 @@ def compute_timeline(items, spec, grid=None):
     whips = sum(1 for s in segs if s.trans_after and s.trans_after[0].startswith("whip"))
     if whips > max(1, total / fps / WHIP_EVERY):
         warnings.append(f"{whips} whips in {total / fps:.0f}s feels busy; keep about one per {WHIP_EVERY:.0f} s")
+    fxn = {XFADE[k] for k in FX_DUR}
+    fx_at = [i for i, s in enumerate(segs) if s.trans_after and s.trans_after[0] in fxn]
+    if len(fx_at) > max(1, total / fps / FX_EVERY):
+        warnings.append(f"{len(fx_at)} effect transitions in {total / fps:.0f}s feels busy; keep about one per {FX_EVERY:.0f} s")
+    for i in fx_at:
+        if i + 1 in fx_at:
+            warnings.append(f"effect transitions after clips {i + 1} and {i + 2} sit back to back; put a hard cut between them")
+        if segs[i + 1].flash:
+            warnings.append(f"clip {i + 2} flashes right after an effect transition; drop one of them")
     sfx = tuple(sorted((segs[i + 1].start_frame + (segs[i].trans_after[1] // 2 if segs[i].trans_after else 0), name)
                        for i, s in enumerate(segs[:-1]) for name in [spec.get("sfx", {}).get(str(s.item_id))] if name))
     texts = []
@@ -781,9 +795,13 @@ def put_transition(cid: int, item_id: int, body: TransitionPut):
         if body.type == "cut":
             spec["transitions"].pop(str(item_id), None)
             return []
+        if body.type in FX_DUR and sum(1 for k, t in spec["transitions"].items()
+                                       if k != str(item_id) and t["type"] in FX_DUR) >= FX_MAX:
+            raise HTTPException(422, f"at most {FX_MAX} effect transitions ({', '.join(FX_DUR)}) per edit; "
+                                     "they are accents for one or two key moments")
         notes = []
-        spec["transitions"][str(item_id)] = {"type": body.type, "duration": _clamp(
-            notes, "duration", body.duration, .2, MAX_WHIP if body.type.startswith("whip") else 2)}
+        lo, hi = FX_DUR.get(body.type, (.2, MAX_WHIP if body.type.startswith("whip") else 2))
+        spec["transitions"][str(item_id)] = {"type": body.type, "duration": _clamp(notes, "duration", body.duration, lo, hi)}
         return notes
 
     return mutate(cid, fn)

@@ -332,15 +332,22 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
 @server.tool()
 def set_transition(collection_id: int, after_item_id: int, type: str, duration: float = 0.5, sfx: str = "") -> dict:
     """Join a clip to the next one. type: cut, dissolve, fade-black, flash-white, zoom-in, whip-left, whip-right,
-    whip-up, whip-down, blur, slide-left, slide-up, wipe-left, wipe-right, circle, squeeze. Duration 0.2 to 2 s (whips
-    at most 0.35 s), capped at half the shorter clip; unsynced, transitions shorten the edit by their duration (synced,
-    the overlap is centred on the beat).
+    whip-up, whip-down, blur, slide-left, slide-up, wipe-left, wipe-right, circle, squeeze, and the effect transitions
+    zoom-through, light-leak, luma-fade, glitch. Duration 0.2 to 2 s (whips at most 0.35 s), capped at half the shorter
+    clip; unsynced, transitions shorten the edit by their duration (synced, the overlap is centred on the beat).
     whip-*: a fast motion-blurred slide; the direction is where the picture moves (whip-left = the picture flies left,
     as if the camera whipped right). Match the movement at the end of the outgoing shot, 0.2 to 0.3 s, with
     sfx="whoosh", about one per 8 s. zoom-in blurs at its peak.
+    Effect transitions are accents: at most 3 per edit (refused past that), about one per 10 s, never back to back,
+    never on a clip that also flashes, each on a strong beat (synced, the cut lands on it) and matched to the content.
+    zoom-through (0.25 to 0.6 s, sfx="whoosh"): push through A into a new place or the hero shot.
+    light-leak (0.4 to 1.5 s): warm film flare over a dissolve; calm, nostalgic, golden-hour edits, at most 2.
+    luma-fade (0.4 to 1.5 s): B's bright areas arrive first; use instead of dissolve when B has a bright sky or window.
+    glitch (0.2 to 0.4 s, sfx="hit"): RGB split and block shifts on a drop; only for energetic edits or when the
+    reference has it, once.
     sfx: a real recorded sound, used sparingly (3 to 5 per 30 s; silence is the default). auto picks by this type
     (whoosh for whips and zoom-in, swish for slides, wipes, blur and circle, hit for flash-white, swell for fade-black,
-    nothing for cut, dissolve and squeeze). Or name one: whoosh (a whip or change of place), swish (a lighter slide),
+    whoosh for zoom-through, hit for glitch, nothing for cut, dissolve, squeeze, light-leak and luma-fade). Or name one: whoosh (a whip or change of place), swish (a lighter slide),
     hit (a hard cut on a drop, once or twice), riser (builds into one big seam, once per edit), swell (a softer riser for
     calm music), shutter (a photo burst), pop (small, mostly for titles), none. Leave sfx empty to keep the current one.
     type cut with an sfx keeps a hard cut with a sound. Hard cuts are declicked automatically."""

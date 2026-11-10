@@ -29,6 +29,7 @@ import library
 import media
 import projects
 import reframe
+import seamfx
 import versions
 import settings
 from timeline import Seg
@@ -561,11 +562,12 @@ def seam_blur(name, tf, o, fps, dims):
             f",dblur=angle={ang}:radius={_n(r, 2)}:enable='between(t,{_n(m0, 6)},{_n(m1, 6)})'")
 
 
-def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=None):
+def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=None, seams=None):
     """Join n inputs (frames[i] long, trans[i] = (xfade name, frames) or None between i and i+1), then optionally
     trim to window (start, end) in seconds and overlay the caption input (index n). fx (audio_fx) adds fades and
     the extra audio tracks (inputs after the caption input). dims (W, H) sizes the whip and zoom-in blur.
-    Ends in [vout][aout]."""
+    seams {i: input index}: the seamfx clip for trans[i] when it is a seamfx effect; it is laid over a plain fade of the
+    same length, frame for frame, so lengths and audio stay exactly xfade's. Ends in [vout][aout]."""
     p = [f"[{i}:v]fps={fps}[v{i}]" for i in range(n)]
     accv, acca, acc = "v0", "0:a", frames[0]
     for i in range(1, n):
@@ -573,10 +575,18 @@ def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=Non
         if t:
             name, tf = t
             o = (acc - tf) / fps
-            p.append(f"[{accv}][v{i}]xfade=transition={WHIPS.get(name, (name,))[0]}:duration={_n(tf / fps, 6)}"
+            base = "fade" if name in seamfx.FX else WHIPS.get(name, (name,))[0]
+            p.append(f"[{accv}][v{i}]xfade=transition={base}:duration={_n(tf / fps, 6)}"
                      f":offset={_n(o, 6)}{seam_blur(name, tf, o, fps, dims)}[x{i}]")
             p.append(f"[{acca}][{i}:a]acrossfade=d={_n(tf / fps, 6)}[ja{i}]")
-            accv, acca, acc = f"x{i}", f"ja{i}", acc + frames[i] - tf
+            accv, acca = f"x{i}", f"ja{i}"
+            if name in seamfx.FX:  # fps first, so the shift is a whole number of frames in a 1/fps time base
+                if i - 1 not in (seams or {}):
+                    raise ValueError(f"the {name} transition after clip {i} has no seam clip")
+                p.append(f"[{seams[i - 1]}:v]fps={fps},setpts=PTS-STARTPTS+{acc - tf}[s{i}]")
+                p.append(f"[x{i}][s{i}]overlay=eof_action=pass:repeatlast=0[y{i}]")
+                accv = f"y{i}"
+            acc += frames[i] - tf
         else:
             # a hard cut joins two waveforms mid-cycle: dip the audio for a few ms either side of the join so it cannot click
             d = min(DECLICK, frames[i] / fps / 2, acc / fps / 2)
@@ -621,16 +631,25 @@ def _run_cmd(files, graph, out, workdir, codec, cue_list=None, extra=()):
     return cmd + ["-/filter_complex", str(gf), "-map", "[vout]", "-map", "[aout]", *codec, str(out)]
 
 
-def join_command(seg_files, frames, trans, fps, out, workdir, codec, dims=None):
-    """One chunk: intermediate in the segment codec. Pure cuts at its edges are the caller's job."""
-    return _run_cmd(seg_files, _graph(len(seg_files), frames, trans, fps, dims=dims), out, workdir, codec)
+def join_command(seg_files, frames, trans, fps, out, workdir, codec, dims=None, seams=None):
+    """One chunk: intermediate in the segment codec. Pure cuts at its edges are the caller's job.
+    seams {i: seam clip path} for the seamfx transitions in trans."""
+    seams = seams or {}
+    n = len(seg_files)
+    idx = {i: n + k for k, i in enumerate(seams)}
+    return _run_cmd(seg_files, _graph(n, frames, trans, fps, dims=dims, seams=idx), out, workdir, codec,
+                    extra=list(seams.values()))
 
 
-def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None, dims=None):
+def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None, dims=None, seams=None):
     """Last pass: join (when several files are left), window trim, caption overlay, fades, audio mix, colour tags,
-    delivery encode."""
-    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx, dims)
-    return _run_cmd(files, g, out, workdir, codec, cue_list, [t["path"] for t in fx["tracks"]] if fx else ())
+    delivery encode. seams as in join_command; their inputs come after the audio tracks."""
+    seams = seams or {}
+    tracks = [t["path"] for t in fx["tracks"]] if fx else []
+    first = len(files) + bool(cue_list) + len(tracks)
+    idx = {i: first + k for k, i in enumerate(seams)}
+    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx, dims, idx)
+    return _run_cmd(files, g, out, workdir, codec, cue_list, tracks + list(seams.values()))
 
 
 def chunks(trans, K):
@@ -962,6 +981,17 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 run_ffmpeg(seg_command(s, src, path, part, mode, dims, fps, work), L, prog.cb(L), cancel, _timeout(L), work)
                 part.replace(cdir / f"{k}.mov")
                 prog.add(L)
+            # 3b. seam clips for the seamfx transitions (cached by both segment keys, so usually already there)
+            seam_files = {}
+            for i, s in enumerate(sel[:-1]):
+                if s.trans_after and s.trans_after[0] in seamfx.FX:
+                    if cancel.is_set():
+                        raise RuntimeError("Cancelled")
+                    prog.stage("Rendering transitions")
+                    name_, tf_ = s.trans_after
+                    sk = seamfx.key(name_, tf_, keys[s.item_id], keys[sel[i + 1].item_id], mode, dims, fps)
+                    seam_files[i] = seamfx.ensure(name_, tf_, files[i], s.frames, files[i + 1], sk, cdir, mode, dims, fps,
+                                                  SEG_CODEC[mode], parts, cancel)
             # 4. captions
             cap_file, cues, all_cues, cap = None, [], [], None
             wsec = (win[0] / fps, win[1] / fps) if win else None
@@ -1005,7 +1035,7 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                     fl = (sum(fr) - sum(t[1] for t in tr if t)) / fps
                     D = (window[1] - window[0]) if window else fl
                     cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size),
-                                         audio_fx(tl, win, D), dims)
+                                         audio_fx(tl, win, D), dims, seam_files if li == 0 else None)
                     run_ffmpeg(cmd, D, prog.cb(fl), cancel, _timeout(fl), work)
                     prog.add(fl)
                     break
@@ -1016,7 +1046,8 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                         nxt.append(files[a]); continue
                     o = work / f"j{li}_{ci}.mov"
                     fl = (sum(fr[a:b]) - sum(t[1] for t in tr[a:b - 1] if t)) / fps
-                    run_ffmpeg(join_command(files[a:b], fr[a:b], tr[a:b - 1], fps, o, work, mid, dims), fl, prog.cb(fl),
+                    sf = {j - a: seam_files[j] for j in range(a, b - 1) if li == 0 and j in seam_files}
+                    run_ffmpeg(join_command(files[a:b], fr[a:b], tr[a:b - 1], fps, o, work, mid, dims, sf), fl, prog.cb(fl),
                                cancel, _timeout(fl), work)
                     prog.add(fl)
                     nxt.append(o)
