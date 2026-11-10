@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.1 (2026-11-10)
+
+- Fix: live edit panel restarts its poll if it dies and shows iCloud downloads; Library select circle selects; review tile caption no longer inherits the Library match dot
+
 ## v0.6.0 (2026-11-10)
 
 - Appearance > Font: seven bundled font pairs for text and headings, remembered per device
