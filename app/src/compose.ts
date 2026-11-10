@@ -164,7 +164,7 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
       return row(q.question, box, "cmp-q");
     }));
   };
-  api<Direction>("/direction/questions", "POST", { prompt })
+  api<Direction>("/direction/questions", "POST", { prompt }, { timeout: 300_000 })
     .then((d) => { dir = d; if (!closed) drawQuestions(d); })
     .catch((e) => {
       if (closed) return;

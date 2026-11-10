@@ -132,6 +132,7 @@ async def lifespan(_app):
     log.info("engine starting; log file %s", LOG_FILE)
     core.query_model()  # CPU text model only; the GPU model lives in the indexer process
     load()
+    projects.mark_interrupted()
     log.info("ready: %d items indexed", len(state["index"].assets))
     yield
 
@@ -411,4 +412,4 @@ def reindex(since: date | None = None, newer: bool = False):
 
 if __name__ == "__main__":
     # localhost only: this exposes your photo library's previews and file paths
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    uvicorn.run(app, host="127.0.0.1", port=8765, timeout_graceful_shutdown=5)  # never hang on long requests when asked to stop

@@ -18,37 +18,69 @@ fn engine_running() -> bool {
 }
 
 /// True if the engine on the port answers /health with this app's version. An engine left over from an older
-/// build (or one that is frozen) keeps the port and the new app would talk to old code.
+/// build keeps the port and the new app would talk to old code. A busy engine can be slow to answer, so a slow or
+/// missing reply is retried before the engine counts as stale (killing a healthy engine kills its running edit).
 fn engine_is_ours() -> bool {
     use std::io::{Read, Write};
     let addr: SocketAddr = ENGINE_ADDR.parse().expect("valid engine address");
-    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else { return false };
-    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
-    let _ = s.set_write_timeout(Some(Duration::from_secs(1)));
-    if s.write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").is_err() {
-        return false;
+    for _ in 0..3 {
+        let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else { return false };
+        let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+        let _ = s.set_write_timeout(Some(Duration::from_secs(1)));
+        if s.write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").is_err() {
+            continue;
+        }
+        let mut body = String::new();
+        let _ = s.read_to_string(&mut body);
+        if body.contains("\"version\"") {
+            return body.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION")));
+        }
     }
-    let mut body = String::new();
-    let _ = s.read_to_string(&mut body);
-    body.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION")))
+    false
 }
 
-/// Stop whatever is listening on the engine port (SIGTERM, then SIGKILL), and wait for the port to free.
+fn alive(pid: &str) -> bool {
+    Command::new("/bin/kill").args(["-0", pid]).status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// Signal a process's whole group (uv, the python engine under it, and the claude edits it started), falling
+/// back to the process alone. Every engine we start leads its own group, so this never reaches the app itself.
+fn signal_group(pid: &str, sig: &str) {
+    let pgid = Command::new("/bin/ps").args(["-o", "pgid=", "-p", pid]).output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let own = Command::new("/bin/ps").args(["-o", "pgid=", "-p", &std::process::id().to_string()]).output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    if !pgid.is_empty() && pgid != own {
+        let _ = Command::new("/bin/kill").args([sig, &format!("-{pgid}")]).status();
+    }
+    let _ = Command::new("/bin/kill").args([sig, pid]).status();
+}
+
+/// Stop pids for good: SIGTERM to their groups, wait up to 5 s for the processes themselves (not just the port:
+/// uvicorn frees the port first and then waits on open requests forever), then SIGKILL whatever is left.
+fn stop_pids(pids: &[String]) {
+    for p in pids {
+        signal_group(p, "-TERM");
+    }
+    for _ in 0..50 {
+        if !pids.iter().any(|p| alive(p)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for p in pids.iter().filter(|p| alive(p)) {
+        signal_group(p, "-KILL");
+    }
+}
+
+/// Stop whatever is listening on the engine port.
 fn stop_stale_engine() {
     let pids = Command::new("/usr/sbin/lsof").args(["-ti", "tcp:8765", "-sTCP:LISTEN"]).output().map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().map(String::from).collect::<Vec<_>>()).unwrap_or_default();
     if pids.is_empty() {
         return;
     }
     eprintln!("kioku: replacing an engine from another version (pid {})", pids.join(" "));
-    for sig in ["-TERM", "-KILL"] {
-        let _ = Command::new("/bin/kill").arg(sig).args(&pids).status();
-        for _ in 0..30 {
-            if !engine_running() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-    }
+    stop_pids(&pids);
 }
 
 /// Where the engine code lives. Release builds run the copy bundled in Kioku.app/Contents/Resources/engine, so an
@@ -103,6 +135,8 @@ fn start_engine(engine: PathBuf) -> Option<Child> {
     let path = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default());
     let mut cmd = Command::new(uv_path());
     cmd.args(["run", "server.py"]).current_dir(&engine).env("PATH", path);
+    // its own process group, so stopping it reaches python and the claude edits under uv, not just uv
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     if !cfg!(debug_assertions) {
         // The bundle is read-only and signed: the venv and bytecode go to ~/Kioku, and uv.lock is used as shipped.
         let data = PathBuf::from(&home).join("Kioku");
@@ -151,7 +185,7 @@ pub fn run() {
         if let RunEvent::Exit = event {
             // Only stop the engine if this app started it.
             if let Some(mut child) = handle.state::<Engine>().0.lock().ok().and_then(|mut g| g.take()) {
-                let _ = child.kill();
+                stop_pids(&[child.id().to_string()]);
                 let _ = child.wait();
             }
         }

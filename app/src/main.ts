@@ -8,7 +8,7 @@ import { timeline } from "./timeline";
 import { openComposer, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
-import { endLive, renderLive, type MediaAct } from "./live";
+import { endLive, onPillShow, renderLive, type MediaAct } from "./live";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -25,6 +25,7 @@ function where() {
   try { return JSON.stringify(view).slice(0, 200); } catch { return "starting"; }  // view isn't declared yet during startup
 }
 function reportError(message: string, stack = "") {
+  if (/ResizeObserver loop/.test(message)) return;  // a harmless browser notice, not a bug
   if (++errsSent > 20) return;  // a looping error must not flood the log
   fetch(`${API}/client-log`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: message.slice(0, 2000), stack: stack.slice(0, 8000), where: where() }) }).catch(() => {});
@@ -313,7 +314,7 @@ async function go(v: View, search = q.value.trim()) {
       const kind = v.type === "lib" ? v.kind : "";
       head.append(el("h1", "", "Search"));
       loadDates(kind);
-      const hits = await api<any[]>(`/search?q=${encodeURIComponent(search)}&k=300${kind ? `&kind=${kind}` : ""}${dateFilter ? `&date=${dateFilter}` : ""}`);
+      const hits = await api<any[]>(`/search?q=${encodeURIComponent(search)}&k=300${kind ? `&kind=${kind}` : ""}${dateFilter ? `&date=${dateFilter}` : ""}`, "GET", undefined, { timeout: 60_000 });
       if (my !== seq) return;
       grid.set(hits.map((h) => ({ ...h, video: isVideo(h.kind), dur: h.duration || 0, created: h.created || "" })), { months: false, badges: true });
       const kw = hits.filter((h) => h.keyword).length;
@@ -408,7 +409,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   // the brief: what Claude aims for on every edit. Read-only until Edit, so it isn't changed by a stray click.
   const brief = el("section", "brief-box");
   brief.setAttribute("aria-labelledby", "brief-h");
-  const briefH = el("h3", "k-h2", "Brief");
+  const briefH = el("h3", "k-h2 brief-h");  // holds the fold button, so it stays a heading for VoiceOver
   briefH.id = "brief-h";
   const briefBody = el("div", "brief-body");
   const showBrief = () => {
@@ -454,7 +455,8 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   fold.type = "button";
   fold.setAttribute("aria-controls", `brief-${c.id}`);
   const peek = el("span", "brief-peek", c.brief.trim().split("\n")[0]);
-  fold.append(icon("chev"), briefH, peek);
+  fold.append(icon("chev"), el("span", "brief-label", "Brief"), peek);
+  briefH.append(fold);
   const briefMore = el("div", "brief-more");
   briefMore.id = `brief-${c.id}`;
   briefMore.append(el("p", "hint brief-hint", "What Claude works toward whenever it edits this project."), briefBody);
@@ -466,7 +468,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     if (remember) try { localStorage.setItem(foldKey, o ? "1" : "0"); } catch { /* this session only */ }
   };
   fold.onclick = () => setOpen(!open);
-  brief.append(fold, briefMore);
+  brief.append(briefH, briefMore);
   setOpen(open, false);
   showBrief();
 
@@ -762,7 +764,7 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
 }
 async function pollLoop(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean; textContent?: string | null }) {
   btn.disabled = true;
-  const label = kind === "ask" ? btn.textContent : null;  // Ask Claude reads "Working…" while the edit runs
+  const label = kind === "ask" ? "Ask Claude" : null;  // reads "Working…" while the edit runs; a constant, so a restarted poll can't capture "Working…" as the label
   if (label) btn.textContent = "Working…";
   out.className = "ask-out running";
   const row = el("div", "prog-row");
@@ -772,6 +774,7 @@ async function pollLoop(cid: number, kind: PollKind, out: HTMLElement, btn: { di
   let misses = 0;
   for (;;) {
     let j: Job;
+    const act = kind === "ask" ? mediaActivity() : null;  // in parallel with the job, not one after the other
     try { j = await api<Job>(pollUrl(cid, kind)); misses = 0; }
     catch (e) {
       if (!out.isConnected) return;
@@ -784,7 +787,8 @@ async function pollLoop(cid: number, kind: PollKind, out: HTMLElement, btn: { di
     if (j.status === "running") {
       // a drawing bug must not stop the poll: the edit keeps running and the next tick may draw fine
       if (kind === "ask") {
-        try { renderSteps(out, j, await mediaActivity()); } catch (e) { console.warn("live panel:", e); reportError(`live panel: ${errMsg(e)}`, (e as Error)?.stack); }
+        onPillShow(() => go({ type: "col", id: cid }));
+        try { renderSteps(out, j, act ? await act : []); } catch (e) { console.warn("live panel:", e); reportError(`live panel: ${errMsg(e)}`, (e as Error)?.stack); }
       }
       else if (kind !== "export") renderProgress(out, j, cid, kind);
       await sleep(kind === "ask" || kind === "export" ? 1500 : 1000);
@@ -1006,9 +1010,12 @@ let refreshT = 0;
 function refreshProjectSoon() {
   clearTimeout(refreshT);
   refreshT = window.setTimeout(async () => {
-    const keep = project.querySelector(".ask-out")?.cloneNode(true);
+    // keep the finished edit's message across the reload, but copy it INTO the new box: replacing the box would
+    // leave the Ask form holding a detached one, and its next edit would show nothing
+    const keep = document.getElementById("ask-out")?.cloneNode(true) as HTMLElement | undefined;
     await go(view);
-    if (keep) project.querySelector(".ask-out")?.replaceWith(keep);
+    const out = document.getElementById("ask-out");
+    if (keep && out && !polling.has(out)) { out.className = keep.className; out.replaceChildren(...keep.childNodes); }
     loadCollections();
   }, 200);
 }

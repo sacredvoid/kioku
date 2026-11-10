@@ -115,7 +115,7 @@ export class Viewer {
         const ld = new Loader("download", 20); // after the text: firstChild is the label above
         this.loadBtn.append(ld.el);
         try {
-          await api(`/media/${it.uuid}/analyze`, "POST");
+          await api(`/media/${it.uuid}/analyze`, "POST", undefined, { timeout: 600_000 });  // iCloud download + scenes
           if (this.i !== i) return;
           this.show(i); // scenes exist now: re-render info and play
         } catch (e) {

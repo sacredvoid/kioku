@@ -43,10 +43,17 @@ def start_job(cid, kind, target, *args):
             raise HTTPException(409, f"{kind} already running for this project")
         jobs[(cid, kind)] = {"status": "running", "started": time.time()}
     # listed in /media/activity too, so the app's activity center sees every project job without polling each project
-    with library.conn() as c:
-        row = c.execute("select name from collections where id = ?", (cid,)).fetchone()
     key = f"job:{cid}:{kind}"
-    media.stage(key, kind, row[0] if row else f"project {cid}")
+    try:
+        with library.conn() as c:
+            row = c.execute("select name from collections where id = ?", (cid,)).fetchone()
+        media.stage(key, kind, row[0] if row else f"project {cid}")
+        if kind == "ask":  # recorded now, so an engine restart mid-edit leaves a row that says so (see mark_interrupted)
+            jobs[(cid, kind)]["run_id"] = open_run(cid, args[0], jobs[(cid, kind)]["started"])
+    except Exception:
+        jobs.pop((cid, kind), None)  # never leave a "running" job with no thread behind it
+        media.stage(key, None)
+        raise
 
     def run():
         t = time.time()
@@ -67,13 +74,43 @@ def start_job(cid, kind, target, *args):
     return job(cid, kind)
 
 
-def save_run(cid, prompt, j):
-    """Keep a finished Claude edit in ask_runs. Never let history break the job itself."""
+INTERRUPTED = ("Kioku restarted while this edit was running, so it stopped. "
+               "Clips placed so far are kept; press Retry to continue.")
+
+
+def open_run(cid, prompt, started):
+    """The ask_runs row for an edit that just started, status running. Returns its id."""
+    with library.conn() as c:
+        rid = c.execute("insert into ask_runs(collection_id, prompt, status, steps, started) values (?,?,?,?,?)",
+                        (cid, prompt, "running", "[]", started)).lastrowid
+        c.commit()
+    return rid
+
+
+def mark_interrupted():
+    """At engine start: any run still marked running died with the previous engine. Say so instead of hiding it."""
     try:
         with library.conn() as c:
-            c.execute("insert into ask_runs(collection_id, prompt, model, status, steps, output, error, started, finished) "
-                      "values (?,?,?,?,?,?,?,?,?)", (cid, prompt, j.get("model"), j["status"], json.dumps(j.get("steps", [])),
-                                                    j.get("output"), j.get("error"), j.get("started"), time.time()))
+            n = c.execute("update ask_runs set status = 'failed', error = ?, finished = ? where status = 'running'",
+                          (INTERRUPTED, time.time())).rowcount
+            c.commit()
+        if n:
+            log.info("marked %d interrupted edit(s) as failed", n)
+    except Exception:
+        log.exception("could not mark interrupted edits")
+
+
+def save_run(cid, prompt, j):
+    """Finish a Claude edit's ask_runs row (or add one). Never let history break the job itself."""
+    vals = (j.get("model"), j["status"], json.dumps(j.get("steps", [])), j.get("output"), j.get("error"), time.time())
+    try:
+        with library.conn() as c:
+            if j.get("run_id"):
+                c.execute("update ask_runs set model = ?, status = ?, steps = ?, output = ?, error = ?, finished = ? where id = ?",
+                          (*vals, j["run_id"]))
+            else:
+                c.execute("insert into ask_runs(collection_id, prompt, model, status, steps, output, error, finished, started) "
+                          "values (?,?,?,?,?,?,?,?,?)", (cid, prompt, *vals, j.get("started")))
             c.commit()
     except Exception:
         log.exception("could not save ask history for collection %d", cid)

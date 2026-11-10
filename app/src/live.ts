@@ -174,7 +174,11 @@ export function renderLive(out: HTMLElement, j: Job, motif: Element, media: Medi
 // screen (bottom centre) saying what Claude is doing, with a button back to the panel. Hidden while the panel is visible.
 let pill: HTMLElement | null = null, pillFor: HTMLElement | null = null, watched: Element | null = null, panelSeen = true;
 let io: IntersectionObserver | null = null;
+let onShowElsewhere: (() => void) | null = null;
+/** What "Show" does when the edit's project isn't on screen (main.ts: open that project). */
+export function onPillShow(f: () => void) { onShowElsewhere = f; }
 const pillParts = { phase: h("strong"), what: h("span", "pill-what"), time: h("span", "live-time") };
+pillParts.time.setAttribute("aria-hidden", "true");  // a ticking clock inside role=status would be re-announced every tick
 
 function pillEl() {
   if (pill) return pill;
@@ -183,7 +187,12 @@ function pillEl() {
   pill.hidden = true;
   const show = h("button", "pill-show", "Show") as HTMLButtonElement;
   show.type = "button";
-  show.onclick = () => watched?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  show.onclick = () => {
+    const panel = watched as HTMLElement | null;
+    // on another page the panel is hidden (or gone): go to the project first
+    if (!panel?.isConnected || panel.closest("[hidden]")) { if (pillFor) onShowElsewhere?.(); return; }
+    panel.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  };
   pill.append(h("span", "live-spin"), h("span", "pill-kicker", "Claude is editing"), pillParts.phase, pillParts.what, pillParts.time, show);
   document.body.append(pill);
   return pill;
@@ -194,7 +203,7 @@ function updatePill(out: HTMLElement, root: Element, phase: string, what: string
   pillFor = out;
   if (watched !== root) {  // a rebuilt panel: watch the new one
     io?.disconnect();
-    io = new IntersectionObserver(([e]) => { panelSeen = e.isIntersecting; if (pill && pillFor) pill.hidden = panelSeen; }, { threshold: 0.15 });
+    io = new IntersectionObserver((es) => { panelSeen = es[es.length - 1].isIntersecting; if (pill && pillFor) pill.hidden = panelSeen; }, { threshold: 0.15 });
     io.observe(root);
     watched = root;
   }
