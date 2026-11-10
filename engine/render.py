@@ -958,8 +958,13 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
             if tl.texts:  # titles and captions share one overlay stream, so the finish pass keeps one overlay input
                 import titles
                 prog.stage("Titles")
+                seg_files = list(zip(sel, files))
+
+                def at(f):  # the rendered clip file and frame that show output frame f, so texts can see what is under them
+                    return next(((str(p), f - s.start_frame) for s, p in seg_files if s.start_frame <= f < s.start_frame + s.frames), None)
                 cap_file = titles.build(tl, dims, work, wsec, cap,
-                                        avoid_bottom=bool(cap_file) and spec["captions"].get("position", "bottom") == "bottom")
+                                        avoid_bottom=bool(cap_file) and spec["captions"].get("position", "bottom") == "bottom",
+                                        at=at, warnings=warnings)
             # 5. join levels, then the finish pass
             if mode == "preview":
                 rdir.mkdir(parents=True, exist_ok=True)
