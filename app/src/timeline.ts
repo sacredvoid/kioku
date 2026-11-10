@@ -12,7 +12,7 @@ export type Deps = {
   go: (...a: any[]) => unknown;
   viewer: { start(items: Item[], i: number): unknown };
   onCaptions?: () => void;   // a clip's captions flag changed: let main.ts start its transcription poll
-  footer?: HTMLElement;   // the project's render row (Captions / Preview / Render / Export)
+  captions?: HTMLElement; // the project's caption settings (main.ts owns them), shown in the inspector's Captions section
 };
 
 type TItem = Item & { item_id: number; pos: number };
@@ -102,6 +102,7 @@ class Editor {
   // dom
   stage = el("div", "tl-stage");
   insp = el("aside", "tl-insp");
+  closed = new Set<string>();  // inspector sections the user folded, kept across re-renders
   bar = el("div", "tl-bar");
   playB!: HTMLButtonElement; tcOut = el("span", "tl-tc", "00:00.00"); roughB!: HTMLButtonElement; exactB!: HTMLButtonElement;
   wrap = el("div", "tl-wrap");
@@ -120,7 +121,6 @@ class Editor {
   tools = el("div", "tl-tools");
   totals = el("span", "tl-totals muted");
   zoomIn!: HTMLInputElement; snapB!: HTMLButtonElement;
-  foot = el("div", "tl-footer");
   strip = el("div", "tl-panel");
   pop = el("div", "tl-pop");
   snd!: HTMLElement;
@@ -546,8 +546,8 @@ class Editor {
     this.strip.hidden = true;
     this.strip.setAttribute("role", "region");
     this.strip.setAttribute("aria-label", "Clip picker");
-    r.append(top, this.wrap, this.tools, this.strip, this.snd, this.foot);
-    if (this.deps.footer) this.foot.append(this.deps.footer);
+    // toolbar sits above the tracks (Resolve/FCP); pickers open below them
+    r.append(top, this.tools, this.wrap, this.strip, this.snd);
     this.renderSnap();
     this.renderPlay();
     this.root.addEventListener("pointerdown", (e) => { if (!this.pop.hidden && !this.pop.contains(e.target as Node) && !(e.target as HTMLElement).closest(".tl-seam")) this.pop.hidden = true; });
@@ -1200,6 +1200,15 @@ class Editor {
       return [i, out];
     };
     const check = (on: boolean, commit: (v: boolean) => void) => { const i = document.createElement("input"); i.type = "checkbox"; i.checked = on; i.onchange = () => commit(i.checked); return i; };
+    // collapsible sections, FCP-inspector style; fold state survives re-renders
+    const sec = (name: string) => {
+      const d = el("details", "tl-sec");
+      d.open = !this.closed.has(name);
+      d.ontoggle = () => { if (d.open) this.closed.delete(name); else this.closed.add(name); };
+      d.append(el("summary", "", name));
+      return d;
+    };
+    const addSecs = (...ds: HTMLDetailsElement[]) => ds.forEach((d) => { if (d.children.length > 1) f.append(d); });
     const sel = this.sel;
     if (sel?.kind === "clip") {
       const k = this.items.findIndex((i) => i.item_id === sel.id), it = this.items[k];
@@ -1208,12 +1217,13 @@ class Editor {
         const head = el("div", "tl-ih");
         head.append(el("strong", "", `Clip ${k + 1}`), el("span", "muted tl-in", this.clipName(it)));
         f.append(head);
+        const sVid = sec("Video"), sTime = sec("Timing"), sCol = sec("Color"), sFx = sec("Effects"), sAud = sec("Audio");
         if (it.video) {
           const s = document.createElement("select");
           s.setAttribute("aria-label", "Speed");
           SPEEDS.forEach((v) => s.append(new Option(`${v}x`, String(v), false, v === (fx.speed ?? 1))));
           s.onchange = () => this.patchClip(id, { speed: Number(s.value) }, "Change speed");
-          f.append(row("Speed", s));
+          sTime.append(row("Speed", s));
         }
         const look = document.createElement("select");
         look.setAttribute("aria-label", "Look");
@@ -1222,16 +1232,16 @@ class Editor {
         (this.model.edit.options.looks ?? []).forEach((l) => look.append(new Option(l, l)));
         look.value = cur;
         look.onchange = () => this.patchClip(id, { look: look.value === "" ? null : look.value }, "Change look");
-        f.append(row("Look", look));
-        if (fx.look?.name) f.append(row("Strength", range(0, 1, .05, fx.look.strength, (v) => this.patchClip(id, { look_strength: v }, "Change look strength"))));
+        sCol.append(row("Look", look));
+        if (fx.look?.name) sCol.append(row("Strength", range(0, 1, .05, fx.look.strength, (v) => this.patchClip(id, { look_strength: v }, "Change look strength"))));
         if (it.video) {
-          f.append(row("Volume", range(0, 2, .05, fx.volume ?? 1, (v) => this.patchClip(id, { volume: v }, "Change volume"), (v) => `${Math.round(v * 100)}%`)));
-          f.append(row("Mute", check(!!fx.mute, (v) => this.patchClip(id, { mute: v }, "Mute clip"))));
+          sAud.append(row("Volume", range(0, 2, .05, fx.volume ?? 1, (v) => this.patchClip(id, { volume: v }, "Change volume"), (v) => `${Math.round(v * 100)}%`)));
+          sAud.append(row("Mute", check(!!fx.mute, (v) => this.patchClip(id, { mute: v }, "Mute clip"))));
           const cc = this.capClips.find((c) => c.item_id === id);
           const note = !cc ? "" : cc.speech === "speech" ? (cc.lang ?? "speech") : cc.speech === "no speech" ? "no speech" : "pending";
-          f.append(row("Captions", check(!!fx.captions, (v) => this.patchClip(id, { captions: v }, "Change captions")), note));
+          sAud.append(row("Captions", check(!!fx.captions, (v) => this.patchClip(id, { captions: v }, "Change captions")), note));
           const rf = fx.reframe ?? {};
-          f.append(row("Reframe", range(0, 1, .02, rf.pos ?? .5, (v) => this.patchClip(id, { reframe_mode: "manual", reframe_pos: v }, "Reframe clip"), (v) => `${Math.round(v * 100)}%`)));
+          sVid.append(row("Reframe", range(0, 1, .02, rf.pos ?? .5, (v) => this.patchClip(id, { reframe_mode: "manual", reframe_pos: v }, "Reframe clip"), (v) => `${Math.round(v * 100)}%`)));
         }
         const pick = (labels: Record<string, string>, vals: string[], cur: string, aria: string, commit: (v: string) => void) => {
           const s = document.createElement("select");
@@ -1242,32 +1252,33 @@ class Editor {
           return s;
         };
         const o = this.model.edit.options, synced = !!this.spec.sync?.track;
-        f.append(row("Motion", pick(MOTION_LABEL, o.motions ?? ["none"], fx.motion ?? "none", "Motion", (v) => this.patchClip(id, { motion: v }, "Change motion"))));
-        if (fx.motion) f.append(row("Amount", range(0, 1, .05, fx.motion_amount ?? .35, (v) => this.patchClip(id, { motion_amount: v }, "Change motion amount"), (v) => `${(1 + .3 * v).toFixed(2)}x`)));
-        f.append(row("Flash", check(!!fx.flash, (v) => this.patchClip(id, { flash: v }, "Change flash"))));
+        sVid.append(row("Motion", pick(MOTION_LABEL, o.motions ?? ["none"], fx.motion ?? "none", "Motion", (v) => this.patchClip(id, { motion: v }, "Change motion"))));
+        if (fx.motion) sVid.append(row("Amount", range(0, 1, .05, fx.motion_amount ?? .35, (v) => this.patchClip(id, { motion_amount: v }, "Change motion amount"), (v) => `${(1 + .3 * v).toFixed(2)}x`)));
+        sFx.append(row("Flash", check(!!fx.flash, (v) => this.patchClip(id, { flash: v }, "Change flash"))));
         if (synced) {
-          f.append(row("Shake", check(!!fx.shake, (v) => this.patchClip(id, { shake: v }, "Change shake")), "on each beat"));
+          sFx.append(row("Shake", check(!!fx.shake, (v) => this.patchClip(id, { shake: v }, "Change shake")), "on each beat"));
           const b = document.createElement("input");
           b.type = "number"; b.min = "0"; b.max = "32"; b.step = "1"; b.value = String(fx.beats ?? 0);
           b.setAttribute("aria-label", "Length in beats, 0 = from its trim");
           b.onchange = () => this.patchClip(id, { beats: clamp(Math.round(Number(b.value) || 0), 0, 32) }, "Change beats");
-          f.append(row("Beats", b, fx.beats ? "" : "auto"));
+          sTime.append(row("Beats", b, fx.beats ? "" : "auto"));
         }
         if (it.video) {
-          f.append(row("Ramp", pick(RAMP_LABEL, o.ramps ?? ["none"], fx.ramp ?? "none", "Speed ramp", (v) => this.patchClip(id, { ramp: v }, "Change speed ramp")), fx.ramp ? "own sound off" : ""));
+          sTime.append(row("Ramp", pick(RAMP_LABEL, o.ramps ?? ["none"], fx.ramp ?? "none", "Speed ramp", (v) => this.patchClip(id, { ramp: v }, "Change speed ramp")), fx.ramp ? "own sound off" : ""));
           if (synced) {
             const l = this.lay[k], at = round2((it.t0 ?? 0) + (this.player.time - (l?.start ?? 0)) * this.speedOf(id));
             const hitActs = el("div", "tl-acts");
             hitActs.append(btn("Hit at playhead", "", () => this.patchClip(id, { hit: at }, "Set beat hit"), "Land the moment under the playhead on a beat"));
             if (fx.hit != null) hitActs.append(btn(`Clear hit (${fx.hit.toFixed(2)}s)`, "ghost", () => this.patchClip(id, { hit: -1 }, "Clear beat hit")));
-            f.append(hitActs);
+            sTime.append(hitActs);
           }
         }
         const adj = el("details", "tl-adj");
         adj.append(el("summary", "", "Adjust"));
         for (const [key, label, lo, hi, step, def] of ADJ) adj.append(row(label, range(lo, hi, step, fx.adjust?.[key as "exposure"] ?? def, (v) => this.patchClip(id, { [key]: v }, `Adjust ${label.toLowerCase()}`))));
         if (fx.adjust && Object.keys(fx.adjust).length) adj.open = true;
-        f.append(adj);
+        sCol.append(adj);
+        addSecs(sVid, sTime, sCol, sFx, sAud);
         const acts = el("div", "tl-acts");
         acts.append(btn("Swap…", "", () => this.openStrip("swap")), btn("Split", "", () => this.splitAtPlayhead()), btn("Remove", "ghost danger", () => this.deleteClip(id)));
         f.append(acts);
@@ -1293,8 +1304,9 @@ class Editor {
       const head = el("div", "tl-ih");
       head.append(el("strong", "", "Project"), el("span", "muted tl-in", this.c.name));
       f.append(head);
-      f.append(row("Clip sound", range(0, 1, .05, this.spec.clip_volume ?? 1, (v) => this.patchEdit({ clip_volume: v }, "Change clip sound", { clip_volume: this.spec.clip_volume ?? 1 }), (v) => `${Math.round(v * 100)}%`)));
-      f.append(row("Duck under voiceover", check(!!this.spec.duck, (v) => this.patchEdit({ duck: v }, "Change ducking", { duck: !v }))));
+      const sAud = sec("Audio"), sBeat = sec("Beat sync"), sTx = sec("Titles"), sCap = sec("Captions");
+      sAud.append(row("Clip sound", range(0, 1, .05, this.spec.clip_volume ?? 1, (v) => this.patchEdit({ clip_volume: v }, "Change clip sound", { clip_volume: this.spec.clip_volume ?? 1 }), (v) => `${Math.round(v * 100)}%`)));
+      sAud.append(row("Duck", check(!!this.spec.duck, (v) => this.patchEdit({ duck: v }, "Change ducking", { duck: !v })), "lower clip sound under music"));
       const sy = this.spec.sync ?? { track: null, grid: "beat", lead: 1 };
       const st = document.createElement("select");
       st.setAttribute("aria-label", "Cut to the beat of");
@@ -1302,18 +1314,17 @@ class Editor {
       this.tracks().forEach((t) => st.append(new Option(base(t.path), t.id)));
       st.value = sy.track ?? "none";
       st.onchange = () => this.patchEdit({ sync_track: st.value }, "Change beat sync", { sync_track: sy.track ?? "none" });
-      f.append(row("Cut to beat", st, this.tracks().length ? "" : "add music first"));
+      sBeat.append(row("Cut to", st, this.tracks().length ? "" : "add music first"));
       if (sy.track) {
         const gs = document.createElement("select");
         gs.setAttribute("aria-label", "Beat grid");
         ([["beat", "Every beat"], ["half", "Every 2nd beat"], ["downbeat", "Bars"]] as const).forEach(([v, l]) => gs.append(new Option(l, v)));
         gs.value = sy.grid;
         gs.onchange = () => this.patchEdit({ sync_grid: gs.value }, "Change beat grid", { sync_grid: sy.grid });
-        f.append(row("Grid", gs));
-        f.append(row("Cut early", range(0, 3, 1, sy.lead, (v) => this.patchEdit({ sync_lead: v }, "Change cut lead", { sync_lead: sy.lead }), (v) => `${v} fr`)));
+        sBeat.append(row("Grid", gs));
+        sBeat.append(row("Cut early", range(0, 3, 1, sy.lead, (v) => this.patchEdit({ sync_lead: v }, "Change cut lead", { sync_lead: sy.lead }), (v) => `${v} fr`)));
       }
       const tx = el("div", "tl-texts");
-      tx.append(el("span", "tl-fl", "Texts"));
       for (const t of this.spec.texts ?? []) {
         const r = el("div", "tl-text");
         const inp = document.createElement("input");
@@ -1326,13 +1337,17 @@ class Editor {
         tp.value = t.template;
         tp.onchange = () => this.putText(t.id, { template: tp.value }, { template: t.template }, "Change text style");
         const at = btn(`${t.start.toFixed(1)}s`, "ghost", () => this.seek(t.start), "Jump to this text");
-        r.append(inp, tp, at, btn("Remove", "ghost danger", () => this.removeText(t), "Remove this text"));
+        const rm = btn("", "ghost icon danger", () => this.removeText(t), "Remove this text");
+        rm.append(icon("close"));
+        r.append(inp, tp, at, rm);
         tx.append(r);
       }
       const ta = el("div", "tl-acts");
       ta.append(btn("Add text at playhead", "", () => this.addText()));
       tx.append(ta);
-      f.append(tx);
+      sTx.append(tx);
+      if (this.deps.captions) sCap.append(this.deps.captions);
+      addSecs(sAud, sBeat, sTx, sCap);
       f.append(el("p", "muted tl-hint", "Click a clip to edit it. Drag to reorder, drag its edges to trim, click a seam for a transition, press S to split."));
     }
     this.insp.replaceChildren(f);
@@ -1447,12 +1462,12 @@ const round2 = (v: number) => Math.round(v * 100) / 100;
 let ed: Editor | null = null;
 
 export const timeline = {
-  /** Idempotent. Same cid already mounted: re-attach to the new host/footer and sync, nothing else rebuilt. */
+  /** Idempotent. Same cid already mounted: re-attach to the new host and sync, nothing else rebuilt. */
   mount(host: HTMLElement, cid: number, c: Collection, items: Item[], deps: Deps) {
     if (ed && ed.cid === cid) {
       ed.deps = deps; ed.c = c;
       if (ed.root.parentElement !== host) host.append(ed.root);
-      if (deps.footer && ed.foot.firstChild !== deps.footer) ed.foot.replaceChildren(deps.footer);
+      ed.renderInspector();  // picks up the new captions panel
       ed.sync();
       return;
     }

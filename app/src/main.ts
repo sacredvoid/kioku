@@ -473,8 +473,16 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   showBrief();
 
   const ask = el("form", "ask") as HTMLFormElement;
-  const askIn = document.createElement("input");
+  // textarea that grows with the text, so a long ask stays readable while typing
+  const askIn = document.createElement("textarea");
   askIn.id = "ask";
+  askIn.rows = 1;
+  const fit = () => { askIn.style.height = "auto"; askIn.style.height = `${askIn.scrollHeight}px`; };
+  askIn.addEventListener("input", fit);
+  // Enter sends, Shift+Enter adds a line (skip while an IME is composing)
+  askIn.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask.requestSubmit(); }
+  });
   // describe what to type for THIS project instead of a made-up example
   askIn.placeholder = items.length
     ? "Ask for a change: shorter, slower, swap a shot, more of something"
@@ -494,6 +502,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
     try {
       await api(`/collections/${c.id}/ask`, "POST", { prompt });
       askIn.value = "";
+      fit();
       pollJob(c.id, "ask", askOut, askBtn);
     } catch (err) { askOut.className = "ask-out failed"; askOut.textContent = `Couldn't start: ${errMsg(err)}`; }
   });
@@ -508,46 +517,48 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   };
 
   // render row: captions toggle, quick preview, finished video
-  const capLabel = el("label", "cap-toggle");
+  // captions: an on/off row plus style rows, shown in the timeline inspector's Captions section
+  const capLabel = el("label", "tl-f");
   const capBox = document.createElement("input");
   capBox.type = "checkbox";
-  capLabel.append(capBox, document.createTextNode(" Captions"));
+  capLabel.append(el("span", "tl-fl", "Show"), capBox);
   const prevBtn = el("button", "", "Preview") as HTMLButtonElement;
+  prevBtn.title = "Render 10 s around the playhead (Shift-click: the whole edit)";
   const rendBtn = el("button", "primary", "Render video") as HTMLButtonElement;
   prevBtn.type = rendBtn.type = "button";
   prevBtn.disabled = rendBtn.disabled = !items.length;
-  const renderRow = el("div", "proj-meta render-row");
-  renderRow.append(capLabel, el("span", "spacer"), prevBtn, rendBtn);
-  // caption style row: only while captions are on
+  // style rows: only while captions are on
   const capStyle = el("div", "cap-style");
   capStyle.hidden = true;
+  const capPanel = el("div", "cap-panel");
+  capPanel.append(capLabel, capStyle);
   const capInputs: Record<string, HTMLInputElement | HTMLSelectElement> = {};
   const capField = (key: string, label: string, input: HTMLInputElement | HTMLSelectElement, send: () => string | number | boolean) => {
     capInputs[key] = input;
     input.onchange = () => api(`/collections/${c.id}/edit`, "PATCH", { [`caption_${key}`]: send() }).then(() => syncCaptions()).catch((e) => { fail("change the caption style")(e); syncCaptions(); });
-    const l = el("label", "", label);
-    l.append(input);
+    const l = el("label", "tl-f");
+    l.append(el("span", "tl-fl", label), input);
     capStyle.append(l);
   };
-  const capSel = (key: string, label: string, opts: string[]) => {
+  const capSel = (key: string, label: string, opts: string[], names: Record<string, string> = {}) => {
     const sel = document.createElement("select");
-    opts.forEach((o) => sel.append(new Option(o, o)));
+    opts.forEach((o) => sel.append(new Option(names[o] ?? o[0].toUpperCase() + o.slice(1), o)));
     capField(key, label, sel, () => sel.value);
   };
   const capIn = (key: string, label: string, type: "color" | "checkbox" | "number") => {
     const inp = document.createElement("input");
     inp.type = type;
-    if (type === "number") { inp.min = "0"; inp.max = "12"; inp.title = "Words per line, 0 fits the frame"; }
+    if (type === "number") { inp.min = "0"; inp.max = "12"; inp.title = "Words per line, 0 fits the frame"; inp.placeholder = "auto"; }
     capField(key, label, inp, () => type === "checkbox" ? inp.checked : type === "number" ? Number(inp.value) : inp.value);
   };
   capSel("style", "Style", ["bold", "box", "pop"]);
   capSel("position", "Position", ["bottom", "middle", "top"]);
   capSel("font", "Font", ["arial", "impact", "georgia", "verdana", "trebuchet", "rounded", "courier"]);
-  capSel("size", "Size", ["S", "M", "L"]);
-  capIn("color", "Color", "color");
-  capIn("highlight_color", "Highlight", "color");
-  capIn("highlight", "Highlight spoken word", "checkbox");
-  capIn("uppercase", "Uppercase", "checkbox");
+  capSel("size", "Size", ["S", "M", "L"], { S: "Small", M: "Medium", L: "Large" });
+  capIn("color", "Text color", "color");
+  capIn("highlight", "Karaoke", "checkbox");
+  capIn("highlight_color", "Karaoke color", "color");
+  capIn("uppercase", "All caps", "checkbox");
   capIn("max_words", "Words/line", "number");
   const capOut = el("div", "ask-out"), prevOut = el("div", "ask-out"), finOut = el("div", "ask-out");
   const startRender = (kind: "preview" | "final", out: HTMLElement, btn: HTMLButtonElement) => async (ev?: MouseEvent) => {
@@ -588,12 +599,13 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
 
   const tlHost = el("div", "tl-host");
 
-  // the editor replaces the clip list; the render row (captions, preview, render) becomes its footer
-  if (items.length) timeline.mount(tlHost, c.id, c, items, { toast, fail, go: () => go(view), viewer, footer: renderRow, onCaptions: () => syncCaptions() });
-  else { timeline.unmount(); tlHost.append(renderRow); }
+  // the editor replaces the clip list; caption settings live in its inspector
+  if (items.length) timeline.mount(tlHost, c.id, c, items, { toast, fail, go: () => go(view), viewer, captions: capPanel, onCaptions: () => syncCaptions() });
+  else timeline.unmount();
 
+  // deliver row, like FCP's Share: export, preview, render together above the editor
   const meta = el("div", "proj-meta");
-  meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), exp);
+  meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), exp, prevBtn, rendBtn);
 
   // Claude panel: live steps of a running edit, then one compact line that opens into every past edit
   const runs = el("section", "runs");
@@ -606,7 +618,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   // job status (render, preview, export, captions) sits above the player, where you look, not under the audio section
   const jobs = el("div", "proj-jobs");
   jobs.append(finOut, prevOut, expOut, capOut);
-  project.replaceChildren(brief, ask, claude, meta, jobs, tlHost, capStyle, audio);
+  project.replaceChildren(brief, ask, claude, meta, jobs, tlHost, audio);
   $("grid").style.display = "none"; // project shows the clip list instead of the grid
   askOut.id = "ask-out";
   api<Job>(`/collections/${c.id}/ask`).then((j) => {
@@ -632,7 +644,7 @@ type EditAudio = { spec: { audio: Track[]; clip_volume: number; duck: boolean; c
 async function loadAudio(cid: number, box: HTMLElement) {
   let ed: EditAudio;
   try { ed = await api<EditAudio>(`/collections/${cid}/edit`); } catch { return; }  // the edit panel is optional: no engine, no panel
-  const { audio, clip_volume, duck } = ed.spec;
+  const { audio } = ed.spec;
   const refresh = () => loadAudio(cid, box).then(() => timeline.sync());
   const put = (id: string, body: object) => api(`/collections/${cid}/edit/audio/${encodeURIComponent(id)}`, "PUT", body).then(refresh).catch((e) => { fail("save the audio")(e); refresh(); });
   const head = el("div", "proj-meta");
@@ -684,24 +696,13 @@ async function loadAudio(cid: number, box: HTMLElement) {
       vol, pct, rm);
     list.append(li);
   }
-  const lvl = el("label", "cap-toggle");
-  const clipVol = document.createElement("input");
-  clipVol.type = "range"; clipVol.min = "0"; clipVol.max = "1"; clipVol.step = "0.05"; clipVol.value = String(clip_volume);
-  clipVol.onchange = () => api(`/collections/${cid}/edit`, "PATCH", { clip_volume: Number(clipVol.value) }).catch(fail("save the clip sound level"));
-  lvl.append("Clip sound ", clipVol);
-  const duckBox = document.createElement("input");
-  duckBox.type = "checkbox"; duckBox.checked = duck;
-  duckBox.onchange = () => api(`/collections/${cid}/edit`, "PATCH", { duck: duckBox.checked }).catch(fail("save ducking"));
-  const duckL = el("label", "cap-toggle");
-  duckL.append(duckBox, " Lower clip sound under audio");
-  const mix = el("div", "proj-meta");
-  mix.append(lvl, duckL);
+  // clip sound and ducking live in the timeline inspector (Audio section)
   // the path field is the fallback; Music & sounds under the timeline and Finder drops are the main ways in
   const more = el("details", "audio-more");
   more.append(el("summary", "", "Add a file by path"), addRow);
   const credits = el("div", "credits");
   credits.hidden = true;
-  box.replaceChildren(head, ...(audio.length ? [list, mix] : []), credits, more);
+  box.replaceChildren(head, ...(audio.length ? [list] : []), credits, more);
   api<{ credits: { title: string; creator: string; needs_credit: boolean }[]; text: string; required: boolean }>(`/collections/${cid}/credits`)
     .then((c) => {
       if (!c.required) return;

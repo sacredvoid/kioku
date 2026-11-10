@@ -3,10 +3,10 @@
 
 .tl { display: flex; flex-direction: column; gap: 10px; min-height: calc(100vh - 230px); opacity: .6; transition: opacity .3s var(--ease) }
 .tl.ready { opacity: 1 }
-.tl-top { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; align-items: start }
-@media (max-width: 1100px) { .tl-top { grid-template-columns: minmax(0, 1fr) } }
+.tl-top { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; align-items: stretch }
+@media (max-width: 1100px) { .tl-top { grid-template-columns: minmax(0, 1fr) } .tl-insp { contain: none; max-height: 50vh } }
 .tl-left { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; box-shadow: var(--shadow) }
-.tl-stage { position: relative; aspect-ratio: 16 / 9; max-height: 34vh; width: 100%; margin: 0 auto; background: #0d0c1c; color: #fff; display: grid; place-items: center; overflow: hidden }
+.tl-stage { position: relative; aspect-ratio: 16 / 9; max-height: 46vh; width: 100%; margin: 0 auto; background: #0d0c1c; color: #fff; display: grid; place-items: center; overflow: hidden }
 .tl-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-top: 1px solid var(--line-soft) }
 .tl-tc { font: 12.5px var(--mono); color: var(--text-2); margin-left: 8px }
 .tl-play { background: var(--accent-fill) !important; color: var(--on-accent) }
@@ -17,11 +17,22 @@
 .tl-pill.on { opacity: 1; transform: none }
 
 /* inspector */
-.tl-insp { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); max-height: 34vh; overflow: auto;
+/* contain: size = the player sets the row height and the inspector scrolls inside it, FCP-style */
+.tl-insp { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); contain: size; min-height: 0; overflow: auto;
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px) }
 .tl-ih { display: flex; flex-direction: column; line-height: 1.25; margin-bottom: 2px }
 .tl-in { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.tl-f { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px }
+.tl-sec { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line-soft); padding-top: 8px }
+.tl-sec > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3) }
+.tl-sec > summary::-webkit-details-marker { display: none }
+.tl-sec > summary::before { content: "›"; display: inline-block; width: 8px; font-size: 13px; transition: transform .15s var(--ease) }
+.tl-sec[open] > summary::before { transform: rotate(90deg) }
+.tl-sec > summary:hover { color: var(--text-2) }
+.cap-panel, .cap-style { display: flex; flex-direction: column; gap: 8px }
+.cap-style[hidden] { display: none }
+.tl-f input[type="color"] { justify-self: start; width: 34px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer }
+.tl-f input[type="number"] { justify-self: start; width: 5em }
+.tl-f { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px }
 .tl-fl { color: var(--text-2) }
 .tl-fv { font: 11.5px var(--mono); color: var(--text-3); min-width: 38px; text-align: right }
 .tl-fn { grid-column: 2 / -1; margin-top: -4px; font-size: 11.5px }
@@ -117,8 +128,6 @@
 .tl-tile-img { display: block; width: 120px; height: 68px; background-repeat: no-repeat; background-color: var(--surface-3) }
 .tl-tile-len { display: block; padding: 3px 6px; font: 10.5px var(--mono); color: var(--text-2) }
 
-.tl-footer { margin-top: 2px }
-.tl-footer > * { margin: 0 }
 
 /* buttons inside the editor share the app's pill look */
 .tl-tools button, .tl-acts button, .tl-panel button:not(.tl-tile):not(.chip), .tl-pop button:not(.chip) {
@@ -131,6 +140,10 @@
 .tl-tools button.danger, .tl-acts button.danger { color: var(--danger) }
 .tl-panel .chip { padding: 5px 12px; cursor: pointer }
 .tl-chips .chip { padding: 5px 11px; cursor: pointer }
-.tl-texts { display: grid; gap: 6px; margin-top: 6px; font-size: 12.5px }
-.tl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center }
-.tl-text input[type="text"], .tl-text select { min-width: 0 }
+.tl-texts { display: grid; gap: 8px; font-size: 12.5px }
+/* one title = text on its own line, then style · time · remove */
+.tl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--line-soft) }
+.tl-text input[type="text"] { grid-column: 1 / -1; min-width: 0; background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 6px 9px; outline: 0 }
+.tl-text input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft) }
+.tl-text select { min-width: 0 }
+.tl-text button { font: 11.5px var(--mono) }
