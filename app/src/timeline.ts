@@ -1413,6 +1413,12 @@ class Editor {
       fs.value = fin.preset;
       fs.onchange = () => this.patchEdit({ finish: fs.value }, "Change finish", { finish: fin.preset });
       sFin.append(row("Finish", fs));
+      const ts = document.createElement("select"), curTs = this.spec.format.text_style ?? "none";  // presets were Claude-only
+      ts.setAttribute("aria-label", "Text style");
+      ["none", ...Object.keys(this.model.edit.options.text_styles ?? {})].forEach((v) => ts.append(new Option(v === "none" ? "None" : v[0].toUpperCase() + v.slice(1), v)));
+      ts.value = curTs;
+      ts.onchange = () => this.patchEdit({ text_style: ts.value }, "Change text style", { text_style: curTs });
+      sFin.append(row("Text style", ts, "fonts and colours for every title"));
       if (fin.preset !== "none") sFin.append(row("Strength", range(0, 1, .05, fin.strength, (v) => this.patchEdit({ finish_strength: v }, "Change finish strength", { finish_strength: fin.strength }))));
       sAud.append(row("Clip sound", range(0, 1, .05, this.spec.clip_volume ?? 1, (v) => this.patchEdit({ clip_volume: v }, "Change clip sound", { clip_volume: this.spec.clip_volume ?? 1 }), (v) => `${Math.round(v * 100)}%`)));
       sAud.append(row("Duck", check(!!this.spec.duck, (v) => this.patchEdit({ duck: v }, "Change ducking", { duck: !v })), "lower clip sound under music"));
