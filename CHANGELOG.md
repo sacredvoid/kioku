@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.0 (2026-11-10)
+
+- Ask: treat polite requests (can you make, I'd like a video of) as edits, not searches
+- Creative direction composer on the home page; skill asks before it searches
+- Creative direction questions grounded in the library; reference links via yt-dlp
+- Skill: one workflow for the full editing kit
+- Texts section in the project inspector: add at playhead, edit, style, remove
+- Titles: animated text templates, bundled OFL fonts, film LUT looks
+- Declare pyobjc-framework-vision (OCR, moments) instead of relying on osxphotos pulling it in
+- Phase 4: style reference analysis, planner, MCP tools and skill section
+- Skill: find moments before cutting
+- moments: brief match from stored scene embeddings (1 fps frame embedding took 40 s per clip)
+- Rhythm in the timeline, MCP tools and skill
+- moments: routes and find_moments MCP tool
+- moments: signals, fusion and tests (ffmpeg stats, Vision, SoundAnalysis)
+- Beat sync, hits, motion, punch, shake, flash, speed ramps, more transitions, seam sounds
+- Design: rhythm, motion, moments, titles, style references
+
 ## v0.4.0 (2026-11-10)
 
 - Four more background arts: Harmonograph, Moire, Truchet, Lattice
