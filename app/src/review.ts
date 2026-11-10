@@ -250,7 +250,7 @@ function tile(it: DraftItem): HTMLElement {
   peek.type = "button";
   peek.tabIndex = -1;
   peek.setAttribute("aria-label", "Open in the viewer (V)");
-  w.append(b, x, el("span", "why", it.why || it.query || ""), peek);
+  w.append(b, x, el("span", "r-why", it.why || it.query || ""), peek);
   if (isNew(it)) w.append(el("span", "new-dot"));
   if (isVideo(it.kind)) w.append(el("span", "dur", fmtDur(it.duration || 0)));
   paint(w, it);
