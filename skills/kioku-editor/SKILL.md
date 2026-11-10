@@ -72,10 +72,11 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 ## 6. Motion, seams, sound
 
-- **Motion** (`set_clip_fx`): snappy edits give most shots `push` or `drift-left` / `drift-right` at `motion_amount` 0.3 to 0.5, and photos always move. Calm: `push` 0.2 to 0.3 on some shots.
+- **Motion** (`set_clip_fx`): moves ease in and out, so small amounts read. Snappy edits give most shots `push` or `drift-left` / `drift-right` at `motion_amount` 0.25 to 0.4, and photos always move. Calm: `push` 0.2 to 0.3 on some shots.
 - **Accents**, peaks only and at most one per shot: `punch` on 1 to 3 shots, `flash` on the drop or the single biggest moment, `shake` on 1 or 2 hard hits, `ramp="slow-mid"` on one hero action shot (its own sound goes silent).
 - **Seams** (`set_transition`): mostly hard cuts.
-  - Snappy: `whip-left` / `whip-right` / `zoom-in` with `sfx="whoosh"` for a change of place, `flash-white` into the drop, `sfx="hit"` on a hard cut at the drop. Not every seam needs a sound; 3-5 sounds in 30 s is plenty.
+  - Snappy: a whip or `zoom-in` with `sfx="whoosh"` for a change of place, `flash-white` into the drop, `sfx="hit"` on a hard cut at the drop. Not every seam needs a sound; 3-5 sounds in 30 s is plenty.
+  - Whips (`whip-left` / `-right` / `-up` / `-down`) are blurred slides, 0.2 to 0.3 s, always with `whoosh`, at most one per 8 to 10 s. The name is where the picture moves: follow the motion at the end of the outgoing shot (a pan to the right moves the picture left, so `whip-left`). No motion to follow: hard cut instead.
   - Calm: `dissolve` 0.4 to 0.6 s between places, no transition inside one scene, never whips or wipes.
 - Unsynced transitions shorten the total; recheck with `get_edit`.
 

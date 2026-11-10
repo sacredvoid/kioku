@@ -18,7 +18,7 @@ export type CaptionConfig = {
 export type Look = { name: string | null; strength: number };
 
 export type TransitionType = "cut" | "dissolve" | "fade-black" | "wipe-left" | "wipe-right" | "slide-left" | "slide-up" | "zoom-in"
-  | "whip-left" | "whip-right" | "flash-white" | "blur" | "circle" | "squeeze";
+  | "whip-left" | "whip-right" | "whip-up" | "whip-down" | "flash-white" | "blur" | "circle" | "squeeze";
 export type Motion = "none" | "push" | "pull" | "drift-left" | "drift-right" | "punch";
 export type Ramp = "none" | "slow-mid" | "fast-in" | "slow-out";
 export type Sfx = "whoosh" | "hit" | "riser";

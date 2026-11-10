@@ -44,8 +44,10 @@ CAPTIONS_DEFAULT = {"on": False, "style": "bold", "position": "bottom", "font": 
                     "highlight_color": "#FFD400", "highlight": False, "uppercase": False, "max_words": 0}
 XFADE = {"dissolve": "fade", "fade-black": "fadeblack", "wipe-left": "wipeleft",
          "wipe-right": "wiperight", "slide-left": "slideleft", "slide-up": "slideup", "zoom-in": "zoomin",
-         "whip-left": "smoothleft", "whip-right": "smoothright", "flash-white": "fadewhite", "blur": "hblur",
-         "circle": "circleopen", "squeeze": "squeezeh"}
+         "whip-left": "whipleft", "whip-right": "whipright", "whip-up": "whipup", "whip-down": "whipdown",
+         "flash-white": "fadewhite", "blur": "hblur", "circle": "circleopen", "squeeze": "squeezeh"}  # whip*: render.WHIPS
+MAX_WHIP = 0.35         # seconds; a longer whip is a slow blurry slide
+WHIP_EVERY = 8.0        # at most one whip per this many output seconds before get_edit warns
 SYNC_DEFAULT = {"track": None, "grid": "beat", "lead": 1}
 MOTIONS = ("none", "push", "pull", "drift-left", "drift-right", "punch")
 MAX_ZOOM = 0.3          # motion_amount 1 = 1.3x; sources go soft past that
@@ -343,6 +345,9 @@ def compute_timeline(items, spec, grid=None):
                         beat_frames=beat_frames, **seg))
         start += n - tf[i]
     total = segs[-1].start_frame + segs[-1].frames if segs else 0
+    whips = sum(1 for s in segs if s.trans_after and s.trans_after[0].startswith("whip"))
+    if whips > max(1, total / fps / WHIP_EVERY):
+        warnings.append(f"{whips} whips in {total / fps:.0f}s feels busy; keep about one per {WHIP_EVERY:.0f} s")
     sfx = tuple(sorted((segs[i + 1].start_frame + (segs[i].trans_after[1] // 2 if segs[i].trans_after else 0), name)
                        for i, s in enumerate(segs[:-1]) for name in [spec.get("sfx", {}).get(str(s.item_id))] if name))
     texts = []
@@ -709,8 +714,8 @@ def put_transition(cid: int, item_id: int, body: TransitionPut):
             spec["transitions"].pop(str(item_id), None)
             return []
         notes = []
-        spec["transitions"][str(item_id)] = {"type": body.type,
-                                             "duration": _clamp(notes, "duration", body.duration, .2, 2)}
+        spec["transitions"][str(item_id)] = {"type": body.type, "duration": _clamp(
+            notes, "duration", body.duration, .2, MAX_WHIP if body.type.startswith("whip") else 2)}
         return notes
 
     return mutate(cid, fn)
