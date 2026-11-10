@@ -8,6 +8,7 @@ look_filters and captions.ensure_transcripts / map_cues / build / write_srt.
 import hashlib
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -259,6 +260,8 @@ def seg_key(seg, sid, mode, dims, fps):
          "fps": fps, "kind": seg.kind, "frames": seg.frames}
     if seg.motion or seg.flash or seg.shake or seg.ramp:  # absent when unused, so older cached segments keep their keys
         d.update(motion=seg.motion, flash=seg.flash, shake=seg.shake, ramp=seg.ramp, beats=seg.beat_frames)
+    if seg.motion:
+        d["ease"] = 1  # eased motion and punch: re-renders only moving clips (no RENDER_V bump for the rest)
     return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -308,14 +311,28 @@ def ramp_setpts(ramp, S, L):
     return f"({expr})/TB"
 
 
-def motion_filter(seg):
+def punch_env(pts, frames):
+    """Expression in output frames: on each beat a snap in (about 2 frames) that eases back out by the next beat, peak 1."""
+    gap = min((b - a for a, b in zip(pts, pts[1:])), default=frames)
+    rise, tau = 1.2, max(3.0, gap / 2)
+    d = rise * math.log(1 + tau / rise)  # where (1-exp(-d/rise))*exp(-d/tau) peaks
+    k = 1 / ((1 - math.exp(-d / rise)) * math.exp(-d / tau))
+    terms = [f"gte(in,{p})*(1-exp(-(in-{p})/{_n(rise)}))*exp(-(in-{p})/{_n(tau)})" for p in pts]
+    return f"min({_n(k)}*({'+'.join(terms)}),1)"
+
+
+def motion_filter(seg, fps):
     """perspective filter (per frame, subpixel, so slow zooms do not jitter like zoompan) for motion, punch and shake.
-    `in` is the output frame index: this runs after fps. '' when the clip does not move."""
+    `in` is the output frame index: this runs after fps. '' when the clip does not move.
+    Push, pull and drift ease in and out (smoothstep); under 1 s they stay linear, so a short clip reads as one move
+    through the cut instead of a bump."""
     import edit
     name, amt = seg.motion or ("none", 0.0)
     A = edit.MAX_ZOOM * max(0.0, min(amt, 1.0))
     N = max(seg.frames - 1, 1)
     u = f"min(in/{N},1)"
+    if seg.frames >= fps:
+        u = f"({u}*{u}*(3-2*{u}))"
     z, dx = "1", "0"
     if name == "push":
         z = f"(1+{_n(A)}*{u})"
@@ -328,7 +345,7 @@ def motion_filter(seg):
         dx = f"({'' if name == 'drift-left' else '-'}{_n(m)}*(1-2*{u}))"
     elif name == "punch":
         pts = seg.beat_frames[:24] or (seg.frames // 2,)
-        z = f"(1+{_n(A)}*mod({'+'.join(f'gte(in,{p})' for p in pts)},2))"
+        z = f"(1+{_n(A)}*{punch_env(pts, seg.frames)})"
     dy = "0"
     if seg.shake and seg.beat_frames:
         z = f"({z}*1.06)"  # room to move without showing edges: 0.012 offset needs 1/(1-0.024) zoom at least
@@ -378,7 +395,7 @@ def seg_graph(seg, src, dims, fps, mode):
             chain.append(f"crop={cw}:{ch}:x='(iw-{cw})*{e}':y=0")
         else:
             chain.append(f"crop={cw}:{ch}:x=0:y='(ih-{ch})*{e}'")
-    mf = motion_filter(seg)
+    mf = motion_filter(seg, fps)
     if mf:
         chain.append(mf)
     chain.append(f"scale={W}:{H}:flags={'bicubic' if mode == 'preview' else 'lanczos'}")
@@ -514,17 +531,43 @@ def audio_fx(tl, win, D):
     return dict(D=D, fi=fi, fo=fo, cv=tl.clip_volume, duck=tl.duck, tracks=tracks)
 
 
-def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None):
+# whip: (xfade slide, dblur angle). The slide moves the frame about W / frames per frame; dblur adds the streak a
+# shutter would record, light over the whole seam and doubled in its middle third, where a real whip is fastest.
+WHIPS = {"whipleft": ("slideleft", 0), "whipright": ("slideright", 0), "whipup": ("slideup", 90), "whipdown": ("slidedown", 90)}
+
+
+def seam_blur(name, tf, o, fps, dims):
+    """Filters run on the joined stream right after a whip or zoom-in xfade that starts at output second o: blur
+    only while the seam moves (its first frame is still A at rest). '' for every other transition."""
+    if name not in WHIPS and name != "zoomin":
+        return ""
+    if not dims:
+        raise ValueError(f"{name} needs the output size for its blur")
+    a, b = o + 0.5 / fps, o + (tf - 0.5) / fps
+    m0, m1 = o + tf / 3 / fps, o + 2 * tf / 3 / fps
+    if name == "zoomin":  # a soft defocus at the peak of the zoom
+        r = max(dims) * 0.006
+        return f",gblur=sigma={_n(r, 2)}:enable='between(t,{_n(m0, 6)},{_n(m1, 6)})'"
+    ang = WHIPS[name][1]
+    r = 0.4 * (dims[0] if ang == 0 else dims[1]) / max(tf, 1)  # 0.4 / 0.8 of the per-frame travel
+    return (f",dblur=angle={ang}:radius={_n(r, 2)}:enable='between(t,{_n(a, 6)},{_n(b, 6)})'"
+            f",dblur=angle={ang}:radius={_n(r, 2)}:enable='between(t,{_n(m0, 6)},{_n(m1, 6)})'")
+
+
+def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=None):
     """Join n inputs (frames[i] long, trans[i] = (xfade name, frames) or None between i and i+1), then optionally
     trim to window (start, end) in seconds and overlay the caption input (index n). fx (audio_fx) adds fades and
-    the extra audio tracks (inputs after the caption input). Ends in [vout][aout]."""
+    the extra audio tracks (inputs after the caption input). dims (W, H) sizes the whip and zoom-in blur.
+    Ends in [vout][aout]."""
     p = [f"[{i}:v]fps={fps}[v{i}]" for i in range(n)]
     accv, acca, acc = "v0", "0:a", frames[0]
     for i in range(1, n):
         t = trans[i - 1]
         if t:
             name, tf = t
-            p.append(f"[{accv}][v{i}]xfade=transition={name}:duration={_n(tf / fps, 6)}:offset={_n((acc - tf) / fps, 6)}[x{i}]")
+            o = (acc - tf) / fps
+            p.append(f"[{accv}][v{i}]xfade=transition={WHIPS.get(name, (name,))[0]}:duration={_n(tf / fps, 6)}"
+                     f":offset={_n(o, 6)}{seam_blur(name, tf, o, fps, dims)}[x{i}]")
             p.append(f"[{acca}][{i}:a]acrossfade=d={_n(tf / fps, 6)}[ja{i}]")
             accv, acca, acc = f"x{i}", f"ja{i}", acc + frames[i] - tf
         else:
@@ -563,15 +606,15 @@ def _run_cmd(files, graph, out, workdir, codec, cue_list=None, extra=()):
     return cmd + ["-/filter_complex", str(gf), "-map", "[vout]", "-map", "[aout]", *codec, str(out)]
 
 
-def join_command(seg_files, frames, trans, fps, out, workdir, codec):
+def join_command(seg_files, frames, trans, fps, out, workdir, codec, dims=None):
     """One chunk: intermediate in the segment codec. Pure cuts at its edges are the caller's job."""
-    return _run_cmd(seg_files, _graph(len(seg_files), frames, trans, fps), out, workdir, codec)
+    return _run_cmd(seg_files, _graph(len(seg_files), frames, trans, fps, dims=dims), out, workdir, codec)
 
 
-def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None):
+def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None, dims=None):
     """Last pass: join (when several files are left), window trim, caption overlay, fades, audio mix, colour tags,
     delivery encode."""
-    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx)
+    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx, dims)
     return _run_cmd(files, g, out, workdir, codec, cue_list, [t["path"] for t in fx["tracks"]] if fx else ())
 
 
@@ -942,7 +985,7 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                     fl = (sum(fr) - sum(t[1] for t in tr if t)) / fps
                     D = (window[1] - window[0]) if window else fl
                     cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size),
-                                         audio_fx(tl, win, D))
+                                         audio_fx(tl, win, D), dims)
                     run_ffmpeg(cmd, D, prog.cb(fl), cancel, _timeout(fl), work)
                     prog.add(fl)
                     break
@@ -953,7 +996,7 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                         nxt.append(files[a]); continue
                     o = work / f"j{li}_{ci}.mov"
                     fl = (sum(fr[a:b]) - sum(t[1] for t in tr[a:b - 1] if t)) / fps
-                    run_ffmpeg(join_command(files[a:b], fr[a:b], tr[a:b - 1], fps, o, work, mid), fl, prog.cb(fl),
+                    run_ffmpeg(join_command(files[a:b], fr[a:b], tr[a:b - 1], fps, o, work, mid, dims), fl, prog.cb(fl),
                                cancel, _timeout(fl), work)
                     prog.add(fl)
                     nxt.append(o)

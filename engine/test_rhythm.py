@@ -112,7 +112,56 @@ for x in tl.segs:
     assert int(n) == x.frames, (x.item_id, n, x.frames)
 
 # only moving clips pay for the perspective pass
-assert "perspective" in render.motion_filter(tl.segs[0]) and render.motion_filter(edit.compute_timeline([item(9)], spec(), GRID).segs[0]) == ""
+assert "perspective" in render.motion_filter(tl.segs[0], FPS) and render.motion_filter(edit.compute_timeline([item(9)], spec(), GRID).segs[0], FPS) == ""
+
+
+# ---------- eased motion: zoom read back from the perspective corners at frame x (W = H = 1, so x0 = 0.5 + dx - 1/(2z))
+def zoom_at(seg, x):
+    import math
+    import re
+    e = re.search(r"x0='([^']*)'", render.motion_filter(seg, FPS)).group(1)
+    e = re.sub(r"\bin\b", "x", e).replace("W", "1").replace("H", "1")
+    return 1 / (2 * (0.5 - eval(e, {"x": x, "min": min, "max": max, "exp": math.exp, "gte": lambda a, b: float(a >= b)})))
+
+
+from dataclasses import replace  # noqa: E402
+base = tl.segs[3]  # no fx of its own
+push = replace(base, frames=60, motion=("push", 1.0), beat_frames=())
+zs = [zoom_at(push, x) for x in range(60)]
+assert abs(zs[0] - 1) < 1e-6 and abs(zs[-1] - 1.3) < 1e-6 and abs(zs[30] - 1.15) < 0.01, zs
+assert zs[1] - zs[0] < 0.002 and zs[31] - zs[30] > 0.007 and zs[-1] - zs[-2] < 0.002, zs  # eases in and out
+short = replace(push, frames=20)  # under 1 s: linear, one move through the cut
+assert abs((zoom_at(short, 1) - zoom_at(short, 0)) - (zoom_at(short, 10) - zoom_at(short, 9))) < 1e-6
+punch = replace(base, frames=60, motion=("punch", 1.0), beat_frames=(15, 30, 45))
+pz = [zoom_at(punch, x) for x in range(60)]
+assert "mod(" not in render.motion_filter(punch, FPS) and max(pz[:15]) == 1, pz
+assert pz[17] > 1.27 and max(pz) <= 1.3 + 1e-9 and pz[29] < 1.1, pz  # snaps in within 2 frames, eased out by the next beat
+assert 1.05 < pz[22] < pz[17], pz  # no hold: it relaxes between beats
+
+# ---------- whips: a slide plus directional blur while the seam moves; other transitions untouched
+g = render._graph(2, [60, 60], [("whipleft", 9)], FPS, dims=(540, 960))
+assert "transition=slideleft" in g and g.count("dblur=angle=0:radius=24") == 2 and "enable='between(t,1.7166" in g, g
+g = render._graph(2, [60, 60], [("whipup", 9)], FPS, dims=(540, 960))
+assert "transition=slideup" in g and g.count("dblur=angle=90") == 2, g
+assert "gblur" in render._graph(2, [60, 60], [("zoomin", 9)], FPS, dims=(540, 960))
+assert "blur" not in render._graph(2, [60, 60], [("fade", 9)], FPS)
+try:
+    render._graph(2, [60, 60], [("whipright", 9)], FPS)
+    raise AssertionError("a whip without dims must fail")
+except ValueError:
+    pass
+assert {edit.XFADE[f"whip-{d}"] for d in ("left", "right", "up", "down")} == set(render.WHIPS)
+j = W / "whip.mov"  # the whip graph runs in ffmpeg and keeps the overlap length
+r = subprocess.run(render.join_command([W / "1.mov", W / "2.mov"], [tl.segs[0].frames, tl.segs[1].frames], [("whipdown", 9)], FPS, j, W,
+                                       ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"], (360, 640)), capture_output=True, text=True)
+assert r.returncode == 0, r.stderr[-800:]
+n = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames",
+                    "-of", "csv=p=0", str(j)], capture_output=True, text=True).stdout.strip()
+assert int(n) == tl.segs[0].frames + tl.segs[1].frames - 9, n
+# too many whips warn; whip-up / whip-down exist
+s = spec(transitions={str(i): {"type": t, "duration": 0.3} for i, t in ((1, "whip-up"), (2, "whip-down"), (3, "whip-left"))})
+w = edit.compute_timeline([item(i, t1=2.0) for i in range(1, 5)], s, GRID)
+assert w.segs[0].trans_after[0] == "whipup" and any("whips" in x for x in w.warnings), w.warnings
 
 # ---------- API: sync needs an existing track, analyses the music, and get_edit reports the grid
 from fastapi import FastAPI  # noqa: E402
@@ -152,6 +201,8 @@ assert c.patch(f"/collections/{cid}/edit/clips/{ids[1]}", json={"shake": True}).
 assert c.put(f"/collections/{cid}/edit/transitions/{ids[0]}", json={"type": "whip-left", "duration": 0.3, "sfx": "whoosh"}).status_code == 200
 sp = c.get(f"/collections/{cid}/edit").json()["spec"]
 assert sp["sfx"] == {str(ids[0]): "whoosh"} and sp["transitions"][str(ids[0])]["type"] == "whip-left", sp
+r = c.put(f"/collections/{cid}/edit/transitions/{ids[0]}", json={"type": "whip-up", "duration": 0.8})
+assert r.status_code == 200 and r.json()["clamped"][0]["to"] == edit.MAX_WHIP, r.text  # a slow whip is a blurry slide
 assert c.put(f"/collections/{cid}/edit/transitions/{ids[0]}", json={"type": "cut"}).status_code == 200
 assert c.get(f"/collections/{cid}/edit").json()["spec"]["sfx"] == {str(ids[0]): "whoosh"}  # a cut keeps its sound
 assert c.delete(f"/collections/{cid}/edit/audio/m").status_code == 200

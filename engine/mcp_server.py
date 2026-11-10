@@ -305,8 +305,9 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
     get_collection.
     Rhythm (needs sync on, see set_edit): beats 1 to 32 = how many grid units the clip lasts (0 = from its in/out length);
     hit = a source time in seconds (the jump, the clap, the splash) that must land exactly on a beat; -1 clears it.
-    Motion: motion push (slow zoom in), pull (zoom out), drift-left / drift-right (slow pan), punch (snaps in and out on
-    each beat), none; motion_amount 0 to 1 (default 0.35, 1 = 1.3x). flash=true: white pulse on the clip's first frame
+    Motion: motion push (slow zoom in), pull (zoom out), drift-left / drift-right (slow pan), punch (snaps in on each
+    beat and eases back out before the next), none. Push, pull and drift ease in and out, so they read at low amounts:
+    motion_amount 0 to 1 (default 0.35, 1 = 1.3x), 0.25 to 0.4 is usually right. flash=true: white pulse on the clip's first frame
     (a drop or a big moment). shake=true: a short shake on each beat in the clip (at most half the clips; peaks only).
     ramp: slow-mid (fast, slow-motion middle, fast), fast-in, slow-out, none; silences the clip's own sound."""
     body = drop_unset(speed=speed, volume=volume, exposure=exposure, contrast=contrast, saturation=saturation,
@@ -322,9 +323,13 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
 
 @server.tool()
 def set_transition(collection_id: int, after_item_id: int, type: str, duration: float = 0.5, sfx: str = "") -> dict:
-    """Join a clip to the next one. type: cut, dissolve, fade-black, flash-white, zoom-in, whip-left, whip-right, blur,
-    slide-left, slide-up, wipe-left, wipe-right, circle, squeeze. Duration 0.2 to 2 s, capped at half the shorter clip;
-    unsynced, transitions shorten the edit by their duration (synced, the overlap is centred on the beat).
+    """Join a clip to the next one. type: cut, dissolve, fade-black, flash-white, zoom-in, whip-left, whip-right,
+    whip-up, whip-down, blur, slide-left, slide-up, wipe-left, wipe-right, circle, squeeze. Duration 0.2 to 2 s (whips
+    at most 0.35 s), capped at half the shorter clip; unsynced, transitions shorten the edit by their duration (synced,
+    the overlap is centred on the beat).
+    whip-*: a fast motion-blurred slide; the direction is where the picture moves (whip-left = the picture flies left,
+    as if the camera whipped right). Match the movement at the end of the outgoing shot, 0.2 to 0.3 s, with
+    sfx="whoosh", about one per 8 s. zoom-in blurs at its peak.
     sfx: whoosh (pairs with whip, zoom-in, slide), hit (a hard cut on a drop), riser (builds into the seam), none.
     Leave sfx empty to keep the current one. type cut with an sfx keeps a hard cut with a sound."""
     path = f"/collections/{collection_id}/edit/transitions/{after_item_id}"
