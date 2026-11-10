@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.0 (2026-11-10)
+
+- Reuse unchanged final renders, fix Export for Resolve, deselect on outside click
+
 ## v0.9.0 (2026-11-10)
 
 - Edit versions, titles lane, cached originals, versioned render names
