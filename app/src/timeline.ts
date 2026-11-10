@@ -665,6 +665,7 @@ class Editor {
       if (x > s.scrollLeft + s.clientWidth - 30 || x < s.scrollLeft) s.scrollLeft = Math.max(0, x - 60);
     }
     if (this.playB.getAttribute("aria-pressed") !== String(this.player.playing)) this.renderPlay();
+    if (this.exactB.getAttribute("aria-pressed") !== String(this.player.mode === "exact")) this.renderMode();  // the player leaves a partial preview on its own
   }
   scrub(e: PointerEvent) {
     e.preventDefault();

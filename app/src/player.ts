@@ -167,8 +167,15 @@ export class LivePlayer implements Player {
     }
   }
 
+  /** A partial preview covers [exactOff, exactOff + its length] only; past that it showed a frozen frame and playback stalled */
+  private outsideExact(t: number) {
+    const d = this.exactV.duration;
+    return Number.isFinite(d) && (t < this.exactOff - 0.02 || t > this.exactOff + d - 0.02);
+  }
+
   seek(t: number) {
     this.t = clamp(t, 0, this.dur);
+    if (this.m === "exact" && this.outsideExact(this.t)) this.setExact(null);  // rough cut for the part not rendered
     if (this.m === "exact") this.exactV.currentTime = Math.max(0, this.t - this.exactOff);
     else this.place(true);
     this.emit();
@@ -234,6 +241,7 @@ export class LivePlayer implements Player {
     this.raf = requestAnimationFrame(this.tick);
     const dt = Math.min((now - this.last) / 1000, 0.25);
     this.last = now;
+    if (this.m === "exact" && (this.exactV.ended || this.outsideExact(this.t)) && this.t < this.dur - 0.05) this.setExact(null);
     if (this.m === "exact") {
       if (this.r > 0) this.t = clamp(this.exactV.currentTime + this.exactOff, 0, this.dur);
       else { this.t -= dt; this.exactV.currentTime = Math.max(0, this.t - this.exactOff); }
