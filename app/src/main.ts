@@ -8,7 +8,7 @@ import { timeline } from "./timeline";
 import { openComposer, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
-import { renderLive } from "./live";
+import { renderLive, type MediaAct } from "./live";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -719,7 +719,14 @@ function renderProgress(out: HTMLElement, j: Job, cid: number, kind: PollKind) {
   if (j.note && !out.querySelector("p.note")) out.append(el("p", "note", j.note));
 }
 
+/** Output boxes with a live poll attached, so a dead or missing poll can be noticed and restarted. */
+const polling = new WeakSet<HTMLElement>();
 async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean; textContent?: string | null }) {
+  if (polling.has(out)) return;  // one poll per box: a second would fight the first over the button label
+  polling.add(out);
+  try { await pollLoop(cid, kind, out, btn); } finally { polling.delete(out); }
+}
+async function pollLoop(cid: number, kind: PollKind, out: HTMLElement, btn: { disabled: boolean; textContent?: string | null }) {
   btn.disabled = true;
   const label = kind === "ask" ? btn.textContent : null;  // Ask Claude reads "Working…" while the edit runs
   if (label) btn.textContent = "Working…";
@@ -741,7 +748,10 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
     // project view re-rendered (live refresh, navigation): its new render started its own poll, so stop this one
     if (!out.isConnected) return;
     if (j.status === "running") {
-      if (kind === "ask") renderSteps(out, j, cid);
+      // a drawing bug must not stop the poll: the edit keeps running and the next tick may draw fine
+      if (kind === "ask") {
+        try { renderSteps(out, j, await mediaActivity()); } catch (e) { console.warn("live panel:", e); }
+      }
       else if (kind !== "export") renderProgress(out, j, cid, kind);
       await sleep(kind === "ask" || kind === "export" ? 1500 : 1000);
       continue;
@@ -941,16 +951,21 @@ async function watchExternalAsk() {
   if (view.type !== "col" || project.hidden) return;
   const out = document.getElementById("ask-out");
   const btn = project.querySelector<HTMLButtonElement>("form.ask button");
-  if (!out || !btn || out.classList.contains("running")) return;
+  if (!out || !btn || polling.has(out)) return;  // no live poll on the box (never started, or died): start one
   try {
     const j = await api<Job>(`/collections/${view.id}/ask`);
-    if (j.status === "running" && out.isConnected && !out.classList.contains("running")) pollJob(view.id, "ask", out, btn);
+    if (j.status === "running" && out.isConnected && !polling.has(out)) pollJob(view.id, "ask", out, btn);
   } catch { /* heartbeat reports the engine being down */ }
 }
 
 const stepsSeen = new Map<number, number>(); // kept for pollJob's cleanup; the live panel tracks its own rows
-function renderSteps(out: HTMLElement, j: Job, _cid: number) {
-  renderLive(out, j, ldFor(out, "think", 40).el);
+function renderSteps(out: HTMLElement, j: Job, media: MediaAct[]) {
+  renderLive(out, j, ldFor(out, "think", 40).el, media);
+}
+/** What the engine is doing to clips right now (iCloud downloads, scene detection), minus the edit job itself. */
+async function mediaActivity(): Promise<MediaAct[]> {
+  try { return (await api<{ active: MediaAct[] }>("/media/activity")).active.filter((a) => !a.uuid.startsWith("job:")); }
+  catch { return []; }
 }
 
 let refreshT = 0;

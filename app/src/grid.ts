@@ -168,7 +168,9 @@ export class Grid {
     const t = (e.target as HTMLElement).closest<HTMLElement>(".tile");
     if (!t) return;
     const i = Number(t.dataset.i);
-    const selecting = e.metaKey || e.shiftKey || this.selected.size > 0;
+    // the circle in the corner is the select box: clicking it starts (or extends) a selection instead of opening
+    const onCheck = !!(e.target as HTMLElement).closest(".check");
+    const selecting = onCheck || e.metaKey || e.shiftKey || this.selected.size > 0;
     if (!selecting) return this.onOpen(i);
     if (e.shiftKey && this.anchor >= 0) {
       const [a, b] = [Math.min(this.anchor, i), Math.max(this.anchor, i)];

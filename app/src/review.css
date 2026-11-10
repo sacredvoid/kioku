@@ -25,18 +25,23 @@
 .r-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity .2s var(--ease), filter .2s var(--ease) }
 .r-tile:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px }
 .r-wrap.removed img { opacity: .3; filter: grayscale(1) }
-.r-wrap .x { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 50%; display: none; place-items: center;
-  background: var(--danger); color: #fff; font: 700 13px/1 var(--font) }
-.r-wrap.removed .x { display: grid }
+/* the remove mark: a faint target on hover (click anywhere on the tile toggles), solid red once removed. Clicks pass through to the tile. */
+.r-wrap .x { position: absolute; top: 7px; left: 7px; width: 22px; height: 22px; border-radius: 50%; pointer-events: none; font-size: 0;
+  background: rgba(20, 18, 24, .45); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .9); opacity: 0; transition: opacity .15s var(--ease), background-color .15s var(--ease) }
+.r-wrap .x::before { content: ""; position: absolute; inset: 0; background: #fff;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M7.5 7.5l7 7M14.5 7.5l-7 7' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M7.5 7.5l7 7M14.5 7.5l-7 7' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% no-repeat }
+.r-wrap:hover .x, .r-wrap:focus-within .x { opacity: 1 }
+.r-wrap.removed .x { opacity: 1; background: var(--danger); box-shadow: 0 0 0 1.5px #fff }
 .r-wrap .new-dot { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--surface-solid) }
-.r-wrap .why { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; font-size: 11.5px; color: #fff; pointer-events: none;
+.r-wrap .r-why { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; font-size: 11.5px; color: #fff; pointer-events: none;
   background: linear-gradient(transparent, rgba(0, 0, 0, .62)); opacity: 0; transition: opacity .15s var(--ease);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
-.r-wrap:hover .why, .r-wrap:focus-within .why, .r-grid.pin-why .why { opacity: 1 }
+.r-wrap:hover .r-why, .r-wrap:focus-within .r-why, .r-grid.pin-why .r-why { opacity: 1 }
 .r-wrap .peek { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 0; display: grid; place-items: center;
   background: var(--surface-solid); color: var(--text); font-size: 13px; opacity: 0; transition: opacity .15s var(--ease) }
 .r-wrap:hover .peek, .r-wrap:focus-within .peek { opacity: 1 }
 .r-wrap .new-dot + .peek { right: 22px }
 .r-wrap .dur { bottom: 22px }
 .r-empty { color: var(--text-2); padding: 40px 0; text-align: center }
-@media (prefers-reduced-motion: reduce) { .r-tile img, .r-wrap .why, .r-wrap .peek { transition: none } }
+@media (prefers-reduced-motion: reduce) { .r-tile img, .r-wrap .r-why, .r-wrap .peek, .r-wrap .x { transition: none } }

@@ -25,6 +25,8 @@ const PHASE_OF: Record<string, Phase> = {
   set_clip_fx: "polish", set_transition: "polish", set_text: "polish", set_edit: "polish", compare_to_reference: "polish",
   render_preview: "render", render_final: "render", render_status: "render", export_project: "render",
 };
+/** One engine media task (GET /media/activity): an iCloud download, scene detection, a proxy. */
+export type MediaAct = { uuid: string; label: string; stage: string; seconds: number };
 const FOOTAGE_LOOKS = new Set(["get_media", "look_at", "analyze_clip", "find_moments"]);
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -85,7 +87,7 @@ function build(out: HTMLElement, motif: Element): Parts {
   return p;
 }
 
-export function renderLive(out: HTMLElement, j: Job, motif: Element) {
+export function renderLive(out: HTMLElement, j: Job, motif: Element, media: MediaAct[] = []) {
   let p = panels.get(out);
   if (!p || !p.root.isConnected || p.root.parentElement !== out) p = build(out, motif);
   const nowS = Date.now() / 1000, start = j.started ?? nowS;
@@ -139,8 +141,14 @@ export function renderLive(out: HTMLElement, j: Job, motif: Element) {
     card.append(top);
     if (e.detail) card.append(h("div", "live-run-detail", e.detail));
     return card;
+  }), ...media.map((m) => {  // the engine's own work under those calls: what's downloading from iCloud, being scanned
+    const card = h("div", "live-run live-media");
+    const top = h("div", "live-run-top");
+    top.append(h("span", "live-spin"), h("span", "live-run-label", m.stage.charAt(0).toUpperCase() + m.stage.slice(1)), h("span", "spacer"), h("span", "live-time", clock(m.seconds)));
+    card.append(top, h("div", "live-run-detail", m.label));
+    return card;
   }));
-  p.now.hidden = !running.length;
+  p.now.hidden = !running.length && !media.length;
 
   // log, newest first; rows are added once and then only change state
   trace.forEach((e, i) => {
