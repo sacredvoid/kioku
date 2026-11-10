@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.0 (2026-11-10)
+
+- Appearance > Font: seven bundled font pairs for text and headings, remembered per device
+- Live edit panel: phase, pipeline, running calls with clips and timers, failed steps with their error; yt-dlp finds Homebrew deno and ffmpeg
+
 ## v0.5.0 (2026-11-10)
 
 - Ask: treat polite requests (can you make, I'd like a video of) as edits, not searches
