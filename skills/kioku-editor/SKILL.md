@@ -94,7 +94,11 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 - One `set_edit` call: `aspect="9:16"` for a reel, story, TikTok, Shorts or "vertical", otherwise 16:9. One `look` for the whole edit at `look_strength` 0.6 to 0.8 unless the user wants it strong. Options are in `get_edit`; film LUTs (`teal-orange`, `warm-film`, `bleach`, `clean-pop`) suit trips and nights, `warm` / `film` suit memories.
 - **Titles** (`set_text`), on snappy and reference edits, or when the brief wants them:
   - An opener: `title-pop` or `title-slide` on the first downbeat (a `grid` time), 1.5 to 2.5 s.
-  - A `location-tag` when the place changes, on that clip's first beat. `big-number` for a year or a count.
+  - A `location-tag` (text `{place}`) when the place changes, on that clip's first beat. `big-number` for a year or a count.
+  - Pick one `set_edit(text_style=...)` before the first title and never mix fonts by hand: `clean` or `editorial` for calm and cinematic edits, `bold` for snappy ones, `playful` for parties and kids. Use one animation family per edit: `letter-rise` or `tracking-in` for calm, `title-pop` for snappy.
+  - `word-on-beat` for a 3 to 5 word hook in the first 3 seconds or on the drop (sync on, so each word lands on a beat). `typewriter` only for dates and places.
+  - `text-behind` at most once, 1 to 2 words, under 4 s, on a single shot with one clear subject and empty space above it (the render warns and draws it in front otherwise; then move it to a better shot).
+  - Write `{place}`, `{date}` or `{year}` instead of typing a place or date: they are filled from the clip's Photos metadata. If it errors, that clip has none: leave it out rather than guess.
   - At most 1 text on screen, under 6 words. Keep `position="auto"`: at render time it looks at the frames under the text and picks the band (bottom, top, or middle as a last resort) that covers the fewest faces and subjects. 9:16 text also stays clear of the app's buttons and caption area. If the render warns that a text covers a face, move it to another clip before forcing a position.
   - Do not add a box or change `color` for readability: the render adds a soft scrim or a box only when the background under the text is too bright or busy for the shadow alone.
 - **Captions** (`set_edit(captions=true)`) only when clips contain speech, never on a music montage. Check `get_edit` `captions_status.pending` reaches 0 before rendering. If whisper is missing, tell the user the install command the tool returns.

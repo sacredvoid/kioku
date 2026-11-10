@@ -6,24 +6,45 @@ capped at the out-animation length), so every frame of the hold reuses one PNG a
 """
 import functools
 import hashlib
+import math
 import re
 from pathlib import Path
 
-TEMPLATES = ("title-pop", "title-slide", "word-stagger", "lower-third", "location-tag", "big-number")
+TEMPLATES = ("title-pop", "title-slide", "word-stagger", "lower-third", "location-tag", "big-number",
+             "word-on-beat", "letter-rise", "tracking-in", "typewriter", "text-behind")
 POSITIONS = ("auto", "top", "middle", "bottom")
+EASES = ("auto", "cubic", "expo", "back", "spring")  # the entrance curve; auto = the template's own
 FONT_DIR = Path(__file__).parent / "fonts"
 FONTS = {"inter": ("Inter.ttf", 800), "anton": ("Anton.ttf", 0), "playfair": ("PlayfairDisplay.ttf", 800),
          "grotesk": ("SpaceGrotesk.ttf", 700)}  # file, variable-font weight (0 = static)
 DEFAULT_FONT = {"title-pop": "anton", "title-slide": "inter", "word-stagger": "grotesk", "lower-third": "inter",
-                "location-tag": "inter", "big-number": "anton"}
-SIZE = {"title-pop": .13, "title-slide": .095, "word-stagger": .09, "lower-third": .055, "location-tag": .042, "big-number": .34}
+                "location-tag": "inter", "big-number": "anton", "word-on-beat": "anton", "letter-rise": "grotesk",
+                "tracking-in": "playfair", "typewriter": "grotesk", "text-behind": "anton"}
+SIZE = {"title-pop": .13, "title-slide": .095, "word-stagger": .09, "lower-third": .055, "location-tag": .042, "big-number": .34,
+        "word-on-beat": .2, "letter-rise": .095, "tracking-in": .085, "typewriter": .06, "text-behind": .22}
+LABELS = ("lower-third", "location-tag")  # small labels; every other template is a heading
+# Named looks for the whole edit (set_edit text_style): heading font, label font, colours, entrance easing, and the
+# templates that suit it. A style fills only what a text leaves at its default (font auto, white, yellow accent).
+STYLES = {
+    "clean": {"display": "grotesk", "label": "inter", "color": "#FFFFFF", "accent": "#FFFFFF", "ease": "expo",
+              "templates": ("title-slide", "letter-rise", "typewriter", "location-tag")},
+    "bold": {"display": "anton", "label": "inter", "color": "#FFFFFF", "accent": "#FFD400", "ease": "back",
+             "templates": ("title-pop", "word-on-beat", "big-number", "text-behind")},
+    "editorial": {"display": "playfair", "label": "inter", "color": "#F6F1E7", "accent": "#C9A46A", "ease": "expo",
+                  "templates": ("tracking-in", "title-slide", "lower-third")},
+    "playful": {"display": "anton", "label": "grotesk", "color": "#FFFFFF", "accent": "#FF5A8A", "ease": "spring",
+                "templates": ("title-pop", "word-on-beat", "location-tag")},
+}
 SAFE = 0.10        # title-safe margin, fraction of each side
 # 9:16 posts sit under app UI: caption, handle and buttons along the bottom, a button column on the right. Conservative
 # guesses (left, top, right, bottom), unverified against current Reels / TikTok / Shorts templates; centred text needs
 # equal sides, so left matches right. Feed (1:1, 4:5) and 16:9 have no UI over the picture: title-safe covers them.
 SAFE_916 = (.12, .12, .12, .26)
 FACE_W, SALIENT_W = 1.0, 0.3  # placement cost per fully covered face / salient region
-BACKED = ("title-pop", "title-slide", "word-stagger", "big-number")  # lower-third and location-tag carry their own box
+# lower-third and location-tag carry their own box; text-behind is half hidden by the subject on purpose
+BACKED = ("title-pop", "title-slide", "word-stagger", "big-number", "word-on-beat", "letter-rise", "tracking-in", "typewriter")
+# templates whose fast entrances get light motion blur (the others swap words or letters, which would ghost)
+BLURRED = ("title-pop", "title-slide", "lower-third", "location-tag", "letter-rise", "tracking-in", "text-behind")
 OUT = 0.3          # seconds, every template
 MAX_FRAMES = 600   # distinct text frames per render; past it animations step every 2nd (3rd...) frame
 MAX_TEXTS = 30
@@ -31,6 +52,11 @@ MAX_CHARS = 80
 DEFAULT = {"position": "auto", "font": "auto", "color": "#FFFFFF", "accent": "#FFD400"}
 STAGGER = 0.11     # word-stagger: seconds between words (shorter for long texts)
 WORD_IN = 0.3
+WORD_POP = 0.18    # word-on-beat: each word's pop
+BEAT_WORDS = 8     # word-on-beat: most words (one per beat)
+LETTER_IN = 0.35   # letter-rise: each letter's rise
+BEHIND_MAX = 4.0   # text-behind: longest (one subject mask per frame)
+BEHIND_COVER = (.05, .70)  # text-behind: subject share of the frame it needs, else plain text
 
 
 # ---------- easing (p in 0..1)
@@ -52,12 +78,58 @@ def ease_out_back(p, s=1.70158):
     return 1 + (s + 1) * p ** 3 + s * p ** 2
 
 
+def ease_out_expo(p):
+    """Fast start, long soft landing (normalised so it ends exactly on 1)."""
+    return (1 - 2 ** (-10 * _c(p))) / (1 - 2 ** -10)
+
+
+def ease_out_spring(p):
+    """Damped spring: overshoots about 10%, settles with one small bounce."""
+    p = _c(p)
+    return 1.0 if p >= 1 else 1 - math.exp(-7 * p) * math.cos(3 * math.pi * p)
+
+
+EASE = {"cubic": ease_out_cubic, "expo": ease_out_expo, "back": ease_out_back, "spring": ease_out_spring}
+
+
+def _ease(tx, default):
+    return EASE.get(tx.get("ease", "auto"), default)
+
+
+def styled(tx, name):
+    """tx with the named STYLES entry filling what it leaves at its default; unchanged for no or an unknown style."""
+    st = STYLES.get(name or "")
+    if not st:
+        return tx
+    tx = dict(tx)
+    if tx.get("font", "auto") in (None, "auto"):
+        tx["font"] = st["label" if tx["template"] in LABELS else "display"]
+    for k in ("color", "accent"):
+        if str(tx.get(k) or DEFAULT[k]).upper() == DEFAULT[k]:
+            tx[k] = st[k]
+    if tx.get("ease", "auto") == "auto":
+        tx["ease"] = st["ease"]
+    return tx
+
+
 # ---------- timing
 
-def _number(text):
-    """(prefix, value, suffix, has commas) when the text is one number (a count or a year), else None."""
-    m = re.fullmatch(r"(\D*?)(\d{1,3}(?:,\d{3})+|\d{1,9})(\D*)", text.strip())
-    return (m[1], int(m[2].replace(",", "")), m[3], "," in m[2]) if m else None
+def _letter_gap(tx):
+    n = max(len(tx["text"]), 1)
+    return min(.035, .7 / n) if tx["template"] == "letter-rise" else min(.06, 1.2 / n)
+
+
+def word_times(tx):
+    """word-on-beat: seconds after the text's start at which each word lands. On the beats inside the text when the
+    edit is synced (tx["beats"], from compute_timeline; the start is on a beat), else an even cadence; words that would
+    land in the fade out are pulled in."""
+    n = max(len(tx["text"].split()), 1)
+    room = max(float(tx.get("dur", 2.0)) - OUT - WORD_POP, 0.0)
+    beats = [0.0, *(b for b in tx.get("beats", ()) if b > 0.05)]
+    if len(beats) >= n and beats[n - 1] <= room:
+        return beats[:n]
+    gap = min(max(room / max(n - 1, 1), .2), .5) if n > 1 else 0.0
+    return [min(k * gap, room) for k in range(n)]
 
 
 def in_seconds(tx):
@@ -67,7 +139,17 @@ def in_seconds(tx):
         return (n - 1) * min(STAGGER, 0.9 / n) + WORD_IN
     if t == "big-number" and _number(tx["text"]):
         return 0.8  # the count-up
-    return {"lower-third": .45, "location-tag": .35}.get(t, .4)
+    if t == "word-on-beat":
+        return word_times(tx)[-1] + WORD_POP
+    if t in ("letter-rise", "typewriter"):
+        g = _letter_gap(tx)
+        return (len(tx["text"]) - 1) * g + (LETTER_IN if t == "letter-rise" else g)
+    return {"lower-third": .45, "location-tag": .35, "tracking-in": .9, "text-behind": .5}.get(t, .4)
+
+def _number(text):
+    """(prefix, value, suffix, has commas) when the text is one number (a count or a year), else None."""
+    m = re.fullmatch(r"(\D*?)(\d{1,3}(?:,\d{3})+|\d{1,9})(\D*)", text.strip())
+    return (m[1], int(m[2].replace(",", "")), m[3], "," in m[2]) if m else None
 
 
 def phase_frames(tx, n, fps):
@@ -186,8 +268,16 @@ def scaled(im, s):
     return im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))), Image.Resampling.BICUBIC)
 
 
-def put(canvas, im, x, y, clip=None):
-    """alpha_composite im at (x, y) (may be partly outside), only inside clip (x0, y0, x1, y1)."""
+def put(canvas, im, x, y, clip=None, sub=False):
+    """alpha_composite im at (x, y) (may be partly outside), only inside clip (x0, y0, x1, y1). sub: keep the fraction
+    of a pixel (a bicubic shift), so slow moves glide instead of stepping; still things stay on whole pixels (sharp)."""
+    if sub and (abs(x - round(x)) > .02 or abs(y - round(y)) > .02):
+        from PIL import Image
+        fx, fy = x - math.floor(x), y - math.floor(y)
+        padded = Image.new("RGBA", (im.width + 2, im.height + 2), (0, 0, 0, 0))  # transparent rim: edges never smear
+        padded.paste(im, (1, 1))
+        im = padded.transform(padded.size, Image.Transform.AFFINE, (1, 0, -fx, 0, 1, -fy), Image.Resampling.BICUBIC)
+        x, y = math.floor(x) - 1, math.floor(y) - 1
     x, y = round(x), round(y)
     x0, y0, x1, y1 = clip or (0, 0, canvas.width, canvas.height)
     x0, y0, x1, y1 = max(x0, 0, x), max(y0, 0, y), min(x1, canvas.width, x + im.width), min(y1, canvas.height, y + im.height)
@@ -233,8 +323,10 @@ def candidates(template, position, avoid_bottom):
     """Bands to try, preferred first. An explicit position is kept as asked."""
     if position != "auto":
         return ("top",) if template == "location-tag" and position == "middle" else (position,)
-    return {"big-number": ("middle", "top", "bottom"), "location-tag": ("top", "bottom"),
-            "lower-third": ("bottom", "top")}.get(template, ("top", "middle") if avoid_bottom else ("bottom", "top", "middle"))
+    return {"big-number": ("middle", "top", "bottom"), "word-on-beat": ("middle", "top", "bottom"),
+            "location-tag": ("top", "bottom"), "lower-third": ("bottom", "top"), "text-behind": ("top", "middle"),
+            "typewriter": ("top", "bottom") if avoid_bottom else ("bottom", "top")}.get(
+        template, ("top", "middle") if avoid_bottom else ("bottom", "top", "middle"))
 
 
 @functools.lru_cache(128)
@@ -247,7 +339,7 @@ def layout(template, text, fkey, dims, position, avoid_bottom, avoid=()):
     S = min(W, H)
     ml, mt, mr, mb = safe_area(dims)
     uni = _uni(text)
-    if template in ("title-pop", "big-number") and fkey == "anton":
+    if template in ("title-pop", "big-number", "word-on-beat", "text-behind") and fkey == "anton":
         text = text.upper()
     size = max(10, round(SIZE[template] * S))
     sx0, sx1 = ml * W, (1 - mr) * W
@@ -256,22 +348,28 @@ def layout(template, text, fkey, dims, position, avoid_bottom, avoid=()):
         width *= .8
     elif template == "location-tag":
         width *= .6
-    max_lines = 1 if template in ("big-number", "location-tag") else 2 if template in ("lower-third", "title-pop") else 3
+    max_lines = 1 if template in ("big-number", "location-tag") else 2 if template in (
+        "lower-third", "title-pop", "text-behind", "typewriter") else 3
     words = text.split() or [""]
     while True:  # shrink until it fits in max_lines lines of the safe width
         f = font(fkey, size, uni)
-        lines = _wrap(words, f, width) if " " in text else [text]
-        if len(lines) > 1:  # balance the lines: the narrowest width that still needs no more lines (no one-word orphan)
-            w = width
-            while w > width * .4 and len(_wrap(words, f, w * .95)) == len(lines):
-                w *= .95
-            lines = _wrap(words, f, w)
-        if (len(lines) <= max_lines and max(f.getlength(ln) for ln in lines) <= width) or size <= 10:
+        if template == "word-on-beat":  # one word on screen at a time: one "line" per word, the longest must fit
+            lines = words
+        else:
+            lines = _wrap(words, f, width) if " " in text else [text]
+            if len(lines) > 1:  # balance the lines: the narrowest width that still needs no more lines (no one-word orphan)
+                w = width
+                while w > width * .4 and len(_wrap(words, f, w * .95)) == len(lines):
+                    w *= .95
+                lines = _wrap(words, f, w)
+        if ((template == "word-on-beat" or len(lines) <= max_lines) and max(f.getlength(ln) for ln in lines) <= width) \
+                or size <= 10:
             break
         size = max(10, int(size * .92))
     cap = -f.getbbox("H", anchor="ls")[1]
     pitch = cap * (1.32 if fkey == "anton" else 1.55)
-    block = cap + pitch * (len(lines) - 1)
+    rows = 1 if template == "word-on-beat" else len(lines)  # lines on screen at once
+    block = cap + pitch * (rows - 1)
     land = W >= H
     align = "left" if template in ("lower-third", "location-tag") else "center"
     tw = max(f.getlength(ln) for ln in lines)
@@ -292,7 +390,7 @@ def layout(template, text, fkey, dims, position, avoid_bottom, avoid=()):
         if best is None or cost < best[0]:
             best = (cost, band, top, rect)
     _, band, top, rect = best
-    return {"lines": tuple(lines), "fkey": fkey, "size": size, "uni": uni, "cap": cap, "pitch": pitch, "top": top,
+    return {"lines": tuple(lines), "rows": rows, "fkey": fkey, "size": size, "uni": uni, "cap": cap, "pitch": pitch, "top": top,
             "x0": sx0, "x1": sx1, "align": align, "text": text, "band": band, "rect": rect,
             "hit": round(covered(rect, tuple(b for b in avoid if b[5])), 3)}
 
@@ -416,10 +514,11 @@ def panel(w, h, kind, color, cap):
 
 # ---------- templates: draw(canvas, tx, L, t, r) where t = seconds since start (capped), r = seconds left (capped)
 
-def _pop(cv, tx, L, t, r, accent_bar=True, override=None):
-    """Scale overshoot in (easeOutBack), hold, fade out with a slight grow."""
+def _pop(cv, tx, L, t, r, accent_bar=True, override=None, s0=.55, ease=ease_out_back):
+    """Scale overshoot in (easeOutBack from s0), hold, fade out with a slight grow."""
     tin = in_seconds(tx)
-    s = (.55 + .45 * ease_out_back(t / tin)) * (1 + .05 * (1 - ease_out_cubic(r / OUT)))
+    s = (s0 + (1 - s0) * _ease(tx, ease)(t / tin)) * (1 + .05 * (1 - ease_out_cubic(r / OUT)))
+    mv = t < tin or r < OUT
     a = min(ease_out_cubic(t / (tin * .5)), ease_out_cubic(r / OUT))
     if a <= 0:
         return
@@ -431,13 +530,13 @@ def _pop(cv, tx, L, t, r, accent_bar=True, override=None):
         im = fade(scaled(im, s), a)
         base = L["top"] + L["cap"] + i * L["pitch"]
         bx = cx - im.width / 2 + (ox - (im.width / s) / 2) * 0
-        put(cv, im, bx, cy + (base - cy) * s - oy * s)
+        put(cv, im, bx, cy + (base - cy) * s - oy * s, sub=mv)
     if accent_bar:
         bw = max(L["size"] * 1.2, 8)
         bh = max(2, round(L["cap"] * .09))
         y = cy + (L["top"] + L["cap"] + (len(lines) - 1) * L["pitch"] - cy) * s + L["cap"] * .38 * s
         w = max(1, round(bw * s * ease_out_cubic((t - tin * .3) / (tin * .7))))
-        put(cv, fade(rounded(w, bh, bh // 2, acc), a), cx - w / 2, y)
+        put(cv, fade(rounded(w, bh, bh // 2, acc), a), cx - w / 2, y, sub=mv)
 
 
 def _slide(cv, tx, L, t, r):
@@ -451,12 +550,12 @@ def _slide(cv, tx, L, t, r):
         base = L["top"] + L["cap"] + i * L["pitch"]
         hgt = L["cap"] * 1.5
         d = .07 * i
-        p = ease_out_cubic((t - d) / (tin - .07 * (n - 1)))
+        p = _ease(tx, ease_out_cubic)((t - d) / (tin - .07 * (n - 1)))
         q = ease_in_cubic(1 - (r - .05 * i) / (OUT - .05 * (n - 1)) if r < OUT else 0)
         off = (1 - p) * hgt - q * hgt
         x = (L["x0"] + L["x1"] - f.getlength(ln)) / 2 - ox
         clip = (0, base - L["cap"] * 1.12, cv.width, base + L["cap"] * .42)
-        put(cv, im, x, base - oy + off, clip)
+        put(cv, im, x, base - oy + off, clip, sub=off != 0)
     # accent rule above the block, wiping out from the centre
     bw = L["size"] * 1.4 * ease_out_cubic((t - .1) / (tin * .8))
     bh = max(2, round(L["cap"] * .08))
@@ -478,10 +577,11 @@ def _stagger(cv, tx, L, t, r):
         base = L["top"] + L["cap"] + i * L["pitch"]
         x = (L["x0"] + L["x1"] - f.getlength(ln)) / 2
         for w in ln.split(" "):
-            p = ease_out_cubic((t - k * gap) / WORD_IN)
-            if p > 0:
+            q = (t - k * gap) / WORD_IN
+            p = _ease(tx, ease_out_cubic)(q)
+            if q > 0:
                 im, ox, oy = sprite(w, L["fkey"], L["size"], col, True, L["uni"])
-                put(cv, fade(im, min(p, a_out)), x - ox, base - oy + (1 - p) * L["cap"] * .45)
+                put(cv, fade(im, min(ease_out_cubic(q), a_out)), x - ox, base - oy + (1 - p) * L["cap"] * .45, sub=q < 1)
             x += f.getlength(w) + sp
             k += 1
 
@@ -503,11 +603,12 @@ def _lower_third(cv, tx, L, t, r):
         return
     clip = (cx0, y0, cx1, y0 + bh)
     put(cv, rounded(bw, bh, max(2, round(bh * .12)), acc), x0, y0, clip)
-    p = ease_out_cubic((t - .15) / .3)
+    q = (t - .15) / .3
+    p = _ease(tx, ease_out_cubic)(q)
     for i, ln in enumerate(L["lines"]):
         im, ox, oy = sprite(ln, L["fkey"], L["size"], col, False, L["uni"])
         base = L["top"] + L["cap"] + i * L["pitch"]
-        put(cv, fade(im, p), x0 + padx - ox - (1 - p) * padx * 1.5, base - oy, clip)
+        put(cv, fade(im, ease_out_cubic(q)), x0 + padx - ox - (1 - p) * padx * 1.5, base - oy, clip, sub=q < 1)
 
 
 def _location(cv, tx, L, t, r):
@@ -521,7 +622,7 @@ def _location(cv, tx, L, t, r):
     ic = round(L["cap"] * 1.35)
     padx = L["cap"] * .9
     pw = round(padx + ic * .75 + L["cap"] * .55 + tw + padx)
-    p = ease_out_back(t / in_seconds(tx))
+    p = _ease(tx, ease_out_back)(t / in_seconds(tx))
     a = min(ease_out_cubic(t / .2), ease_out_cubic(r / OUT))
     if a <= 0:
         return
@@ -530,12 +631,13 @@ def _location(cv, tx, L, t, r):
     from PIL import Image, ImageFilter
     cv2 = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))  # one group, so one fade covers the pill and its contents
     sh = rounded(pw, ph, ph // 2, (0, 0, 0), 70).filter(ImageFilter.GaussianBlur(max(1, ph * .08)))
-    put(cv, fade(sh, a), x0, y0 + max(1, ph * .06))
+    mv = dy != 0
+    put(cv, fade(sh, a), x0, y0 + max(1, ph * .06), sub=mv)
     cv2.alpha_composite(rounded(pw, ph, ph // 2, bg, 240), (0, 0))
     put(cv2, pin(ic, acc), padx, (ph - ic) / 2)
     im, ox, oy = sprite(L["lines"][0], L["fkey"], L["size"], col, False, L["uni"])
     put(cv2, im, padx + ic * .75 + L["cap"] * .55 - ox, (ph + L["cap"]) / 2 - oy)
-    put(cv, fade(cv2, a), x0, y0)
+    put(cv, fade(cv2, a), x0, y0, sub=mv)
 
 
 def _big_number(cv, tx, L, t, r):
@@ -552,33 +654,91 @@ def _big_number(cv, tx, L, t, r):
     _pop(cv, tx2, L, min(t, .4), r, accent_bar=False, override=(s,))
 
 
+def _word_beat(cv, tx, L, t, r):
+    """One big word at a time, centred: each lands on its beat with a short pop and replaces the one before."""
+    times = word_times(tx)
+    k = max(i for i, s in enumerate(times) if s <= max(t, 0)) if len(L["lines"]) == len(times) else 0
+    q = (t - times[k]) / WORD_POP
+    s = .7 + .3 * _ease(tx, ease_out_back)(q)
+    a = min(ease_out_cubic(q * 2) if k == 0 else 1.0, ease_out_cubic(r / OUT))  # later words cut in on their beat
+    if a <= 0:
+        return
+    im, ox, oy = sprite(L["lines"][k], L["fkey"], L["size"], _rgb(tx["color"]), True, L["uni"])
+    im = fade(scaled(im, s), a)
+    cx, cy = (L["x0"] + L["x1"]) / 2, L["top"] + L["cap"] / 2
+    put(cv, im, cx - im.width / 2, cy + L["cap"] / 2 * s - oy * s, sub=q < 1 or r < OUT)
+
+
+def _letters(cv, tx, L, t, r):
+    """letter-rise: letters fade and rise one after another. tracking-in: the line fades in while its letter spacing
+    closes. typewriter: letters appear one at a time, no motion. Once in, whole lines are drawn (same as the hold of
+    any other template); while animating every glyph's shadow goes down first, so no shadow darkens a neighbour."""
+    tpl = tx["template"]
+    col = _rgb(tx["color"])
+    f = font(L["fkey"], L["size"], L["uni"])
+    tin, gap = in_seconds(tx), _letter_gap(tx)
+    a_out = ease_out_cubic(r / OUT)
+    ease = _ease(tx, ease_out_cubic)
+    glyphs, k = [], 0  # (char, x, y, alpha)
+    for i, ln in enumerate(L["lines"]):
+        base = L["top"] + L["cap"] + i * L["pitch"]
+        x0 = (L["x0"] + L["x1"] - f.getlength(ln)) / 2
+        if t >= tin:
+            im, ox, oy = sprite(ln, L["fkey"], L["size"], col, True, L["uni"])
+            put(cv, fade(im, a_out), x0 - ox, base - oy)
+            continue
+        spread = (1 - ease(t / tin)) * L["size"] * .25  # tracking-in: extra space between letters
+        for j, ch in enumerate(ln):
+            x, y, a = x0 + f.getlength(ln[:j]), base, a_out
+            if tpl == "typewriter":
+                a = a_out if t >= k * gap else 0
+            elif tpl == "letter-rise":
+                q = (t - k * gap) / LETTER_IN
+                y += (1 - ease(q)) * L["cap"] * .5
+                a = min(ease_out_cubic(q), a_out)
+            else:
+                x += (j - (len(ln) - 1) / 2) * spread
+                a = min(ease_out_cubic(t / (tin * .6)), a_out)
+            if a > 0 and not ch.isspace():
+                glyphs.append((ch, x, y, a))
+            k += 1
+    for shadow in (True, False):
+        for ch, x, y, a in glyphs:
+            im, ox, oy = sprite(ch, L["fkey"], L["size"], col, shadow, L["uni"])
+            put(cv, fade(im, a), x - ox, y - oy, sub=tpl != "typewriter")
+
+
+def _behind(cv, tx, L, t, r):
+    """Big title for text-behind (build() masks the subject out of it): settles from 85% size, no accent bar."""
+    return _pop(cv, tx, L, t, r, accent_bar=False, s0=.85, ease=ease_out_expo)
+
+
 DRAW = {"title-pop": _pop, "title-slide": _slide, "word-stagger": _stagger, "lower-third": _lower_third,
-        "location-tag": _location, "big-number": _big_number}
+        "location-tag": _location, "big-number": _big_number, "word-on-beat": _word_beat, "letter-rise": _letters,
+        "tracking-in": _letters, "typewriter": _letters, "text-behind": _behind}
 
 
 def place(tx, dims, avoid_bottom=False, avoid=(), grids=()):
-    """(layout, backing kind) of one text over what is under it (scene())."""
+    """(layout, backing kind) of one text over what is under it (scene()). text-behind ignores subjects: it is meant
+    to sit behind them."""
     fkey = tx.get("font", "auto")
     fkey = DEFAULT_FONT[tx["template"]] if fkey in (None, "auto") else fkey
+    if tx["template"] == "text-behind":
+        avoid = ()
     L = layout(tx["template"], tx["text"], fkey, tuple(dims), tx.get("position", "auto"), avoid_bottom, tuple(avoid))
     kind = backing(L["rect"], grids, _rgb(tx.get("color") or DEFAULT["color"])) if tx["template"] in BACKED else "shadow"
     return L, kind
 
 
-def frame(tx, dims, a, b, fps, avoid_bottom=False, placed=None):
-    """Full-frame RGBA of one text at key (a, b) = frame_key(...). placed: place(...) of this text (default: nothing
-    known about the picture, so the template's usual band and shadow only)."""
+def _draw(tx, L, kind, dims, t, r):
     from PIL import Image
-    L, kind = placed or place(tx, dims, avoid_bottom)
     cv = Image.new("RGBA", tuple(dims), (0, 0, 0, 0))
-    tx = {**DEFAULT, **tx}
-    t, r = a / fps, b / fps
     if kind != "shadow":  # behind the text, fading with it
         vis = min(ease_out_cubic(t / (in_seconds(tx) * .5)), ease_out_cubic(r / OUT))
         if vis > 0:
             f = font(L["fkey"], L["size"], L["uni"])
             tw = round(max(f.getlength(ln) for ln in L["lines"]))
-            bh = round(L["cap"] + L["pitch"] * (len(L["lines"]) - 1) + L["cap"] * .35)
+            bh = round(L["cap"] + L["pitch"] * (L.get("rows", len(L["lines"])) - 1) + L["cap"] * .35)
             back = (17, 17, 17) if _lum(_rgb(tx["color"])) > .3 else (255, 255, 255)
             im, mx, my = panel(tw, bh, kind, back, round(L["cap"]))
             put(cv, fade(im, vis), (L["x0"] + L["x1"] - tw) / 2 - mx, L["top"] - my)
@@ -586,11 +746,176 @@ def frame(tx, dims, a, b, fps, avoid_bottom=False, placed=None):
     return cv
 
 
+def _moved(a, b):
+    """How far (px) the drawn text moved between two canvases: the largest shift of an edge of its alpha box."""
+    ba, bb = a.getchannel("A").getbbox(), b.getchannel("A").getbbox()
+    return max(abs(x - y) for x, y in zip(ba, bb)) if ba and bb else 0
+
+
+def _average(ims):
+    """Mean of RGBA images in premultiplied alpha (no dark fringes), computed only over their union box."""
+    import numpy as np
+    from PIL import Image
+    boxes = [b for b in (im.getchannel("A").getbbox() for im in ims) if b]
+    if not boxes:
+        return ims[0]
+    box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    arr = np.stack([np.asarray(im.crop(box), np.float32) for im in ims])
+    al = arr[..., 3:4]
+    am = al.mean(0)
+    rgb = (arr[..., :3] * al).mean(0) / np.maximum(am, 1e-6)
+    out = ims[0].copy()
+    out.paste(Image.fromarray(np.concatenate([rgb, am], -1).round().clip(0, 255).astype(np.uint8), "RGBA"), box[:2])
+    return out
+
+
+def frame(tx, dims, a, b, fps, avoid_bottom=False, placed=None):
+    """Full-frame RGBA of one text at key (a, b) = frame_key(...). placed: place(...) of this text (default: nothing
+    known about the picture, so the template's usual band and shadow only). A fast entrance (the text moves over 1% of
+    the short side in half a frame) is averaged over 3 samples of a half-frame shutter: light motion blur."""
+    L, kind = placed or place(tx, dims, avoid_bottom)
+    tx = {**DEFAULT, **tx}
+    t, r = a / fps, b / fps
+    cv = _draw(tx, L, kind, dims, t, r)
+    if tx["template"] in BLURRED and 0 < a < round(in_seconds(tx) * fps):
+        early = _draw(tx, L, kind, dims, t - .5 / fps, r)
+        if _moved(cv, early) > .01 * min(dims):
+            cv = _average([cv, _draw(tx, L, kind, dims, t - .25 / fps, r), early])
+    return cv
+
+
 # ---------- the overlay stream (titles merged with captions)
 
-def _per_frame(tl, f0, total):
-    """[(text index, key), ...] per output frame of the window, the step used, and the distinct (index, key) count."""
+# ---------- text-behind: the subject's mask, per frame, cut out of the text
+
+def _foreground(bgr):
+    """Apple Vision foreground mask of every subject instance in a BGR frame: uint8 0..255 at the frame's size (all 0
+    when Vision sees no subject), or None when Vision is unavailable or fails."""
+    try:
+        import cv2
+        import numpy as np
+        import Quartz
+        import Vision
+        from Foundation import NSData
+        import core
+    except ImportError:
+        return None
+    ok, jpg = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        return None
+    try:
+        data = NSData.dataWithBytes_length_(jpg.tobytes(), len(jpg))
+        req = Vision.VNGenerateForegroundInstanceMaskRequest.alloc().init()
+        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(data, {})
+        with core.VISION_SLOTS:  # unbounded parallel Vision calls deadlock (core.VISION_SLOTS)
+            done, _ = handler.performRequests_error_([req], None)
+            if not done:
+                return None
+            res = req.results()
+            if not res:
+                return np.zeros(bgr.shape[:2], np.uint8)
+            buf, _ = res[0].generateScaledMaskForImageForInstances_fromRequestHandler_error_(res[0].allInstances(), handler, None)
+        if buf is None or Quartz.CVPixelBufferGetPixelFormatType(buf) != Quartz.kCVPixelFormatType_OneComponent32Float:
+            return None
+        Quartz.CVPixelBufferLockBaseAddress(buf, Quartz.kCVPixelBufferLock_ReadOnly)
+        try:
+            w, h = Quartz.CVPixelBufferGetWidth(buf), Quartz.CVPixelBufferGetHeight(buf)
+            row = Quartz.CVPixelBufferGetBytesPerRow(buf)
+            raw = Quartz.CVPixelBufferGetBaseAddress(buf).as_buffer(row * h)
+            m = np.frombuffer(raw, np.float32).reshape(h, row // 4)[:, :w]
+            m = (np.clip(m, 0, 1) * 255).astype(np.uint8)  # copies out of the locked buffer
+        finally:
+            Quartz.CVPixelBufferUnlockBaseAddress(buf, Quartz.kCVPixelBufferLock_ReadOnly)
+        return m if m.shape == bgr.shape[:2] else cv2.resize(m, (bgr.shape[1], bgr.shape[0]))
+    except Exception:  # text-behind falls back to plain text
+        import logging
+        logging.getLogger("kioku.titles").exception("foreground mask")
+        return None
+
+
+@functools.lru_cache(2)
+def mattes(path, i0, n):
+    """Foreground masks of frames i0 .. i0 + n - 1 of a rendered clip file, read in one pass: a tuple of uint8 arrays
+    (540 px on the short side at most) or None per frame. Clip files are named by content, so the cache cannot go stale.
+    ponytail: in memory only (about 60 MB for 4 s at 30 fps); a disk cache if repeated renders show up in timings."""
+    import cv2
+    out = []
+    cap = cv2.VideoCapture(str(path))
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i0)
+        for _ in range(n):
+            ok, bgr = cap.read()
+            if not ok or bgr is None:
+                break
+            h, w = bgr.shape[:2]
+            k = 540 / min(h, w)
+            if k < 1:
+                bgr = cv2.resize(bgr, (round(w * k), round(h * k)), interpolation=cv2.INTER_AREA)
+            out.append(_foreground(bgr))
+    finally:
+        cap.release()
+    return tuple(out + [None] * (n - len(out)))
+
+
+def behind_plan(tx, at):
+    """(per-frame masks of the text, top of the subject as a fraction of the height) for a text-behind text, or
+    (None, reason) to draw it as plain text: it must sit inside one shot, Vision must work, and the subject must cover
+    BEHIND_COVER of the frame. (None, None): nothing of it is in this window, or nothing known about the picture."""
+    import numpy as np
+    srcs = [at(tx["start_frame"] + i) if at else None for i in range(tx["frames"])]
+    got = [s for s in srcs if s]
+    if not got:
+        return None, None
+    if len({p for p, _ in got}) > 1:
+        return None, "spans a cut, so it is drawn in front; keep text-behind inside one shot"
+    i0 = min(i for _, i in got)
+    run = mattes(got[0][0], i0, max(i for _, i in got) - i0 + 1)
+    masks = [run[s[1] - i0] if s else None for s in srcs]
+    seen = [m for m in masks if m is not None]
+    if not seen:
+        return None, "could not find the subject (Vision unavailable), so it is drawn in front"
+    cover = float(np.median([m.mean() / 255 for m in seen]))
+    if not BEHIND_COVER[0] <= cover <= BEHIND_COVER[1]:
+        return None, (f"has a subject covering {cover:.0%} of the frame (needs {BEHIND_COVER[0]:.0%} to "
+                      f"{BEHIND_COVER[1]:.0%}), so it is drawn in front; pick a shot with one clear subject")
+    mid = seen[len(seen) // 2]
+    rows = np.flatnonzero((mid > 127).mean(axis=1) > .02)
+    return masks, (float(rows[0]) / mid.shape[0] if len(rows) else 1.0)
+
+
+def behind_layout(L, top_frac, dims):
+    """L moved so the subject's top overlaps the lower half of the last line (the subject then hides part of it)."""
+    W, H = dims
+    _, mt, _, mb = safe_area(dims)
+    block = L["cap"] + L["pitch"] * (L["rows"] - 1)
+    top = top_frac * H + .5 * L["cap"] - block
+    return {**L, "top": min(max(top, mt * H + L["cap"] * .9), (1 - mb) * H - block - L["cap"] * .7)}
+
+
+def cut_out(im, masks, i):
+    """im (the text's full-frame RGBA) with the subject of text frame i removed from it; the mask is smoothed over
+    the neighbouring frames (less edge flicker) and feathered. Unchanged when no mask is known near i."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    near = [(masks[j].astype(np.float32), 2 if j == i else 1) for j in (i - 1, i, i + 1)
+            if 0 <= j < len(masks) and masks[j] is not None]
+    if not near:
+        return im
+    m = sum(a * w for a, w in near) / sum(w for _, w in near)
+    m = cv2.resize(m, im.size, interpolation=cv2.INTER_LINEAR)
+    m = cv2.GaussianBlur(m, (0, 0), max(.8, min(im.size) / 540))
+    arr = np.asarray(im).copy()
+    arr[..., 3] = (arr[..., 3] * (1 - m / 255)).round().clip(0, 255).astype(np.uint8)
+    return Image.fromarray(arr, "RGBA")
+
+
+def _per_frame(tl, f0, total, behind=None):
+    """[(text index, key), ...] per output frame of the window, the step used, and the distinct (index, key) count.
+    Texts in `behind` (default: every text-behind) get a key per frame, since the subject moves under them."""
     step = 1
+    if behind is None:
+        behind = {k for k, tx in enumerate(tl.texts) if tx["template"] == "text-behind"}
     while True:
         per = [()] * total
         seen = set()
@@ -598,7 +923,7 @@ def _per_frame(tl, f0, total):
             n = tx["frames"]
             ti, to = phase_frames(tx, n, tl.fps)
             for i in range(max(0, f0 - tx["start_frame"]), min(n, f0 + total - tx["start_frame"])):
-                key = (k, frame_key(i, n, ti, to, step))
+                key = (k, frame_key(i, n, ti, to, step) + ((i // step * step,) if k in behind else ()))
                 o = tx["start_frame"] + i - f0
                 per[o] = per[o] + (key,)
                 seen.add(key)
@@ -622,7 +947,15 @@ def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False, at
     f0, total = round(w0 * fps), round((w1 - w0) * fps)
     if total <= 0:
         return cap.list_file if cap else None
-    per, _, _ = _per_frame(tl, f0, total)
+    plans = {}  # text-behind: index -> (masks per text frame, subject top); the others are drawn in front
+    for k, tx in enumerate(tl.texts):
+        if tx["template"] == "text-behind" and tx["start_frame"] < f0 + total and tx["start_frame"] + tx["frames"] > f0:
+            masks, top = behind_plan(tx, at)
+            if masks is not None:
+                plans[k] = (masks, top)
+            elif top and warnings is not None:
+                warnings.append(f"text {tx.get('id', k)!r} {top}")
+    per, _, _ = _per_frame(tl, f0, total, set(plans))
     capf = []
     for name, n in (cap.runs if cap else ()):
         capf += [name] * n
@@ -640,6 +973,8 @@ def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False, at
     for k in sorted({k for (_, ks), _ in runs for k, _ in ks}):
         tx = tl.texts[k]
         placed[k] = place(tx, dims, avoid_bottom, *scene(tx, at))
+        if k in plans and tx.get("position", "auto") == "auto":
+            placed[k] = (behind_layout(placed[k][0], plans[k][1], dims), placed[k][1])
         if placed[k][0]["hit"] > .25 and warnings is not None:
             warnings.append(f"text {tx.get('id', k)!r} covers a face" + (
                 ": no band is free, move it to another clip" if tx.get("position", "auto") == "auto"
@@ -656,8 +991,9 @@ def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False, at
                 im = Image.new("RGBA", tuple(dims), (0, 0, 0, 0))
             else:
                 im = Image.open(workdir / c).convert("RGBA") if c else Image.new("RGBA", tuple(dims), (0, 0, 0, 0))
-                for k, (a, b) in ks:
-                    im.alpha_composite(frame(tl.texts[k], dims, a, b, fps, avoid_bottom, placed[k]))
+                for k, key in ks:
+                    f = frame(tl.texts[k], dims, key[0], key[1], fps, avoid_bottom, placed[k])
+                    im.alpha_composite(cut_out(f, plans[k][0], key[2]) if k in plans else f)
             im.save(workdir / name, compress_level=1)
         return names[state]
 
