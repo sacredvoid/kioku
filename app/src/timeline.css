@@ -41,6 +41,7 @@
 .tl-canvas { position: relative; min-width: 100% }
 .tl-ruler { position: relative; height: 26px; border-bottom: 1px solid var(--line-soft); cursor: col-resize; touch-action: none }
 .tl-tick { position: absolute; top: 0; height: 100%; padding: 6px 0 0 5px; border-left: 1px solid var(--line); font: 10.5px var(--mono); color: var(--text-3); pointer-events: none }
+.tl-beat { position: absolute; bottom: 0; width: 1px; height: 7px; background: var(--accent, #e8b04a); opacity: .55; pointer-events: none }
 .tl-lane { position: relative; border-bottom: 1px solid var(--line-soft) }
 .tl-v { height: 68px }
 .tl-a { height: 44px; transition: background .2s var(--ease) }

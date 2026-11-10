@@ -44,10 +44,15 @@ const H = { ruler: 26, v: 68, a: 44, c: 30 };
 const MIN_LEN = 0.2;
 const STILL = 3;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
-const TR_LABEL: Record<string, string> = { cut: "Cut", dissolve: "Dissolve", "fade-black": "Fade black", "wipe-left": "Wipe left", "wipe-right": "Wipe right", "slide-left": "Slide left" };
+const TR_LABEL: Record<string, string> = { cut: "Cut", dissolve: "Dissolve", "fade-black": "Fade black", "wipe-left": "Wipe left", "wipe-right": "Wipe right", "slide-left": "Slide left",
+  "slide-up": "Slide up", "zoom-in": "Zoom in", "whip-left": "Whip left", "whip-right": "Whip right", "flash-white": "Flash", blur: "Blur", circle: "Circle", squeeze: "Squeeze" };
+const MOTION_LABEL: Record<string, string> = { none: "None", push: "Push in", pull: "Pull out", "drift-left": "Drift left", "drift-right": "Drift right", punch: "Punch on beats" };
+const RAMP_LABEL: Record<string, string> = { none: "None", "slow-mid": "Fast, slow, fast", "fast-in": "Fast start", "slow-out": "Slow finish" };
+const SFX_LABEL: Record<string, string> = { none: "No sound", whoosh: "Whoosh", hit: "Hit", riser: "Riser" };
 const ADJ: [string, string, number, number, number, number][] = [  // flat key, label, min, max, step, default
   ["exposure", "Exposure", -1, 1, .05, 0], ["contrast", "Contrast", .8, 1.3, .02, 1], ["saturation", "Saturation", 0, 1.6, .05, 1], ["warmth", "Warmth", -1, 1, .05, 0]];
-const DEFAULTS: Flat = { speed: 1, volume: 1, mute: false, captions: false, exposure: 0, contrast: 1, saturation: 1, warmth: 0, reframe_mode: "center", reframe_pos: .5, reframe_from: .5, reframe_to: .5 };
+const DEFAULTS: Flat = { speed: 1, volume: 1, mute: false, captions: false, exposure: 0, contrast: 1, saturation: 1, warmth: 0, reframe_mode: "center", reframe_pos: .5, reframe_from: .5, reframe_to: .5,
+  beats: 0, hit: -1, motion: "none", motion_amount: .35, flash: false, shake: false, ramp: "none" };
 
 const tc = (t: number, fps: number) => {
   const f = Math.floor((t % 1) * fps + 1e-6), s = Math.floor(t);
@@ -297,7 +302,7 @@ class Editor {
   fxToFlat(fx: ClipFx | undefined): Flat {
     const o: Flat = {};
     if (!fx) return o;
-    for (const k of ["speed", "volume", "mute", "captions"] as const) if (fx[k] != null) o[k] = fx[k];
+    for (const k of ["speed", "volume", "mute", "captions", "beats", "hit", "motion", "motion_amount", "flash", "shake", "ramp"] as const) if (fx[k] != null) o[k] = fx[k];
     for (const [k, v] of Object.entries(fx.adjust ?? {})) o[k] = v;
     if (fx.look) { o.look = fx.look.name ?? "none"; o.look_strength = fx.look.strength; }
     if (fx.reframe) {
@@ -377,6 +382,12 @@ class Editor {
     const old = clone(this.spec.transitions[String(id)]);
     const put = (b: Flat) => api(`/collections/${this.cid}/edit/transitions/${this.rid(id)}`, "PUT", b);
     return this.act("Change transition", () => put({ type, duration }), () => put(old ?? { type: "cut" }));
+  }
+  setSfx(id: number, sfx: string) {
+    const t = this.spec.transitions[String(id)], cur = { type: t?.type ?? "cut", duration: t?.duration ?? .5 };
+    const old = this.spec.sfx?.[String(id)] ?? "none";
+    const put = (b: Flat) => api(`/collections/${this.cid}/edit/transitions/${this.rid(id)}`, "PUT", b);
+    return this.act("Change seam sound", () => put({ ...cur, sfx }), () => put({ ...cur, sfx: old }));
   }
   addClips(uuids: string[]) {
     if (!uuids.length) return;
@@ -610,6 +621,8 @@ class Editor {
       m.style.left = `${t * this.pps}px`;
       f.append(m);
     }
+    const grid = this.model.edit.grid ?? [], every = Math.max(1, Math.ceil(6 / Math.max(this.pps * ((grid[1] ?? 1) - (grid[0] ?? 0)), 1e-6)));
+    grid.forEach((t, i) => { if (i % every === 0) { const b = el("span", "tl-beat"); b.style.left = `${t * this.pps}px`; f.append(b); } });
     this.ruler.replaceChildren(f);
   }
   renderLabels() {
@@ -1044,7 +1057,14 @@ class Editor {
       chips.append(c);
     }
     const warn = this.model.edit.warnings.filter((w) => /transition/i.test(w)).join(" ");
-    this.pop.replaceChildren(chips, el("div", "tl-pop-row"), warn ? el("div", "tl-pop-note muted", warn) : el("span"));
+    const snd = document.createElement("select");
+    snd.setAttribute("aria-label", "Sound on this cut");
+    (this.model.edit.options.sfx?.length ? this.model.edit.options.sfx : ["none"]).forEach((x) => snd.append(new Option(SFX_LABEL[x] ?? x, x)));
+    snd.value = this.spec.sfx?.[String(id)] ?? "none";
+    snd.onchange = () => { this.setSfx(id, snd.value); this.pop.hidden = true; };
+    const sndRow = el("div", "tl-pop-row");
+    sndRow.append(el("span", "muted", "Sound"), snd);
+    this.pop.replaceChildren(chips, el("div", "tl-pop-row"), sndRow, warn ? el("div", "tl-pop-note muted", warn) : el("span"));
     (this.pop.children[1] as HTMLElement).append(el("span", "muted", "0.2"), slider, el("span", "muted", "2"), val);
     this.pop.hidden = false;
     const w = this.wrap.getBoundingClientRect(), s = seam.getBoundingClientRect();
@@ -1194,6 +1214,36 @@ class Editor {
           const rf = fx.reframe ?? {};
           f.append(row("Reframe", range(0, 1, .02, rf.pos ?? .5, (v) => this.patchClip(id, { reframe_mode: "manual", reframe_pos: v }, "Reframe clip"), (v) => `${Math.round(v * 100)}%`)));
         }
+        const pick = (labels: Record<string, string>, vals: string[], cur: string, aria: string, commit: (v: string) => void) => {
+          const s = document.createElement("select");
+          s.setAttribute("aria-label", aria);
+          vals.forEach((v) => s.append(new Option(labels[v] ?? v, v)));
+          s.value = cur;
+          s.onchange = () => commit(s.value);
+          return s;
+        };
+        const o = this.model.edit.options, synced = !!this.spec.sync?.track;
+        f.append(row("Motion", pick(MOTION_LABEL, o.motions ?? ["none"], fx.motion ?? "none", "Motion", (v) => this.patchClip(id, { motion: v }, "Change motion"))));
+        if (fx.motion) f.append(row("Amount", range(0, 1, .05, fx.motion_amount ?? .35, (v) => this.patchClip(id, { motion_amount: v }, "Change motion amount"), (v) => `${(1 + .3 * v).toFixed(2)}x`)));
+        f.append(row("Flash", check(!!fx.flash, (v) => this.patchClip(id, { flash: v }, "Change flash"))));
+        if (synced) {
+          f.append(row("Shake", check(!!fx.shake, (v) => this.patchClip(id, { shake: v }, "Change shake")), "on each beat"));
+          const b = document.createElement("input");
+          b.type = "number"; b.min = "0"; b.max = "32"; b.step = "1"; b.value = String(fx.beats ?? 0);
+          b.setAttribute("aria-label", "Length in beats, 0 = from its trim");
+          b.onchange = () => this.patchClip(id, { beats: clamp(Math.round(Number(b.value) || 0), 0, 32) }, "Change beats");
+          f.append(row("Beats", b, fx.beats ? "" : "auto"));
+        }
+        if (it.video) {
+          f.append(row("Ramp", pick(RAMP_LABEL, o.ramps ?? ["none"], fx.ramp ?? "none", "Speed ramp", (v) => this.patchClip(id, { ramp: v }, "Change speed ramp")), fx.ramp ? "own sound off" : ""));
+          if (synced) {
+            const l = this.lay[k], at = round2((it.t0 ?? 0) + (this.player.time - (l?.start ?? 0)) * this.speedOf(id));
+            const hitActs = el("div", "tl-acts");
+            hitActs.append(btn("Hit at playhead", "", () => this.patchClip(id, { hit: at }, "Set beat hit"), "Land the moment under the playhead on a beat"));
+            if (fx.hit != null) hitActs.append(btn(`Clear hit (${fx.hit.toFixed(2)}s)`, "ghost", () => this.patchClip(id, { hit: -1 }, "Clear beat hit")));
+            f.append(hitActs);
+          }
+        }
         const adj = el("details", "tl-adj");
         adj.append(el("summary", "", "Adjust"));
         for (const [key, label, lo, hi, step, def] of ADJ) adj.append(row(label, range(lo, hi, step, fx.adjust?.[key as "exposure"] ?? def, (v) => this.patchClip(id, { [key]: v }, `Adjust ${label.toLowerCase()}`))));
@@ -1226,6 +1276,23 @@ class Editor {
       f.append(head);
       f.append(row("Clip sound", range(0, 1, .05, this.spec.clip_volume ?? 1, (v) => this.patchEdit({ clip_volume: v }, "Change clip sound", { clip_volume: this.spec.clip_volume ?? 1 }), (v) => `${Math.round(v * 100)}%`)));
       f.append(row("Duck under voiceover", check(!!this.spec.duck, (v) => this.patchEdit({ duck: v }, "Change ducking", { duck: !v }))));
+      const sy = this.spec.sync ?? { track: null, grid: "beat", lead: 1 };
+      const st = document.createElement("select");
+      st.setAttribute("aria-label", "Cut to the beat of");
+      st.append(new Option("Off", "none"));
+      this.tracks().forEach((t) => st.append(new Option(base(t.path), t.id)));
+      st.value = sy.track ?? "none";
+      st.onchange = () => this.patchEdit({ sync_track: st.value }, "Change beat sync", { sync_track: sy.track ?? "none" });
+      f.append(row("Cut to beat", st, this.tracks().length ? "" : "add music first"));
+      if (sy.track) {
+        const gs = document.createElement("select");
+        gs.setAttribute("aria-label", "Beat grid");
+        ([["beat", "Every beat"], ["half", "Every 2nd beat"], ["downbeat", "Bars"]] as const).forEach(([v, l]) => gs.append(new Option(l, v)));
+        gs.value = sy.grid;
+        gs.onchange = () => this.patchEdit({ sync_grid: gs.value }, "Change beat grid", { sync_grid: sy.grid });
+        f.append(row("Grid", gs));
+        f.append(row("Cut early", range(0, 3, 1, sy.lead, (v) => this.patchEdit({ sync_lead: v }, "Change cut lead", { sync_lead: sy.lead }), (v) => `${v} fr`)));
+      }
       f.append(el("p", "muted tl-hint", "Click a clip to edit it. Drag to reorder, drag its edges to trim, click a seam for a transition, press S to split."));
     }
     this.insp.replaceChildren(f);

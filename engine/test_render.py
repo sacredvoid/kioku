@@ -652,4 +652,18 @@ assert "data/index.db" not in str(core.DB_PATH)
 projects.jobs.pop((1, "preview"), None)
 j = c.get("/collections/1/render/preview").json()
 assert j["status"] == "done" and j.get("saved") and j["path"] == render.saved_preview(1)["path"], j
+# rhythm: moving clips, a ramp, a held last frame and seam sounds go through the whole preview pipeline
+from dataclasses import replace  # noqa: E402
+r14 = mk([("A", "video", 0, 1, 1, None), ("C", "video", 0, 1.5, 1, ("smoothleft", 6)), ("E", "photo", 0, 1, 1, None)])
+segs = list(r14.segs)
+segs[0] = replace(segs[0], motion=("punch", 0.5), flash=True, shake=True, beat_frames=(15,))
+segs[1] = replace(segs[1], ramp="slow-mid", volume=0.0, motion=("drift-left", 0.3), src_out=1.0)  # source shorter than needed: holds
+segs[2] = replace(segs[2], motion=("push", 0.4))
+PLAN[77] = replace(r14, segs=tuple(segs), sfx=((segs[1].start_frame, "whoosh"), (segs[2].start_frame, "hit")))
+db.execute("insert into collections(id, name, kind, created, updated) values (77,'P77','project',1.0,1.0)")
+db.commit()
+res, n = go(77)
+assert n == 3 and abs(duration(res["path"]) - PLAN[77].duration) < 0.1, (res, duration(res["path"]))
+assert any("whoosh.wav" in " ".join(map(str, cmd)) and "hit.wav" in " ".join(map(str, cmd)) for cmd in RUNS), "seam sounds not mixed"
+assert_clean()
 print("render checks passed")

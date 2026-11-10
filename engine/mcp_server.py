@@ -197,7 +197,8 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
              caption_position: str = "", caption_font: str = "", caption_size: str = "", caption_color: str = "",
              caption_highlight_color: str = "", caption_highlight: bool | None = None, caption_uppercase: bool | None = None,
              caption_max_words: int = -1, fade_in: float = -1, fade_out: float = -1,
-             clip_volume: float = -1, duck: bool | None = None) -> dict:
+             clip_volume: float = -1, duck: bool | None = None, sync_track: str = "", sync_grid: str = "",
+             sync_lead: int = -1) -> dict:
     """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
     stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop). size: short side 720, 1080 or 2160.
     fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
@@ -213,7 +214,11 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
     Turning captions on or picking clips starts the transcription and returns at once; check get_edit
     captions_status.pending before rendering. fade_in / fade_out: seconds 0 to 3, the whole video fades from / to
     black and silence (0 = none). clip_volume 0 to 1 scales every clip's own sound; duck (default true) lowers clip
-    sound under the audio tracks from set_audio."""
+    sound under the audio tracks from set_audio.
+    Beat sync: sync_track = the audio track id of the music (add it first with add_sound / set_audio), "none" turns it off.
+    Every cut then lands on the music's beat grid; get_edit returns `grid` (beat times on the output timeline).
+    sync_grid: beat (default), half (every 2nd beat, calmer) or downbeat (bar starts, slowest). sync_lead 0 to 3 frames the
+    cut lands before the beat (default 1; it reads as on time). Set each clip's length in beats with set_clip_fx(beats=)."""
     body = drop_unset(aspect=aspect or None, size=size or None, fps=fps or None, look_strength=None if look_strength < 0 else look_strength,
                       captions=captions, caption_style=caption_style or None, caption_clips=caption_clips,
                       caption_position=caption_position or None, caption_font=caption_font or None, caption_size=caption_size or None,
@@ -221,7 +226,10 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
                       caption_highlight=caption_highlight, caption_uppercase=caption_uppercase,
                       caption_max_words=None if caption_max_words < 0 else caption_max_words,
                       fade_in=None if fade_in < 0 else fade_in, fade_out=None if fade_out < 0 else fade_out,
-                      clip_volume=None if clip_volume < 0 else clip_volume, duck=duck)
+                      clip_volume=None if clip_volume < 0 else clip_volume, duck=duck,
+                      sync_grid=sync_grid or None, sync_lead=None if sync_lead < 0 else sync_lead)
+    if sync_track:
+        body["sync_track"] = None if sync_track.lower() == "none" else sync_track
     if look:
         body["look"] = None if look.lower() == "none" else look
     if not body:
@@ -234,16 +242,25 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
                 exposure: float | None = None, contrast: float | None = None, saturation: float | None = None,
                 warmth: float | None = None, look: str | None = None, look_strength: float | None = None,
                 reframe_mode: str | None = None, reframe_pos: float | None = None, reframe_from: float | None = None,
-                reframe_to: float | None = None, mute: bool | None = None) -> dict:
+                reframe_to: float | None = None, mute: bool | None = None, beats: int | None = None,
+                hit: float | None = None, motion: str | None = None, motion_amount: float | None = None,
+                flash: bool | None = None, shake: bool | None = None, ramp: str | None = None) -> dict:
     """Change one clip's look and motion. Only the arguments you pass change; speed also scales its audio (0.25 to 4;
     photos cannot change speed). volume 0 to 2. exposure and warmth -1 to 1, contrast 0.8 to 1.3, saturation 0 to 1.6.
     look: a name from get_edit, or "none" for no look on this clip even when the project has one.
     reframe_mode: center, manual (reframe_pos) or pan (reframe_from to reframe_to); positions are 0 to 1 along the
     axis being cropped. mute=true silences this clip's own sound (voiceover and music tracks stay). Item ids come from
-    get_collection."""
+    get_collection.
+    Rhythm (needs sync on, see set_edit): beats 1 to 32 = how many grid units the clip lasts (0 = from its in/out length);
+    hit = a source time in seconds (the jump, the clap, the splash) that must land exactly on a beat; -1 clears it.
+    Motion: motion push (slow zoom in), pull (zoom out), drift-left / drift-right (slow pan), punch (snaps in and out on
+    each beat), none; motion_amount 0 to 1 (default 0.35, 1 = 1.3x). flash=true: white pulse on the clip's first frame
+    (a drop or a big moment). shake=true: a short shake on each beat in the clip (at most half the clips; peaks only).
+    ramp: slow-mid (fast, slow-motion middle, fast), fast-in, slow-out, none; silences the clip's own sound."""
     body = drop_unset(speed=speed, volume=volume, exposure=exposure, contrast=contrast, saturation=saturation,
                       warmth=warmth, look_strength=look_strength, reframe_mode=reframe_mode, reframe_pos=reframe_pos,
-                      reframe_from=reframe_from, reframe_to=reframe_to, mute=mute)
+                      reframe_from=reframe_from, reframe_to=reframe_to, mute=mute, beats=beats, hit=hit, motion=motion,
+                      motion_amount=motion_amount, flash=flash, shake=shake, ramp=ramp)
     if look is not None:
         body["look"] = look.lower() if look.lower() == "none" else look  # engine: "none" = no look on this clip
     if not body:
@@ -252,11 +269,17 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
 
 
 @server.tool()
-def set_transition(collection_id: int, after_item_id: int, type: str, duration: float = 0.5) -> dict:
-    """Join a clip to the next one. type: cut, dissolve, fade-black, wipe-left, wipe-right, slide-left. Duration 0.2 to 2 s,
-    capped at half the shorter clip; transitions shorten the edit by their duration. Use 'cut' to remove one."""
+def set_transition(collection_id: int, after_item_id: int, type: str, duration: float = 0.5, sfx: str = "") -> dict:
+    """Join a clip to the next one. type: cut, dissolve, fade-black, flash-white, zoom-in, whip-left, whip-right, blur,
+    slide-left, slide-up, wipe-left, wipe-right, circle, squeeze. Duration 0.2 to 2 s, capped at half the shorter clip;
+    unsynced, transitions shorten the edit by their duration (synced, the overlap is centred on the beat).
+    sfx: whoosh (pairs with whip, zoom-in, slide), hit (a hard cut on a drop), riser (builds into the seam), none.
+    Leave sfx empty to keep the current one. type cut with an sfx keeps a hard cut with a sound."""
     path = f"/collections/{collection_id}/edit/transitions/{after_item_id}"
-    return call("DELETE", path) if type == "cut" else call("PUT", path, {"type": type, "duration": duration})
+    body = {"type": type, "duration": duration}
+    if sfx:
+        body["sfx"] = sfx
+    return call("PUT", path, body)
 
 
 @server.tool()
