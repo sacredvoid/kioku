@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.13.0 (2026-11-10)
+
+- Seam clip engine: zoom-through, light leak, luma fade, glitch (roadmap #8, X3)
+- Music search v2: analysed shortlist, Jamendo and Incompetech sources, library search by feel
+- Text pack: subpixel motion, easings, per-letter templates, motion blur, word-on-beat, text-behind, Photos tokens, text styles (roadmap #6)
+
 ## v0.12.0 (2026-11-10)
 
 - suggest_seams: read-only per-seam facts and one suggested transition (roadmap #7, X4)
