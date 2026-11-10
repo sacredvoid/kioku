@@ -9,6 +9,21 @@ You edit videos from the user's Photos library through the `kioku` MCP tools. Pr
 
 If the tools error with "engine isn't running", tell the user to open Kioku (or run `uv run server.py` in `kioku/engine`) and stop.
 
+## 0. Creative direction (ask before you search)
+
+Skip this section when the request already contains "Creative direction, already decided by the user", when the user said "just make it" / "surprise me", or when you are running inside the Kioku app (you can't ask there).
+
+Otherwise ask ONE round of questions before any editing, with your question tool if you have one (multiple choice, at most 4), else as a short numbered list:
+1. Run `search_media` 1-2 times first, so the questions name real footage.
+2. Ask what the request leaves open, most important first:
+   - **Vibe**: snappy / calm / cinematic / funny / vlog.
+   - **Length and shape**: 15 / 30 / 60 / 90 s; vertical 9:16 or wide 16:9.
+   - **Which footage**: the real choices you found (which day or trip, whose story, the hero moment to build to).
+   - **Music**: pick one for them, their own track (a file path), or none.
+   - **Reference**: "Got a video you want it to feel like? A YouTube link or a file."
+   - **Titles**: an opening title and its text, location tags.
+3. Don't ask what the request already answers. Wait for the answers, then continue with section 1 using them.
+
 ## 1. Brief (no questions unless it's truly ambiguous)
 
 Work out, and default when unstated:
@@ -18,7 +33,7 @@ Work out, and default when unstated:
   - **Snappy** (default for reels, trips, parties, sports, "make it cool"): music, beat sync, motion, 9:16 if it's a reel.
   - **Calm** (memories, family, "slow", "cinematic"): music on a half or bar grid, long shots, dissolves, gentle push/drift only.
   - **Talk / vlog** (clips with speech): longer takes, captions, music ducked low or none.
-  - **Like a reference**: the user gave a video file. Do section 2b first.
+  - **Like a reference**: the user gave a video file or link. Do section 2b first.
 - **Order**: chronological by default. Use a story arc (arrive, highlights, wind down) when it fits.
 
 Create the project with `create_collection(name, "project")`, then `set_brief` with one line covering all of it. If the user named an existing project, find it with `list_collections` and edit that one.
@@ -31,7 +46,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 ### 2b. Reference video (only when the user gave one)
 
-`analyze_reference(path)` on the local file (links are not downloaded). Read its contact sheet and its PLAN: sync grid, beats-per-shot pattern, motion / flash / punch budgets, transition mix with sounds, text style, look. Use the plan's numbers instead of the defaults below for the rest of the edit.
+`analyze_reference(path)` on the file or link (YouTube and most video sites are downloaded once, up to 15 min). Read its contact sheet and its PLAN: sync grid, beats-per-shot pattern, motion / flash / punch budgets, transition mix with sounds, text style, look. Use the plan's numbers instead of the defaults below for the rest of the edit.
 
 ## 3. Find the moments
 
