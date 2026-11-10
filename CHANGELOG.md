@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.3 (2026-11-09)
+
+- Copy project previews out of Photos once, so scrubbing stops prompting
+
 ## v0.3.2 (2026-11-09)
 
 - Run the engine bundled in Kioku.app, venv in ~/Kioku
