@@ -404,7 +404,6 @@ function confirmInline(btn: HTMLButtonElement, msg: string, action: () => Promis
 // ---------- project view: clip list with in/out, brief, ask Claude, export
 function renderProject(c: Collection & { brief: string }, items: Item[]) {
   project.hidden = false;
-  const total = items.reduce((s, it) => s + clipLen(it), 0);
 
   // the brief: what Claude aims for on every edit. Read-only until Edit, so it isn't changed by a stray click.
   const brief = el("section", "brief-box");
@@ -605,7 +604,8 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
 
   // deliver row, like FCP's Share: export, preview, render together above the editor
   const meta = el("div", "proj-meta");
-  meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), versionPicker(c.id), exp, prevBtn, rendBtn);
+  // duration lives in the timeline: summed clip lengths ignored beat sync, speed and transitions (said 1:28 for a 57 s edit)
+  meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"}`), el("span", "spacer"), versionPicker(c.id), exp, prevBtn, rendBtn);
 
   // Claude panel: live steps of a running edit, then one compact line that opens into every past edit
   const runs = el("section", "runs");
@@ -664,7 +664,6 @@ function versionPicker(cid: number) {
 }
 
 let previewStart = 0;  // output second where the last preview file starts
-const clipLen = (it: Item) => it.video ? ((it.t1 ?? it.dur) - (it.t0 ?? 0)) : (it.t1 != null ? it.t1 - (it.t0 ?? 0) : 3);
 
 
 // ---------- audio: voiceover / music tracks (at most 3), clip sound level, mute marks on the clip list
