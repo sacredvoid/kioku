@@ -37,7 +37,10 @@ sys.modules.setdefault("server", sys.modules[__name__])
 import albums  # noqa: E402
 import captions
 import edit
+import moments
 import sounds
+import reference
+import direction
 import render
 
 log = logging.getLogger("kioku")
@@ -156,12 +159,15 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=1)
 app.include_router(library.router)
 app.include_router(projects.router)
 app.include_router(media.router)
+app.include_router(moments.router)
 app.include_router(settings.router)
 app.include_router(edit.router)
 app.include_router(render.router)
 app.include_router(captions.router)
 app.include_router(albums.router)
 app.include_router(sounds.router)
+app.include_router(reference.router)
+app.include_router(direction.router)
 app.add_exception_handler(RequestValidationError, library.validation_error)
 
 

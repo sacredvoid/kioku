@@ -48,7 +48,7 @@ def trim(cid, iid, t0, t1):
 # defaults, and albums have no edit
 cid, ids = project("V", "V", "P")
 g = c.get(f"/collections/{cid}/edit").json()
-assert g["spec"] == edit.default_spec() and g["rev"] == 0 and g["options"]["looks"] == sorted(edit.LOOKS), g
+assert g["spec"] == edit.default_spec() and g["rev"] == 0 and g["options"]["looks"] == [*sorted(edit.LOOKS), *edit.LUTS], g
 alb = c.post("/collections", json={"name": "a", "kind": "album"}).json()["id"]
 assert c.get(f"/collections/{alb}/edit").status_code == 422
 assert c.patch(f"/collections/{alb}/edit", json={"fps": 24}).status_code == 422

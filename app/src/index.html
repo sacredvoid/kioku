@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="./review.css">
   <link rel="stylesheet" href="./player.css">
   <link rel="stylesheet" href="./timeline.css">
+  <link rel="stylesheet" href="./compose.css">
   <script type="module" src="./main.ts"></script>
 </head>
 <body>
@@ -91,6 +92,7 @@
         </form>
         <p class="k-hint">Start with make, cut or recap to have Claude edit a video. Anything else searches your library.</p>
         <div class="k-sugg chips" id="ask-sugg" role="group" aria-label="Try one of these"></div>
+        <div id="ask-compose" hidden></div>
       </div>
       <section class="k-card k-latest" id="ask-live" aria-labelledby="ask-live-h" hidden></section>
       <div class="k-board">

@@ -32,6 +32,8 @@
     "targets": ["app"],
     "resources": {
       "../../engine/*.py": "engine/",
+      "../../engine/fonts/*": "engine/fonts/",
+      "../../engine/luts/*": "engine/luts/",
       "../../engine/pyproject.toml": "engine/pyproject.toml",
       "../../engine/uv.lock": "engine/uv.lock",
       "../../engine/.python-version": "engine/.python-version",

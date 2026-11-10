@@ -5,6 +5,7 @@ import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 import * as review from "./review";
 import { timeline } from "./timeline";
+import { openComposer, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
 
@@ -1326,7 +1327,10 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- Ask: the landing page. "make / cut / recap ..." starts a new Claude edit; anything else is a library search.
-const MAKE = /^\s*(?:please\s+)?(?:make|cut|create|edit|recap|build|assemble|compile|stitch|put together|turn)\b/i;
+// A request to edit: a make-verb first, optionally after a polite lead ("can you", "I'd like you to", "let's"),
+// or "I want / give me a <...> video". Anything else is a search.
+const LEAD = String.raw`^\s*(?:(?:hey|hi|ok(?:ay)?|so)[,!.\s]+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|i(?:\s+(?:want|need|would\s+like|wanna)|['’]d\s+like)\s+(?:you\s+)?(?:to\s+)?|let['’]?s\s+|help\s+me\s+|go\s+ahead\s+and\s+)?(?:please\s+)?`;
+const MAKE = new RegExp(LEAD + String.raw`(?:(?:make|cut|create|edit|recap|build|assemble|compile|stitch|put together|turn)\b|(?:i(?:\s+(?:want|need|would\s+like)|['’]d\s+like)|give\s+me|get\s+me)\s+(?:a|an)\s+(?:[\w-]+\s+){0,3}?(?:video|reel|recap|montage|movie|edit)\b)`, "i");
 const SUGGEST = ["Make a 30 second reel of last weekend", "Recap this month, warm and upbeat", "Find sunsets from the car", "Find dinners with friends"];
 
 /** A short project name from the prompt: "Make a 30 s reel of Halloween, punchy" becomes "Halloween". */
@@ -1338,21 +1342,25 @@ function nameFrom(prompt: string) {
   return (name[0].toUpperCase() + name.slice(1)).slice(0, 60);
 }
 
+/** Make requests open the creative direction composer first; "Make it" there starts the edit. */
 async function askKioku(text: string) {
   text = text.trim();
   if (!text) return;
   if (!MAKE.test(text)) { q.value = text; go({ type: "lib", kind: "" }, text); return; }
-  const btn = document.querySelector<HTMLButtonElement>("#ask-form button")!;
-  btn.disabled = true;
+  const hero = document.querySelector<HTMLElement>("#ask-view .k-hero")!;
+  hero.classList.add("composing");
+  openComposer($("ask-compose"), text, (c) => startEdit(text, c), () => { hero.classList.remove("composing"); $<HTMLInputElement>("ask-q").focus(); });
+}
+
+async function startEdit(text: string, c: Composed) {
   try {
-    const c = await api<Collection>("/collections", "POST", { name: nameFrom(text), kind: "project" });
-    await api(`/collections/${c.id}`, "PATCH", { brief: text });
-    await api(`/collections/${c.id}/ask`, "POST", { prompt: text });
+    const col = await api<Collection>("/collections", "POST", { name: nameFrom(text), kind: "project" });
+    await api(`/collections/${col.id}`, "PATCH", { brief: c.brief.slice(0, 2000) });
+    await api(`/collections/${col.id}/ask`, "POST", { prompt: c.prompt.slice(0, 4000) });
     $<HTMLInputElement>("ask-q").value = "";
     await loadCollections();
-    go({ type: "col", id: c.id });  // the project view picks up the running edit and shows its steps live
-  } catch (e) { fail("start the edit")(e); }
-  finally { btn.disabled = false; }
+    go({ type: "col", id: col.id });  // the project view picks up the running edit and shows its steps live
+  } catch (e) { fail("start the edit")(e); throw e; }
 }
 $("ask-form").addEventListener("submit", (e) => { e.preventDefault(); askKioku($<HTMLInputElement>("ask-q").value); });
 $("ask-sugg").replaceChildren(...SUGGEST.map((t) => {

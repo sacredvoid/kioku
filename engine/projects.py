@@ -237,7 +237,9 @@ SYSTEM = ("You are running inside the Kioku app. Use only the kioku tools. You a
           "below.\n\nYour final message is shown in the app's project panel, above the clip list, which already "
           "lists every shot. Keep it under 120 words: one sentence on the cut (shots, length, arc), then at most 4 short "
           "bullets on what you left out or what the user should check, by shot number. No tables, no shot-by-shot "
-          "recap. The app has Preview, Render video and Export buttons, so never ask the user to type 'export' or 'render'.\n\n{skill}")
+          "recap. The app has Preview, Render video and Export buttons, so never ask the user to type 'export' or 'render'. "
+          "You cannot ask the user questions here: skip section 0 of the workflow. Any creative direction the user chose "
+          "in the app is in the request; follow it, and pick sensible defaults for anything it leaves open.\n\n{skill}")
 
 
 class Ask(BaseModel):
