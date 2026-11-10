@@ -405,6 +405,20 @@ def analyze_music(collection_id: int, track_id: str) -> dict:
 
 
 @server.tool(annotations=READ_ONLY)
+def suggest_seams(collection_id: int) -> dict:
+    """Facts about every seam (cut between two consecutive clips) and ONE suggested transition each. Read-only: it never
+    changes the edit and only reads what is already analysed, so a field is null when it is not known yet. Per seam: `at`
+    (output seconds), `beat` (downbeat / beat / off) and `bar_pos` and `energy_out` / `energy_in` (0 to 9) and
+    `section_change` when the sync track is mapped, `motion_out` / `motion_in` (amount, label still / moderate / fast,
+    direction = where the PICTURE moves, same naming as whip-*), `similarity` (+ `similarity_by`), `place_change`,
+    `gap_hours`, the `current` transition and the `suggestion` {type, duration, sfx, reason}; `change` is true when it
+    differs from the current one. The suggestion is a default: hard cut unless there is a reason, whips only on a downbeat
+    in a loud bar with matching motion, at most one per 8 s, transitions on at most 30% of seams. Call it once after
+    ordering the clips and syncing the music; apply what fits the brief with set_transition."""
+    return call("GET", f"/collections/{collection_id}/edit/seams")
+
+
+@server.tool(annotations=READ_ONLY)
 def search_sounds(query: str, kind: str = "music", max_duration: float | None = None, source: str = "free") -> dict:
     """Find music (kind="music", the default) or sound effects (kind="sfx") for a project. You cannot hear audio:
     choose from title, tags, creator and duration_s, and tell the user what you picked so they can listen in the app.
