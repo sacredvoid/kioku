@@ -43,7 +43,7 @@ SOUND = {"laugh": ("laughter", "belly_laugh", "chuckle_chortle", "baby_laughter"
          "cheer": ("cheering", "applause", "clapping", "crowd"),
          "shout": ("shout", "yell", "screaming", "children_shouting"),
          "speech": ("speech",), "music": ("music",)}
-SERIES = ("motion", "blur", "yavg", "loud", "aesth", "utility", "faces", "face_q", "humans", "sal_x", "sal_y", *SOUND)
+SERIES = ("motion", "blur", "yavg", "loud", "aesth", "utility", "faces", "face_q", "humans", "sal_x", "sal_y", "face_x", "face_y", *SOUND)
 
 
 # ---------- ffmpeg
@@ -130,13 +130,17 @@ def vision_signals(proxy, dur, n):
             if boxes:
                 b = max(boxes, key=lambda o: o.confidence()).boundingBox()
                 cx, cy = b.origin.x + b.size.width / 2, 1 - (b.origin.y + b.size.height / 2)  # Vision's y is bottom-up
+            fx, fy = (0.5, 0.5)  # centre of the largest face; only read where faces > 0 (reframe.track)
+            if face:
+                fb = max((o.boundingBox() for o in face), key=lambda b: b.size.width * b.size.height)
+                fx, fy = fb.origin.x + fb.size.width / 2, 1 - (fb.origin.y + fb.size.height / 2)
             return dict(aesth=float(aes[0].overallScore()) if aes else 0.0, utility=float(bool(aes and aes[0].isUtility())),
                         faces=float(len(face)), face_q=max([float(o.faceCaptureQuality() or 0) for o in face], default=0.0),
-                        humans=float(len(hum)), sal_x=float(cx), sal_y=float(cy))
+                        humans=float(len(hum)), sal_x=float(cx), sal_y=float(cy), face_x=float(fx), face_y=float(fy))
 
         with ThreadPoolExecutor(8) as ex:  # ponytail: 8 threads, Vision releases the GIL; 1.9 s per minute of video, lower VISION_FPS if that is too slow
             rows = list(ex.map(one, files))
-    out = {k: [] for k in ("aesth", "utility", "faces", "face_q", "humans", "sal_x", "sal_y")}
+    out = {k: [] for k in ("aesth", "utility", "faces", "face_q", "humans", "sal_x", "sal_y", "face_x", "face_y")}
     for i in range(n):
         j = min(int(i / HZ * VISION_FPS), len(rows) - 1)  # nearest sampled frame
         r = next((x for x in rows[j::-1] if x), None) if rows else None

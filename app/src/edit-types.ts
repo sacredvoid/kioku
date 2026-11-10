@@ -30,7 +30,7 @@ export type ClipFx = {
   captions?: boolean;  // absent = false
   look?: Look;         // absent = inherit the project look; name null = no look
   adjust?: { exposure?: number; contrast?: number; saturation?: number; warmth?: number };
-  reframe?: { mode?: "center" | "manual" | "pan"; pos?: number; pos_from?: number; pos_to?: number };
+  reframe?: { mode?: "center" | "manual" | "pan" | "auto"; pos?: number; pos_from?: number; pos_to?: number };
   beats?: number;          // grid units when synced, absent = from its length
   hit?: number;            // source seconds that land on a beat
   motion?: Exclude<Motion, "none">;

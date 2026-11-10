@@ -13,7 +13,7 @@ class Seg:
     volume: float
     adjust: tuple[float, float, float, float]   # exposure, contrast, saturation, warmth
     look: tuple[str, float] | None              # effective (name, strength)
-    reframe: tuple[str, float, float]           # (mode, a, b): center (.5,.5), manual (p,p), pan (from,to)
+    reframe: tuple[str, float, float]           # (mode, a, b): center (.5,.5), manual (p,p), pan (from,to), auto (.5,.5)
     frames: int                    # output length in frames at Timeline.fps
     start_frame: int               # position on the output timeline, after transition overlaps
     trans_after: tuple[str, int] | None         # (xfade name, frames) joining this seg to the next
@@ -22,6 +22,7 @@ class Seg:
     shake: bool = False                         # short decaying shake on each beat inside the clip
     ramp: str | None = None                     # edit.RAMPS name; own audio already silenced via volume
     beat_frames: tuple[int, ...] = ()           # grid points inside the clip, frames from its first frame
+    track: tuple | None = None                  # reframe "auto": subject centres ((cx, cy), ...) evenly over the clip (reframe.track)
 
 
 @dataclass(frozen=True)

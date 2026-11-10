@@ -91,7 +91,8 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
   - At most 1 text on screen, under 6 words. Keep `position="auto"`: at render time it looks at the frames under the text and picks the band (bottom, top, or middle as a last resort) that covers the fewest faces and subjects. 9:16 text also stays clear of the app's buttons and caption area. If the render warns that a text covers a face, move it to another clip before forcing a position.
   - Do not add a box or change `color` for readability: the render adds a soft scrim or a box only when the background under the text is too bright or busy for the shadow alone.
 - **Captions** (`set_edit(captions=true)`) only when clips contain speech, never on a music montage. Check `get_edit` `captions_status.pending` reaches 0 before rendering. If whisper is missing, tell the user the install command the tool returns.
-- `set_clip_fx` adjustments only for a reason: `speed` 0.5 for slow-mo, 1.5-2 for a boring stretch, `reframe_*` when the crop cuts off the subject, `exposure` / `warmth` to match a shot to its neighbours.
+- **Vertical from wide footage** (9:16 edit, landscape clips): set `reframe_mode="auto"` on each clip that has people or a clear subject, after the clips are analysed (`find_moments` / `analyze_clip`). It follows faces, then the main subject, with a slow smoothed pan. Clips without analysis or a subject use `reframe_pos` (default center), and `get_edit` warns. Check the preview; fix only the clips that are wrong with a manual `reframe_pos`. Default stays center, so do not set auto on clips that do not crop.
+- `set_clip_fx` adjustments only for a reason: `speed` 0.5 for slow-mo, 1.5-2 for a boring stretch, `reframe_mode="auto"` when the crop cuts off the subject (see below), other `reframe_*` for a fixed or panned crop, `exposure` / `warmth` to match a shot to its neighbours.
 
 ## 8. Check
 

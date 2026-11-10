@@ -28,6 +28,7 @@ import core
 import library
 import media
 import projects
+import reframe
 import versions
 import settings
 from timeline import Seg
@@ -262,6 +263,8 @@ def seg_key(seg, sid, mode, dims, fps):
         d.update(motion=seg.motion, flash=seg.flash, shake=seg.shake, ramp=seg.ramp, beats=seg.beat_frames)
     if seg.motion:
         d["ease"] = 1  # eased motion and punch: re-renders only moving clips (no RENDER_V bump for the rest)
+    if seg.track:  # the subject path and the algorithm version decide the crop, so both are in the key
+        d.update(track=seg.track, reframe_v=reframe.VERSION)
     return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -387,7 +390,20 @@ def seg_graph(seg, src, dims, fps, mode):
     if (cw, ch) != (src.w, src.h):
         mode_, a, b = seg.reframe
         a, b = (0.5, 0.5) if mode_ == "center" else (a, b)
-        if mode_ == "pan":
+        keys = None
+        if mode_ == "auto":
+            if seg.track:
+                horiz = cw < src.w
+                f = (cw / src.w) if horiz else (ch / src.h)
+                keys = reframe.path([p[0 if horiz else 1] for p in seg.track], f, L)
+            else:  # no track (should not reach here; edit.compute_timeline falls back): centre
+                keys = [(0.0, 0.5)]
+        if keys:
+            e = _n(keys[0][1])
+            for (t0, p0), (t1, p1) in zip(keys, keys[1:]):  # piecewise linear, flat sum (no nesting)
+                e += f"+{_n(p1 - p0)}*min(max((t-{_n(t0, 3)})/{_n(t1 - t0, 3)},0),1)"
+            e = f"({e})"
+        elif mode_ == "pan":
             e = f"({_n(a)}+({_n(b)}-{_n(a)})*min(max(t/{_n(L, 6)},0),1))"
         else:
             e = _n(a)

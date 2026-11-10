@@ -252,7 +252,7 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
              clip_volume: float = -1, duck: bool | None = None, sync_track: str = "", sync_grid: str = "",
              sync_lead: int = -1) -> dict:
     """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
-    stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop). size: short side 720, 1080 or 2160.
+    stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop, reframe_mode=auto follows the subject). size: short side 720, 1080 or 2160.
     fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
     unless the user wants it strong. captions=true burns the spoken words in and writes an .srt next to the video: it
     transcribes each picked clip's audio once (needs whisper.cpp; the error says how to install it); silent clips and
@@ -300,8 +300,10 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
     """Change one clip's look and motion. Only the arguments you pass change; speed also scales its audio (0.25 to 4;
     photos cannot change speed). volume 0 to 2. exposure and warmth -1 to 1, contrast 0.8 to 1.3, saturation 0 to 1.6.
     look: a name from get_edit, or "none" for no look on this clip even when the project has one.
-    reframe_mode: center, manual (reframe_pos) or pan (reframe_from to reframe_to); positions are 0 to 1 along the
-    axis being cropped. mute=true silences this clip's own sound (voiceover and music tracks stay). Item ids come from
+    reframe_mode: center, manual (reframe_pos), pan (reframe_from to reframe_to) or auto; positions are 0 to 1 along the
+    axis being cropped. auto follows the subject (faces first, then the main salient object) with a smoothed, jitter-free
+    crop; it needs the clip analysed (analyze_clip, find_moments) and otherwise uses reframe_pos. It only matters when
+    the output aspect crops the clip (landscape footage in a 9:16 edit). mute=true silences this clip's own sound (voiceover and music tracks stay). Item ids come from
     get_collection.
     Rhythm (needs sync on, see set_edit): beats 1 to 32 = how many grid units the clip lasts (0 = from its in/out length);
     hit = a source time in seconds (the jump, the clap, the splash) that must land exactly on a beat; -1 clears it.
