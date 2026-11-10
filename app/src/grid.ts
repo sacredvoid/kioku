@@ -135,6 +135,8 @@ export class Grid {
     b.className = "tile" + (this.selected.has(it.uuid) ? " sel" : "");
     b.dataset.i = String(i);
     b.dataset.uuid = it.uuid;
+    const when = new Date(it.created);  // VoiceOver read every tile as just "button"
+    b.setAttribute("aria-label", `${it.video ? `Video, ${fmtDur(it.dur)}` : "Photo"}${isNaN(+when) ? "" : `, ${when.toLocaleDateString(undefined, { dateStyle: "medium" })}`}`);
     const img = document.createElement("img");
     img.decoding = "async";
     img.alt = "";
