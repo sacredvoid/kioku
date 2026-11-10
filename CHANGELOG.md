@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.0 (2026-11-10)
+
+- Editor: FCP-style inspector sections, captions in inspector, growing Ask box
+
 ## v0.7.1 (2026-11-10)
 
 - Fix: cap concurrent Apple Vision calls at 2; parallel find_moments deadlocked Vision's capacity queue and froze edits
