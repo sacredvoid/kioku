@@ -8,6 +8,7 @@ import { timeline } from "./timeline";
 import { openComposer, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
+import { renderLive } from "./live";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -25,6 +26,21 @@ function applyTheme(t: string) {
   else delete document.documentElement.dataset.theme;
 }
 try { applyTheme(localStorage.getItem("kioku.theme") ?? ""); } catch { /* storage blocked: follow the system */ }
+// font pairs: [id, name, text font, heading font]; the CSS for each lives in styles.css under :root[data-font]
+const FONTS = [
+  ["", "Kioku", '"Hanken Grotesk Variable"', '"Unbounded"'],
+  ["editorial", "Editorial", '"Inter Variable"', '"Fraunces Variable"'],
+  ["classic", "Classic", '"Hanken Grotesk Variable"', '"Playfair Display Variable"'],
+  ["grotesk", "Grotesk", '"Space Grotesk Variable"', '"Space Grotesk Variable"'],
+  ["poster", "Poster", '"Inter Variable"', '"Anton"'],
+  ["terminal", "Terminal", '"JetBrains Mono Variable"', '"JetBrains Mono Variable"'],
+  ["system", "System", "-apple-system", "ui-rounded, -apple-system"],
+] as const;
+function applyFont(f: string) {
+  if (FONTS.some(([id]) => id && id === f)) document.documentElement.dataset.font = f;
+  else delete document.documentElement.dataset.font;
+}
+try { applyFont(localStorage.getItem("kioku.font") ?? ""); } catch { /* storage blocked: default font */ }
 initArt();
 document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
   applyTheme(r.value);
@@ -33,6 +49,20 @@ document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) =
 }));
 // the picker's cards: a still of each art in its own hue, redrawn when the mode changes the ink
 const lookPop = $("look-pop");
+$("look-fonts").append(...FONTS.map(([id, name, text, display]) => {
+  const card = el("label", "font-opt"), input = el("input") as HTMLInputElement;
+  input.type = "radio"; input.name = "font"; input.value = id;
+  input.checked = (document.documentElement.dataset.font ?? "") === id;
+  input.onchange = () => {
+    applyFont(id);
+    try { localStorage.setItem("kioku.font", id); } catch { /* applies for this session only */ }
+  };
+  const sample = el("span", "fa", "Aa"), label = el("span", "fn", name);
+  sample.style.fontFamily = display;
+  label.style.fontFamily = text;
+  card.append(input, sample, label);
+  return card;
+}));
 $("look-arts").append(...ARTS.map((a) => {
   const card = el("label", "look-opt"), input = el("input") as HTMLInputElement, txt = el("span", "look-txt");
   input.type = "radio"; input.name = "art"; input.value = a;
@@ -695,7 +725,7 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
   if (label) btn.textContent = "Working…";
   out.className = "ask-out running";
   const row = el("div", "prog-row");
-  row.append(ldFor(out, MOTIF[kind], kind === "ask" ? 22 : 30).el,
+  row.append(ldFor(out, MOTIF[kind], kind === "ask" ? 40 : 30).el,
     el("span", "", kind === "ask" ? "Claude is searching your library and editing…" : kind === "export" ? "Exporting: downloading originals from iCloud if needed…" : "Starting…"));
   out.replaceChildren(row);
   let misses = 0;
@@ -918,23 +948,9 @@ async function watchExternalAsk() {
   } catch { /* heartbeat reports the engine being down */ }
 }
 
-const stepsSeen = new Map<number, number>(); // per project: steps already shown, so only new ones animate in
-function renderSteps(out: HTMLElement, j: Job, cid: number) {
-  const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
-  const head = el("div", "steps-head");
-  head.append(ldFor(out, "think", 22).el, el("span", "", `Claude is editing${j.model ? ` · ${j.model}` : ""}`), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
-  const list = el("ol", "steps");
-  const steps = j.steps ?? [];
-  const seen = stepsSeen.get(cid) ?? 0;
-  stepsSeen.set(cid, steps.length);
-  steps.slice(-6).forEach((t, k, arr) => {
-    const fresh = steps.length - arr.length + k >= seen;
-    list.append(el("li", `${k === arr.length - 1 ? "now" : ""}${fresh ? " new" : ""}`, t));
-  });
-  if (!steps.length) list.append(el("li", "now", "Reading the brief…"));
-  out.replaceChildren(head, list);
-  if (j.note) out.append(el("p", "note", j.note));
-  if (steps.length > 6) out.append(el("p", "muted", `${steps.length} steps so far`));
+const stepsSeen = new Map<number, number>(); // kept for pollJob's cleanup; the live panel tracks its own rows
+function renderSteps(out: HTMLElement, j: Job, _cid: number) {
+  renderLive(out, j, ldFor(out, "think", 40).el);
 }
 
 let refreshT = 0;

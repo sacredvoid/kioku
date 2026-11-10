@@ -25,8 +25,10 @@ export type Asset = {
   collections: { id: number; name: string; kind: string }[];
 };
 
+/** One tool call in a running Claude edit (engine projects.run_claude). */
+export type TraceEntry = { tool: string; label: string; detail: string; t0: number; t1?: number; state: "running" | "done" | "error"; error?: string };
 export type Job = { status: "idle" | "running" | "done" | "failed"; started?: number; output?: string;
-  error?: string; path?: string; message?: string; steps?: string[]; note?: string; model?: string;
+  error?: string; path?: string; message?: string; steps?: string[]; trace?: TraceEntry[]; note?: string; model?: string;
   progress?: number; stage?: string; eta_seconds?: number; sheet?: string; srt?: string; edit_hash?: string; stale?: boolean;
   warnings?: string[]; seconds?: number };
 

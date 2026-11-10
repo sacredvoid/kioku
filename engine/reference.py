@@ -606,6 +606,13 @@ def ytdlp_bin():
     return shutil.which("yt-dlp") or next((p for p in (*YTDLP_PATHS, *extra) if Path(p).is_file()), None)
 
 
+def tool_env():
+    """The app's bare PATH hides Homebrew: yt-dlp then can't find deno (YouTube needs a JS runtime) or ffmpeg to merge."""
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(["/opt/homebrew/bin", "/usr/local/bin", env.get("PATH", "/usr/bin:/bin")])
+    return env
+
+
 def is_link(s):
     from urllib.parse import urlparse
     u = urlparse(s.strip())
@@ -631,7 +638,7 @@ def fetch_link(url):
                             "--match-filter", f"duration <= {MAX_SECONDS}",
                             "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b[height<=1080]/b",
                             "--merge-output-format", "mp4", "-o", tmpl, "--", url],
-                           capture_output=True, text=True, timeout=900)
+                           capture_output=True, text=True, timeout=900, env=tool_env())
     except subprocess.TimeoutExpired:
         raise RuntimeError("downloading the reference took over 15 minutes")
     got = sorted(out.parent.glob(out.stem + ".part-dl.*"), key=lambda f: f.stat().st_size, reverse=True)
