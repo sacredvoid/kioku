@@ -80,6 +80,12 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
   - Snappy: a whip or `zoom-in` with `sfx="whoosh"` for a change of place, `flash-white` into the drop, `sfx="hit"` on a hard cut at the drop. Not every seam needs a sound; 3-5 sounds in 30 s is plenty.
   - Whips (`whip-left` / `-right` / `-up` / `-down`) are blurred slides, 0.2 to 0.3 s, always with `whoosh`, at most one per 8 to 10 s. The name is where the picture moves: follow the motion at the end of the outgoing shot (a pan to the right moves the picture left, so `whip-left`). No motion to follow: hard cut instead.
   - Calm: `dissolve` 0.4 to 0.6 s between places, no transition inside one scene, never whips or wipes.
+  - Effect transitions are rare accents, at most 3 per edit (the engine refuses more), about one per 10 s, each on a strong beat and never next to another effect or a flash:
+    - `zoom-through` 0.3 to 0.5 s with `whoosh`: into the hero shot or a new location.
+    - `light-leak` 0.6 to 1.2 s: calm, nostalgic or golden-hour edits, at most 2.
+    - `luma-fade` 0.6 to 1 s: instead of `dissolve` when the incoming shot has a bright sky or window.
+    - `glitch` 0.2 to 0.3 s with `hit`: once, on a drop in an energetic edit, or when the reference uses it.
+    - If you cannot name the reason for an effect, use a hard cut.
 - Unsynced transitions shorten the total; recheck with `get_edit`.
 
 ## 7. Format, look, text, captions
