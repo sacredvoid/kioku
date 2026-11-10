@@ -740,6 +740,12 @@ class Editor {
   }
 
   clipName(it: Item) { return (it.meta || "").split(" ; ")[0] || (it.video ? "Video" : "Photo"); }
+  /** For people: place and date (meta is "labels ; people ; video|photo ; place ; Month Year"); labels are alphabetical, so "Art" said nothing */
+  clipLabel(it: Item) {
+    const m = (it.meta || "").split(" ; "), k = m.findIndex((x) => x === "video" || x === "photo");
+    const place = k >= 0 ? (m[k + 1] || "").split(", ")[0] : "", when = k >= 0 ? m[k + 2] || "" : "";
+    return [it.video ? "Video" : "Photo", place, when].filter(Boolean).join(" · ");
+  }
   placeClips(anim: boolean) {
     const items = this.items, seen = new Set<number>();
     items.forEach((it, i) => {
@@ -759,7 +765,7 @@ class Editor {
         b.style.transition = "";
         b.style.transform = "";
       }
-      const fx = this.fxOf(id), name = this.clipName(it);
+      const fx = this.fxOf(id), name = this.clipLabel(it);
       (b.querySelector(".tl-name") as HTMLElement).textContent = `${i + 1} ${name}`;
       (b.querySelector(".tl-len") as HTMLElement).textContent = [fmtS(l.end - l.start), fx.speed && fx.speed !== 1 ? `${fx.speed}x` : "", fx.mute ? "muted" : "", fx.captions ? "cc" : ""].filter(Boolean).join(" · ");
       b.setAttribute("aria-label", `Clip ${i + 1}, ${name}, ${fmtS(l.end - l.start)}`);
@@ -836,7 +842,7 @@ class Editor {
       b.style.left = `${t.start * this.pps}px`;
       b.style.width = `${Math.max(4, (t.out - t.in) * this.pps)}px`;
       (b.querySelector(".tl-name") as HTMLElement).textContent = this.trackName(t);
-      b.setAttribute("aria-label", `Voiceover ${this.trackName(t)}, starts at ${t.start.toFixed(1)} seconds, ${fmtS(t.out - t.in)} long`);
+      b.setAttribute("aria-label", `Audio ${this.trackName(t)}, starts at ${t.start.toFixed(1)} seconds, ${fmtS(t.out - t.in)} long`);
       b.classList.toggle("sel", this.sel?.kind === "audio" && this.sel.id === t.id);
     }
     this.auds.forEach((b, id) => { if (!seen.has(id)) { b.remove(); this.auds.delete(id); } });
@@ -1301,7 +1307,7 @@ class Editor {
       if (it) {
         const fx = this.fxOf(sel.id), id = sel.id;
         const head = el("div", "tl-ih");
-        head.append(el("strong", "", `Clip ${k + 1}`), el("span", "muted tl-in", this.clipName(it)));
+        head.append(el("strong", "", `Clip ${k + 1}`), el("span", "muted tl-in", this.clipLabel(it)));
         f.append(head);
         const sVid = sec("Video"), sTime = sec("Timing"), sCol = sec("Color"), sFx = sec("Effects"), sAud = sec("Audio");
         if (it.video) {
