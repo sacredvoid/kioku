@@ -49,6 +49,8 @@ def start_job(cid, kind, target, *args):
             row = c.execute("select name from collections where id = ?", (cid,)).fetchone()
         media.stage(key, kind, row[0] if row else f"project {cid}")
         if kind == "ask":  # recorded now, so an engine restart mid-edit leaves a row that says so (see mark_interrupted)
+            import versions  # lazy: versions -> edit -> projects
+            versions.save(cid, "Your changes")  # hand edits since the last version, before Claude changes anything
             jobs[(cid, kind)]["run_id"] = open_run(cid, args[0], jobs[(cid, kind)]["started"])
     except Exception:
         jobs.pop((cid, kind), None)  # never leave a "running" job with no thread behind it
@@ -70,6 +72,8 @@ def start_job(cid, kind, target, *args):
         media.stage(key, None)
         if kind == "ask":
             save_run(cid, args[0], job(cid, kind))
+            import versions
+            versions.save(cid, args[0] if jobs[(cid, kind)]["status"] == "done" else f"{args[0]} (stopped early)")
     threading.Thread(target=run, daemon=True).start()
     return job(cid, kind)
 

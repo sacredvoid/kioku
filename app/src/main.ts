@@ -605,7 +605,7 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
 
   // deliver row, like FCP's Share: export, preview, render together above the editor
   const meta = el("div", "proj-meta");
-  meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), exp, prevBtn, rendBtn);
+  meta.append(el("span", "", `${items.length} clip${items.length === 1 ? "" : "s"} · ${fmtDur(total)}`), el("span", "spacer"), versionPicker(c.id), exp, prevBtn, rendBtn);
 
   // Claude panel: live steps of a running edit, then one compact line that opens into every past edit
   const runs = el("section", "runs");
@@ -631,6 +631,36 @@ function renderProject(c: Collection & { brief: string }, items: Item[]) {
   for (const [kind, out, btn] of [["preview", prevOut, prevBtn], ["final", finOut, rendBtn]] as const)
     api<Job>(`/collections/${c.id}/render/${kind}`).then((j) => { if (j.status !== "idle") pollJob(c.id, kind, out, btn); }).catch(() => {});
   api<Job>(`/collections/${c.id}/captions/job`).then((j) => { if (j.status === "running") pollCaps(); }).catch(() => {});
+}
+
+/** Saved versions of the edit (one after every Claude edit); picking one loads it. The engine saves the current edit
+ * first if it isn't saved yet, so switching never loses work. */
+type Version = { id: number; n: number; label: string; created: number; current: boolean; clips: number };
+function versionPicker(cid: number) {
+  const sel = document.createElement("select");
+  sel.className = "versions";
+  sel.setAttribute("aria-label", "Edit version");
+  sel.title = "Every Claude edit is saved as a version. Pick one to load it; your current edit is kept as a version too.";
+  sel.hidden = true;
+  const when = (t: number) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const short = (t: string) => t.length > 48 ? `${t.slice(0, 47)}…` : t;
+  api<Version[]>(`/collections/${cid}/versions`).then((vs) => {
+    if (!vs.length) return;
+    if (!vs.some((v) => v.current)) sel.append(new Option("Current edit (unsaved)", "", true, true));
+    for (const v of vs) sel.append(new Option(`v${v.n} · ${short(v.label)} · ${when(v.created)}`, String(v.id), false, v.current));
+    sel.hidden = false;
+  }).catch(() => { /* older engine: no versions */ });
+  sel.onchange = async () => {
+    if (!sel.value) return;
+    sel.disabled = true;
+    try {
+      const r = await api<{ label: string; skipped: number }>(`/collections/${cid}/versions/${sel.value}/load`, "POST");
+      toast(`Loaded “${short(r.label)}”${r.skipped ? `, ${r.skipped} clip${r.skipped === 1 ? "" : "s"} no longer in Photos` : ""}`);
+      timeline.unmount();  // its undo history points at the replaced clips
+      go(view);
+    } catch (e) { fail("load that version")(e); go(view); }
+  };
+  return sel;
 }
 
 let previewStart = 0;  // output second where the last preview file starts

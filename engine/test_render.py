@@ -5,6 +5,7 @@ import json
 import os
 import re
 import resource
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -291,7 +292,7 @@ render._stamp = lambda: "20260101-000000"
 PLAN[6] = mk(FIVE)
 r1, ran = go(6, "final")
 p1 = Path(r1["path"])
-assert p1.parent.resolve() == (render.EXPORTS / "Proj-6").resolve() and p1.name == "Proj-6-20260101-000000.mp4", p1
+assert p1.parent.resolve() == (render.EXPORTS / "Proj-6").resolve() and p1.name == "Proj-6_2026-01-01_0000.mp4", p1
 fv = probe(p1, ["-show_entries", "stream=codec_name,codec_tag_string,width,height,color_space,color_transfer"])["streams"]
 assert fv[0]["codec_tag_string"] == "hvc1" and (fv[0]["width"], fv[0]["height"]) == (360, 640), fv
 assert abs(duration(p1) - PLAN[6].duration) <= 1 / 30 + 1e-3 and not any(s.get("side_data_list") for s in side_rot(p1))
@@ -362,6 +363,20 @@ assert dl_seen[0][0] == "Downloading originals: 0 of 4" == dl_seen[0][1], dl_see
 assert dl_seen[0][2] == 1, dl_seen  # only the download's slot is held, never the render slot
 assert abs(duration(r["path"]) - PLAN[14].duration) <= 1 / 30 + 1e-3 and media.RUNNING == 0
 assert_clean()
+# downloaded originals are kept: a later render (e.g. a re-trimmed clip, so a segment cache miss) downloads nothing
+assert sorted(f.name for f in render.ORIG_CACHE.iterdir()) == ["V1.mp4", "V2.mp4", "V3.mp4"], list(render.ORIG_CACHE.iterdir())
+projects.originals = lambda uuids, dest: (_ for _ in ()).throw(AssertionError(f"downloaded again: {uuids}"))
+got, errs = render.fetch_originals([seg_for("V1"), seg_for("V3")], root / "fo0", "k", "l", lambda n, t: None)
+assert got == {"V1": render.ORIG_CACHE / "V1.mp4", "V3": render.ORIG_CACHE / "V3.mp4"} and not errs, (got, errs)
+assert not list(render.ORIG_CACHE.glob("*.part"))
+# the sweep keeps the cache under its cap, oldest first
+cap0 = render.ORIG_CAP
+render.ORIG_CAP = 2 * (render.ORIG_CACHE / "V1.mp4").stat().st_size
+os.utime(render.ORIG_CACHE / "V2.mp4", (1, 1))
+render._gc_cache()
+assert sorted(f.name for f in render.ORIG_CACHE.iterdir()) == ["V1.mp4", "V3.mp4"]
+render.ORIG_CAP = cap0
+shutil.rmtree(render.ORIG_CACHE)  # the failure checks below need real downloads
 # the worker also reports progress while it runs (n of N from files appearing in the destination)
 reports = []
 

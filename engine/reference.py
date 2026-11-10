@@ -704,7 +704,7 @@ def get_reference(rid: str):
 def get_sheet(rid: str):
     f = REFS / f"{rid}.jpg"
     if not re.fullmatch(r"[0-9a-f]{40}", rid) or not f.is_file():
-        raise HTTPException(404, "no contact sheet")
+        raise HTTPException(404, "no frame grid")
     return FileResponse(f, media_type="image/jpeg")
 
 

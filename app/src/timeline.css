@@ -140,10 +140,21 @@
 .tl-tools button.danger, .tl-acts button.danger { color: var(--danger) }
 .tl-panel .chip { padding: 5px 12px; cursor: pointer }
 .tl-chips .chip { padding: 5px 11px; cursor: pointer }
-.tl-texts { display: grid; gap: 8px; font-size: 12.5px }
-/* one title = text on its own line, then style · time · remove */
-.tl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--line-soft) }
-.tl-text input[type="text"] { grid-column: 1 / -1; min-width: 0; background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 6px 9px; outline: 0 }
-.tl-text input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft) }
-.tl-text select { min-width: 0 }
-.tl-text button { font: 11.5px var(--mono) }
+
+
+/* titles lane (T, above V) and the title dialog */
+.tl-t { height: 30px }
+.tl-title { position: absolute; top: 4px; height: 22px; padding: 0 8px; border: 0; border-radius: 6px; cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 28%, var(--surface-solid)); color: var(--text); font-size: 11.5px; font-weight: 600;
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.tl-title:hover { background: color-mix(in srgb, var(--accent) 45%, var(--surface-solid)) }
+.tl-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px }
+.tl-dlg { border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); color: var(--text); padding: 0; width: min(420px, calc(100vw - 32px)); box-shadow: var(--shadow) }
+.tl-dlg::backdrop { background: rgb(0 0 0 / .45) }
+.tl-dlg-form { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px }
+.tl-dlg-form h3 { margin: 0 0 2px; font-size: 15px }
+.tl-dlg-form input[type="text"] { font-size: 15px; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); outline: 0 }
+.tl-dlg-form input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft) }
+.tl-dlg-form .tl-f input[type="number"] { width: 6em }
+.tl-dlg-acts { display: flex; gap: 8px; margin-top: 6px }
+.tl-dlg-acts .danger { color: var(--danger) }

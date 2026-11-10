@@ -59,7 +59,7 @@ def search_media(query: str, kind: str = "", limit: int = 20) -> list[dict]:
 def analyze_clip(uuid: str) -> list:
     """Understand a video before cutting it: detects scenes (shot boundaries; long takes split into <=8s pieces),
     scores each scene's sharpness (higher = crisper; under ~40 is usually blurry) and motion (higher = more
-    movement or camera shake), and returns a contact sheet image with one labelled frame per scene (#idx, start-end s).
+    movement or camera shake), and returns a frame grid image with one labelled frame per scene (#idx, start-end s).
     First call per video downloads it from iCloud and takes 10-60 s; later calls are instant.
     Analyze several candidates at once (parallel tool calls in one turn): the engine downloads them in parallel.
     Cut on scene boundaries: use a scene's t0/t1 (or a sub-range of it) with set_clip_range."""
@@ -425,7 +425,7 @@ def render_final(collection_id: int, codec: str = "hevc") -> dict:
 @server.tool(annotations=READ_ONLY)
 def render_status(collection_id: int, mode: str = "preview", wait_seconds: int = 0) -> list:
     """State of the last preview or final render (mode: preview or final): stage, progress, output path, .srt path,
-    warnings, error. When done it also returns a contact sheet image of the result: look at it and fix what you see
+    warnings, error. When done it also returns a frame grid image of the result: look at it and fix what you see
     (cuts, crop, color, caption position). wait_seconds (0 to 90) waits for it to finish, so you do not need to poll
     in a tight loop."""
     if mode not in ("preview", "final"):
@@ -443,7 +443,7 @@ def render_status(collection_id: int, mode: str = "preview", wait_seconds: int =
         with urllib.request.urlopen(f"{API}{path}/sheet", timeout=60) as r:
             return [j, Image(data=r.read(), format="jpeg")]
     except (urllib.error.URLError, TimeoutError):
-        return [{**j, "sheet_error": "no contact sheet available"}]
+        return [{**j, "sheet_error": "no frame grid available"}]
 
 
 # ---------- style reference
@@ -453,7 +453,7 @@ def analyze_reference(path: str) -> list:
     """Learn the style of a reference video the user gave you: a local .mp4/.mov/.m4v file or a link (YouTube and most
     video sites, downloaded once at up to 1080p and kept on this Mac), up to 15 minutes. Measures pacing in seconds and beats, cuts on the beat, transitions, camera motion, punch-ins, flashes,
     on-screen text and color, then returns a short summary, a concrete PLAN in Kioku's own settings (sync grid, beats per
-    clip, motion/flash budgets, transitions with sounds, captions, look) and a contact sheet of the reference's shots.
+    clip, motion/flash budgets, transitions with sounds, captions, look) and a frame grid of the reference's shots.
     Takes about 10 s per minute of video; the result is cached. Follow the plan with set_edit, set_clip_fx, set_transition."""
     res = call("POST", "/references/analyze", {"path": path}, timeout=900)
     if "error" in res:
@@ -463,7 +463,7 @@ def analyze_reference(path: str) -> list:
         with urllib.request.urlopen(API + res["sheet"], timeout=60) as r:
             out.append(Image(data=r.read(), format="jpeg"))
     except (urllib.error.URLError, TimeoutError):
-        out.append("no contact sheet available")
+        out.append("no frame grid available")
     return out
 
 

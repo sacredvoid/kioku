@@ -398,6 +398,8 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
   background: linear-gradient(100deg, transparent 30%, var(--accent-soft) 50%, transparent 70%); transform: translateX(-100%); animation: shimmer 2.6s var(--ease) infinite }
 @keyframes shimmer { to { transform: translateX(100%) } }
 .ask-out.failed { color: var(--danger) }
+.proj-meta select.versions { max-width: 300px; height: 32px; padding: 0 28px 0 12px; border-radius: 9px; border: 1px solid var(--line); background-color: var(--surface-2); color: var(--text); font-size: 13px; text-overflow: ellipsis }
+.proj-meta select.versions[hidden] { display: none }
 .proj-meta { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); padding: 4px 2px }
 .cap-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer }
 .cap-toggle input { accent-color: var(--accent) }

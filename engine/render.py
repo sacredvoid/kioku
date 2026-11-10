@@ -27,6 +27,7 @@ import core
 import library
 import media
 import projects
+import versions
 import settings
 from timeline import Seg
 
@@ -37,6 +38,8 @@ CACHE = core.DATA / "render_cache"  # /final and /preview, LRU by mtime
 RENDERS = core.DATA / "renders"  # /<cid>/preview.mp4, .srt, <mode>-sheet.jpg
 EXPORTS = projects.EXPORTS  # finals go to EXPORTS/<slug>/
 CACHE_CAP = {"final": 20 * 10**9, "preview": 3 * 10**9}
+ORIG_CACHE = core.DATA / "originals"  # iCloud originals kept between renders, so a changed clip is not downloaded again
+ORIG_CAP = 15 * 10**9  # LRU by mtime, swept with the render cache
 JOIN_CHUNK = {720: 12, 1080: 8, 2160: 3}  # segments per join run; measured 5.4 GB for 20 at 1080x1920 in one graph
 MAX_SECONDS = 15 * 60
 MAX_CLIPS = 200
@@ -132,6 +135,33 @@ def source_for(seg, mode, tmp):
     return still_for(seg.uuid, mode, tmp) if seg.kind == "photo" else media.fetch(seg.uuid, mode, tmp / "src")
 
 
+def cached_original(uuid):
+    """A previously downloaded original, or None. Touches it so the LRU sweep keeps what renders use."""
+    for f in ORIG_CACHE.glob(f"{uuid}.*"):
+        if f.is_file() and not f.name.endswith(".part"):
+            try:
+                os.utime(f)
+            except OSError:
+                pass
+            return f
+    return None
+
+
+def keep_original(p):
+    """Move a fresh download into ORIG_CACHE (via .part + rename, so a crash never leaves a half file that looks
+    complete). Returns the cached path, or p itself if the move fails: the render still has its file."""
+    try:
+        ORIG_CACHE.mkdir(parents=True, exist_ok=True)
+        dst = ORIG_CACHE / p.name
+        part = dst.with_name(dst.name + ".part")
+        shutil.move(str(p), part)
+        os.replace(part, dst)
+        return dst
+    except OSError as e:
+        log.warning("could not keep %s in the originals cache: %s", p.name, e)
+        return p if p.is_file() else None
+
+
 def fetch_originals(segs, tmp, slot_key, label, report):
     """Final renders: every original that is not already on disk, in ONE projects.originals call (one osxphotos
     launch). Returns ({uuid: path}, {uuid: readable error}). Lock order as media.fetch: lock_for(uuid) for each
@@ -148,6 +178,9 @@ def fetch_originals(segs, tmp, slot_key, label, report):
             if p:
                 got[s.uuid] = p
                 continue
+        if (hit := cached_original(s.uuid)):  # downloaded by an earlier render
+            got[s.uuid] = hit
+            continue
         need.append(s.uuid)
     need = list(dict.fromkeys(need))
     if not need:
@@ -188,8 +221,9 @@ def fetch_originals(segs, tmp, slot_key, label, report):
         for lk in locks:
             lk.release()
     for u in need:
-        if res.get(u):
-            got[u] = res[u]
+        # only move files the download put in dest (never a file that lives somewhere else)
+        if res.get(u) and (kept := keep_original(res[u]) if Path(res[u]).parent == dest else res[u]):
+            got[u] = kept
         else:
             errs[u] = why
     report(len(need) - sum(u in errs for u in need), len(need))
@@ -653,6 +687,13 @@ def _gc_cache():
                     break
                 total -= f.stat().st_size
                 f.unlink(missing_ok=True)
+        files = sorted((f for f in ORIG_CACHE.glob("*") if f.is_file()), key=lambda f: f.stat().st_mtime)
+        total = sum(f.stat().st_size for f in files)
+        for f in files:
+            if total <= ORIG_CAP:
+                break
+            total -= f.stat().st_size
+            f.unlink(missing_ok=True)
 
 
 def _stamp():
@@ -699,6 +740,8 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         raise ValueError(f"mode must be preview or final, not {mode!r}")
     tl, spec = edit.snapshot(cid)
     name = library.get_collection(cid)["name"]
+    # the file is named after the version it shows (saved now if it isn't yet), so every render maps to one in the app
+    ver = versions.number(cid, "Rendered") if mode == "final" and tl.segs else None
     if not tl.segs:
         raise RuntimeError("project has no clips")
     if len(tl.segs) > MAX_CLIPS:
@@ -867,7 +910,9 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 fpart = rdir / "preview.part.mp4"
             else:
                 folder.mkdir(parents=True, exist_ok=True)
-                stem = f"{projects.slug(name)}-{_stamp()}"
+                # e.g. All-our-halloweens_v3_2026-11-10_1308.mp4
+                st = _stamp()  # YYYYmmdd-HHMMSS
+                stem = "_".join(x for x in (projects.slug(name), f"v{ver}" if ver else "", f"{st[:4]}-{st[4:6]}-{st[6:8]}_{st[9:13]}") if x)
                 i = 1
                 while any((folder / f"{stem}{'' if i == 1 else f'-{i}'}{x}").exists() for x in (".mp4", ".part.mp4")):
                     i += 1
@@ -927,7 +972,7 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
             srt = None
             if mode == "preview":
                 target.with_suffix(".srt").unlink(missing_ok=True)
-        state["stage"] = "Contact sheet"  # not prog.stage: the activity entry was cleared with the slot
+        state["stage"] = "Checking frames"  # not prog.stage: the activity entry was cleared with the slot
         sheet = _sheet(target, sel, win, fps, rdir / f"{mode}-sheet.jpg")
         prog.state["progress"] = 1.0
         _gc_cache()

@@ -40,7 +40,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const clone = <T,>(v: T): T => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
 const uid = () => crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 
-const H = { ruler: 26, v: 68, a: 44, c: 30 };
+const H = { ruler: 26, t: 30, v: 68, a: 44, c: 30 };
 const MIN_LEN = 0.2;
 const STILL = 3;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
@@ -113,6 +113,7 @@ class Editor {
   vlane = el("div", "tl-lane tl-v");
   alanes = el("div", "tl-alanes");
   clane = el("div", "tl-lane tl-c");
+  tlane = el("div", "tl-lane tl-t");  // titles, above the video like a V2 track
   ph = el("div", "tl-ph");
   snapLine = el("div", "tl-snapline");
   caret = el("div", "tl-caret");
@@ -444,11 +445,58 @@ class Editor {
     const { id: _id, ...full } = t;
     return this.act("Remove text", () => api(url, "DELETE"), () => api(url, "PUT", full));
   }
-  addText() {
+  addText() { this.editTitle(null, this.player.time); }
+  /** Title editor dialog. t = null: a new title starting at `at` seconds. */
+  editTitle(t: TextSpec | null, at = 0) {
     const max = this.model.edit.options.max_texts ?? 30;
-    if ((this.spec.texts ?? []).length >= max) return this.deps.toast(`At most ${max} texts: remove one first`, true);
-    const start = round2(Math.min(Math.max(0, this.player.time), Math.max(0, this.dur - 2)));
-    return this.putText(uid(), { template: "title-pop", text: "Title", start, dur: 2 }, null, "Add text");
+    if (!t && (this.spec.texts ?? []).length >= max) return this.deps.toast(`At most ${max} titles: remove one first`, true);
+    const o = this.model.edit.options;
+    const cur = t ?? { template: "title-pop", text: "", start: round2(clamp(at, 0, Math.max(0, this.dur - 2))), dur: 2, position: "auto" } as TextSpec;
+    const dlg = el("dialog", "tl-dlg");
+    const form = el("form", "tl-dlg-form");
+    form.method = "dialog";
+    const field = (label: string, ctl: HTMLElement) => { const l = el("label", "tl-f"); l.append(el("span", "tl-fl", label), ctl); return l; };
+    const text = document.createElement("input");
+    text.type = "text"; text.maxLength = 80; text.required = true; text.value = cur.text; text.placeholder = "Title text";
+    const pick = (vals: string[], labels: Record<string, string>, v: string) => {
+      const s = document.createElement("select");
+      vals.forEach((x) => s.append(new Option(labels[x] ?? x[0].toUpperCase() + x.slice(1), x)));
+      s.value = v;
+      return s;
+    };
+    const tpl = pick(o.text_templates ?? [cur.template], TEMPLATE_LABEL, cur.template);
+    const pos = pick(o.text_positions ?? ["auto"], {}, cur.position ?? "auto");
+    const num = (v: number, min: number, max: number) => {
+      const n = document.createElement("input");
+      n.type = "number"; n.step = "0.1"; n.min = String(min); n.max = String(max); n.value = String(v); n.required = true;
+      return n;
+    };
+    const start = num(cur.start, 0, Math.max(0, this.dur)), dur = num(cur.dur, 0.5, 15);
+    const acts = el("div", "tl-dlg-acts");
+    if (t) acts.append(btn("Delete", "ghost danger", () => { dlg.close(); this.removeText(t); }));
+    const save = el("button", "primary", t ? "Save" : "Add title") as HTMLButtonElement;
+    save.type = "submit";
+    acts.append(el("span", "spacer"), btn("Cancel", "ghost", () => dlg.close()), save);
+    form.append(el("h3", "", t ? "Edit title" : "New title"), text, field("Style", tpl), field("Position", pos),
+      field("Starts at (s)", start), field("Length (s)", dur), acts);
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const v = text.value.trim();
+      if (!v) { text.focus(); return; }
+      const next: Flat = { text: v, template: tpl.value, position: pos.value,
+        start: round2(clamp(Number(start.value) || 0, 0, Math.max(0, this.dur))), dur: round2(clamp(Number(dur.value) || 2, 0.5, 15)) };
+      dlg.close();
+      if (!t) { this.putText(uid(), next, null, "Add title"); return; }
+      const body: Flat = {}, old: Flat = {};
+      for (const [k, val] of Object.entries(next)) if ((t as unknown as Flat)[k] !== val) { body[k] = val; old[k] = (t as unknown as Flat)[k]; }
+      if (Object.keys(body).length) this.putText(t.id, body, old, "Edit title");
+    };
+    dlg.append(form);
+    dlg.onclose = () => dlg.remove();
+    dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); };  // click on the backdrop
+    document.body.append(dlg);
+    dlg.showModal();
+    text.focus();
   }
   roomForAudio() {
     const max = this.model.edit.options.max_audio ?? 3;
@@ -497,7 +545,7 @@ class Editor {
     top.append(left, this.insp);
 
     // lanes
-    this.canvas.append(this.ruler, this.vlane, this.alanes, this.clane, this.snapLine, this.caret, this.tipEl, this.ph);
+    this.canvas.append(this.ruler, this.tlane, this.vlane, this.alanes, this.clane, this.snapLine, this.caret, this.tipEl, this.ph);
     this.ph.append(el("div", "tl-ph-cap"));
     this.scroll.append(this.canvas);
     this.wrap.append(this.labels, this.scroll, this.pop);
@@ -507,6 +555,10 @@ class Editor {
     this.pop.setAttribute("aria-label", "Transition");
     this.ruler.onpointerdown = (e) => this.scrub(e);
     this.vlane.onpointerdown = (e) => { if (e.target === this.vlane) { this.setSel(null); } };
+    this.tlane.ondblclick = (e) => {  // double-click empty lane: new title there
+      if (e.target !== this.tlane) return;
+      this.editTitle(null, (e.clientX - this.canvas.getBoundingClientRect().left) / this.pps);
+    };
     this.scroll.addEventListener("wheel", (e) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
@@ -542,7 +594,9 @@ class Editor {
       toast: (m, bad) => this.deps.toast(m, bad),
     });
     this.snd.hidden = true;
-    this.tools.append(add, snd, el("span", "spacer"), this.snapB, btn("−", "ghost icon", () => zoom(0.8), "Zoom out"), this.zoomIn, btn("+", "ghost icon", () => zoom(1.25), "Zoom in"), btn("Fit", "ghost", () => { this.autoFit = true; this.fit(); }, "Fit the whole edit"), this.totals);
+    const ttl = btn("", "", () => this.addText(), "Add a title at the playhead");
+    ttl.append(icon("plus"), document.createTextNode(" Title"));
+    this.tools.append(add, snd, ttl, el("span", "spacer"), this.snapB, btn("−", "ghost icon", () => zoom(0.8), "Zoom out"), this.zoomIn, btn("+", "ghost icon", () => zoom(1.25), "Zoom in"), btn("Fit", "ghost", () => { this.autoFit = true; this.fit(); }, "Fit the whole edit"), this.totals);
     this.strip.hidden = true;
     this.strip.setAttribute("role", "region");
     this.strip.setAttribute("aria-label", "Clip picker");
@@ -624,6 +678,7 @@ class Editor {
     this.placeClips(anim);
     this.placeAudio();
     this.placeCues();
+    this.placeTitles();
     this.renderLabels();
     this.onTime(this.player.time);
     const n = this.items.length;
@@ -648,6 +703,7 @@ class Editor {
     const f = document.createDocumentFragment();
     const row = (t: string, h: number, title: string) => { const d = el("div", "tl-label", t); d.style.height = `${h}px`; d.title = title; f.append(d); };
     row("", H.ruler, "");
+    row("T", H.t, "Titles: click one to edit it, double-click the lane to add one");
     row("V", H.v, "Video");
     for (let i = 0; i < this.nLanes(); i++) row(`A${i + 1}`, H.a, "Voiceover: drop an audio file from Finder here");
     row("C", H.c, "Captions (read only)");
@@ -810,6 +866,20 @@ class Editor {
   }
   fileDur(t: AudioTrack) { return this.peakDur.get(t.id) ?? Math.max(t.out, 0.1); }
   peakDur = new Map<string, number>();
+  placeTitles() {
+    const f = document.createDocumentFragment();
+    for (const t of this.spec.texts ?? []) {
+      const b = el("button", "tl-title", t.text);
+      b.type = "button";
+      b.style.left = `${t.start * this.pps}px`;
+      b.style.width = `${Math.max(14, t.dur * this.pps - 2)}px`;
+      b.title = `${TEMPLATE_LABEL[t.template] ?? t.template}: ${t.text} (${t.start.toFixed(1)}s). Click to edit.`;
+      b.onclick = () => { this.seek(t.start); this.editTitle(t); };
+      f.append(b);
+    }
+    if (!this.spec.texts?.length) f.append(el("span", "tl-cempty", "Double-click to add a title"));
+    this.tlane.replaceChildren(f);
+  }
   placeCues() {
     const f = document.createDocumentFragment();
     const cues: Cue[] = this.model.cues;
@@ -1304,7 +1374,7 @@ class Editor {
       const head = el("div", "tl-ih");
       head.append(el("strong", "", "Project"), el("span", "muted tl-in", this.c.name));
       f.append(head);
-      const sAud = sec("Audio"), sBeat = sec("Beat sync"), sTx = sec("Titles"), sCap = sec("Captions");
+      const sAud = sec("Audio"), sBeat = sec("Beat sync"), sCap = sec("Captions");
       sAud.append(row("Clip sound", range(0, 1, .05, this.spec.clip_volume ?? 1, (v) => this.patchEdit({ clip_volume: v }, "Change clip sound", { clip_volume: this.spec.clip_volume ?? 1 }), (v) => `${Math.round(v * 100)}%`)));
       sAud.append(row("Duck", check(!!this.spec.duck, (v) => this.patchEdit({ duck: v }, "Change ducking", { duck: !v })), "lower clip sound under music"));
       const sy = this.spec.sync ?? { track: null, grid: "beat", lead: 1 };
@@ -1324,30 +1394,8 @@ class Editor {
         sBeat.append(row("Grid", gs));
         sBeat.append(row("Cut early", range(0, 3, 1, sy.lead, (v) => this.patchEdit({ sync_lead: v }, "Change cut lead", { sync_lead: sy.lead }), (v) => `${v} fr`)));
       }
-      const tx = el("div", "tl-texts");
-      for (const t of this.spec.texts ?? []) {
-        const r = el("div", "tl-text");
-        const inp = document.createElement("input");
-        inp.type = "text"; inp.maxLength = 80; inp.value = t.text;
-        inp.setAttribute("aria-label", "Text");
-        inp.onchange = () => { const v = inp.value.trim(); if (v && v !== t.text) this.putText(t.id, { text: v }, { text: t.text }, "Edit text"); else inp.value = t.text; };
-        const tp = document.createElement("select");
-        tp.setAttribute("aria-label", "Text style");
-        (this.model.edit.options.text_templates ?? [t.template]).forEach((v) => tp.append(new Option(TEMPLATE_LABEL[v] ?? v, v)));
-        tp.value = t.template;
-        tp.onchange = () => this.putText(t.id, { template: tp.value }, { template: t.template }, "Change text style");
-        const at = btn(`${t.start.toFixed(1)}s`, "ghost", () => this.seek(t.start), "Jump to this text");
-        const rm = btn("", "ghost icon danger", () => this.removeText(t), "Remove this text");
-        rm.append(icon("close"));
-        r.append(inp, tp, at, rm);
-        tx.append(r);
-      }
-      const ta = el("div", "tl-acts");
-      ta.append(btn("Add text at playhead", "", () => this.addText()));
-      tx.append(ta);
-      sTx.append(tx);
       if (this.deps.captions) sCap.append(this.deps.captions);
-      addSecs(sAud, sBeat, sTx, sCap);
+      addSecs(sAud, sBeat, sCap);
       f.append(el("p", "muted tl-hint", "Click a clip to edit it. Drag to reorder, drag its edges to trim, click a seam for a transition, press S to split."));
     }
     this.insp.replaceChildren(f);

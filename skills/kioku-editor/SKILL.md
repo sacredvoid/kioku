@@ -46,7 +46,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 ### 2b. Reference video (only when the user gave one)
 
-`analyze_reference(path)` on the file or link (YouTube and most video sites are downloaded once, up to 15 min). Read its contact sheet and its PLAN: sync grid, beats-per-shot pattern, motion / flash / punch budgets, transition mix with sounds, text style, look. Use the plan's numbers instead of the defaults below for the rest of the edit.
+`analyze_reference(path)` on the file or link (YouTube and most video sites are downloaded once, up to 15 min). Read its frame grid and its PLAN: sync grid, beats-per-shot pattern, motion / flash / punch budgets, transition mix with sounds, text style, look. Use the plan's numbers instead of the defaults below for the rest of the edit.
 
 ## 3. Find the moments
 
@@ -91,7 +91,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 ## 8. Check
 
-- `render_preview` (use `start` and `end` for one section), then `render_status(wait_seconds=60)` and look at the contact sheet. Fix what you see (cuts, crop, colour, text position). At most 3 rounds.
+- `render_preview` (use `start` and `end` for one section), then `render_status(wait_seconds=60)` and look at the frame grid. Fix what you see (cuts, crop, colour, text position). At most 3 rounds.
 - If it feels busy, remove effects before adding new ones.
 - Reference edits: `compare_to_reference(collection_id, path)` once after the first preview. Fix the top 2 gaps only, then render again.
 - Never `render_final` unless the user asked for the finished video.

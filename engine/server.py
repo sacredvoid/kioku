@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 import core
 import library
 import projects
+import versions
 import media
 import settings
 # `uv run server.py` loads this file as __main__; register it as `server` too, so a lazy `import server`
@@ -165,6 +166,7 @@ app.include_router(media.router)
 app.include_router(moments.router)
 app.include_router(settings.router)
 app.include_router(edit.router)
+app.include_router(versions.router)
 app.include_router(render.router)
 app.include_router(captions.router)
 app.include_router(albums.router)
