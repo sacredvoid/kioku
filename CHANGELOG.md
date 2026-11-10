@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.0 (2026-11-10)
+
+- Face-aware text placement, 9:16 safe area, auto legibility backing
+- Music map and auto fit: per-bar energy, sections, drop, fit track to edit via audio spec fields
+- Eased motion and real whips (roadmap #1, X1 + X2)
+- notes: editing power research (text, transitions, music roadmap)
+
 ## v0.10.0 (2026-11-10)
 
 - Reuse unchanged final renders, fix Export for Resolve, deselect on outside click
