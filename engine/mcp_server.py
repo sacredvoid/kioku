@@ -332,8 +332,12 @@ def set_transition(collection_id: int, after_item_id: int, type: str, duration: 
     whip-*: a fast motion-blurred slide; the direction is where the picture moves (whip-left = the picture flies left,
     as if the camera whipped right). Match the movement at the end of the outgoing shot, 0.2 to 0.3 s, with
     sfx="whoosh", about one per 8 s. zoom-in blurs at its peak.
-    sfx: whoosh (pairs with whip, zoom-in, slide), hit (a hard cut on a drop), riser (builds into the seam), none.
-    Leave sfx empty to keep the current one. type cut with an sfx keeps a hard cut with a sound."""
+    sfx: a real recorded sound, used sparingly (3 to 5 per 30 s; silence is the default). auto picks by this type
+    (whoosh for whips and zoom-in, swish for slides, wipes, blur and circle, hit for flash-white, swell for fade-black,
+    nothing for cut, dissolve and squeeze). Or name one: whoosh (a whip or change of place), swish (a lighter slide),
+    hit (a hard cut on a drop, once or twice), riser (builds into one big seam, once per edit), swell (a softer riser for
+    calm music), shutter (a photo burst), pop (small, mostly for titles), none. Leave sfx empty to keep the current one.
+    type cut with an sfx keeps a hard cut with a sound. Hard cuts are declicked automatically."""
     path = f"/collections/{collection_id}/edit/transitions/{after_item_id}"
     body = {"type": type, "duration": duration}
     if sfx:
@@ -343,7 +347,8 @@ def set_transition(collection_id: int, after_item_id: int, type: str, duration: 
 
 @server.tool()
 def set_text(collection_id: int, text_id: str, template: str = "", text: str = "", start: float | None = None,
-             dur: float | None = None, position: str = "", font: str = "", color: str = "", accent: str = "") -> dict:
+             dur: float | None = None, position: str = "", font: str = "", color: str = "", accent: str = "",
+             sfx: str = "") -> dict:
     """Add, change or remove an animated title. text_id: any short name; a new id needs template and text, an existing id
     changes only what you pass; template="none" removes it. template: title-pop (big opener), title-slide (clean
     subtitle-style title), word-stagger (words appear one by one), lower-third (name or caption on a bar),
@@ -353,12 +358,13 @@ def set_text(collection_id: int, text_id: str, template: str = "", text: str = "
     when free, middle only as a last resort), top, middle, bottom (kept as asked; the render warns if it covers a face).
     9:16 text keeps clear of the app's buttons and caption area. Readability is automatic (shadow, or a soft scrim or
     box on bright or busy footage), so don't change color for it. font: auto, inter, anton, playfair, grotesk.
-    color / accent: #RRGGBB (accent colours the bar, rule or pin). Returns the edit."""
+    color / accent: #RRGGBB (accent colours the bar, rule or pin). sfx: a sound on the title's first frame, usually pop
+    (whoosh or swish suit a slide); only for an opener or a location tag, not every text; none removes it. Returns the edit."""
     p = f"/collections/{collection_id}/edit/texts/{text_id}"
     if template.lower() == "none":
         return call("DELETE", p)
     body = drop_unset(template=template or None, text=text or None, start=start, dur=dur, position=position or None,
-                      font=font or None, color=color or None, accent=accent or None)
+                      font=font or None, color=color or None, accent=accent or None, sfx=sfx or None)
     if not body:
         return {"error": "Nothing to change: pass template and text for a new title, or at least one setting."}
     return call("PUT", p, body)

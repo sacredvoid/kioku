@@ -245,6 +245,12 @@ assert t["text"] == "Hi there" and t["start"] == 11.5 and t["dur"] == 0.5 and {n
 r = cl.put(f"{u}/a", json={"start": 1, "dur": 2, "accent": "#00FFAA"})
 t = r.json()["spec"]["texts"][0]
 assert (t["template"], t["start"], t["dur"], t["accent"]) == ("title-pop", 1, 2, "#00FFAA"), t
+# a text sound: validated, kept when other fields change, removed by "none"
+assert cl.put(f"{u}/a", json={"sfx": "boom"}).status_code == 422
+assert cl.put(f"{u}/a", json={"sfx": "pop"}).json()["spec"]["texts"][0]["sfx"] == "pop"
+assert cl.put(f"{u}/a", json={"text": "Hello"}).json()["spec"]["texts"][0]["sfx"] == "pop"
+assert "sfx" not in cl.put(f"{u}/a", json={"sfx": "none"}).json()["spec"]["texts"][0]
+assert cl.put(f"{u}/a", json={"sfx": "pop"}).status_code == 200
 for k in range(1, titles.MAX_TEXTS):
     assert cl.put(f"{u}/t{k}", json={"template": "location-tag", "text": "X"}).status_code == 200
 assert cl.put(f"{u}/one-more", json={"template": "location-tag", "text": "X"}).status_code == 422

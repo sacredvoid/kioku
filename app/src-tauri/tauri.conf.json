@@ -34,6 +34,8 @@
       "../../engine/*.py": "engine/",
       "../../engine/fonts/*": "engine/fonts/",
       "../../engine/luts/*": "engine/luts/",
+      "../../engine/sfx/*.m4a": "engine/sfx/",
+      "../../engine/sfx/MANIFEST.json": "engine/sfx/MANIFEST.json",
       "../../engine/pyproject.toml": "engine/pyproject.toml",
       "../../engine/uv.lock": "engine/uv.lock",
       "../../engine/.python-version": "engine/.python-version",

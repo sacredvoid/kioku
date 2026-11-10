@@ -21,7 +21,7 @@ export type TransitionType = "cut" | "dissolve" | "fade-black" | "wipe-left" | "
   | "whip-left" | "whip-right" | "whip-up" | "whip-down" | "flash-white" | "blur" | "circle" | "squeeze";
 export type Motion = "none" | "push" | "pull" | "drift-left" | "drift-right" | "punch";
 export type Ramp = "none" | "slow-mid" | "fast-in" | "slow-out";
-export type Sfx = "whoosh" | "hit" | "riser";
+export type Sfx = "whoosh" | "swish" | "hit" | "riser" | "swell" | "pop" | "shutter";
 
 export type ClipFx = {
   speed?: number;      // 0.25..4, absent = 1

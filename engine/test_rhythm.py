@@ -86,7 +86,7 @@ s = spec(sfx={"1": "whoosh"})
 tl = edit.compute_timeline([item(1, t1=1.0), item(2, t1=1.0)], s, GRID)
 assert tl.sfx == ((30, "whoosh"),), tl.sfx
 fx = render.audio_fx(tl, None, tl.duration)
-assert len(fx["tracks"]) == 2 and abs(fx["tracks"][1]["delay"] - (1.0 - 0.4)) < 1e-6, fx["tracks"]
+assert len(fx["tracks"]) == 2 and abs(fx["tracks"][1]["delay"] - (1.0 - render.SFX_META["whoosh"]["before"])) < 1e-6, fx["tracks"]
 
 # beats.grid: shifted by the track start and in point, extended both ways
 g = beats.grid({"start": 1.0, "in": 0.25, "out": 2.0}, {"beats": [0.25, 0.75, 1.25, 1.75], "downbeats": [0.25], "duration": 3}, "beat", 4)
@@ -205,6 +205,14 @@ r = c.put(f"/collections/{cid}/edit/transitions/{ids[0]}", json={"type": "whip-u
 assert r.status_code == 200 and r.json()["clamped"][0]["to"] == edit.MAX_WHIP, r.text  # a slow whip is a blurry slide
 assert c.put(f"/collections/{cid}/edit/transitions/{ids[0]}", json={"type": "cut"}).status_code == 200
 assert c.get(f"/collections/{cid}/edit").json()["spec"]["sfx"] == {str(ids[0]): "whoosh"}  # a cut keeps its sound
+# sfx="auto" resolves by transition type and is stored as the name; unknown names are refused; types without a default stay silent
+assert c.put(f"/collections/{cid}/edit/transitions/{ids[1]}", json={"type": "slide-left", "duration": 0.3, "sfx": "auto"}).status_code == 200
+assert c.get(f"/collections/{cid}/edit").json()["spec"]["sfx"][str(ids[1])] == "swish"
+assert c.put(f"/collections/{cid}/edit/transitions/{ids[1]}", json={"type": "dissolve", "sfx": "auto"}).status_code == 200
+assert str(ids[1]) not in c.get(f"/collections/{cid}/edit").json()["spec"]["sfx"]
+assert c.put(f"/collections/{cid}/edit/transitions/{ids[1]}", json={"type": "cut", "sfx": "boom"}).status_code == 422
+assert c.put(f"/collections/{cid}/edit/transitions/{ids[1]}", json={"type": "cut", "sfx": "shutter"}).status_code == 200
+assert c.get(f"/collections/{cid}/edit").json()["spec"]["sfx"][str(ids[1])] == "shutter"
 assert c.delete(f"/collections/{cid}/edit/audio/m").status_code == 200
 assert c.get(f"/collections/{cid}/edit").json()["spec"]["sync"]["track"] is None  # deleting the music turns sync off
 print("rhythm checks passed")

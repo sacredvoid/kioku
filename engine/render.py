@@ -35,6 +35,7 @@ from timeline import Seg
 
 router = APIRouter()
 log = logging.getLogger("kioku.render")
+DECLICK = 0.008  # seconds of audio fade either side of a hard cut
 RENDER_V = 3  # bump to invalidate every cached segment (e.g. when a look preset changes)
 CACHE = core.DATA / "render_cache"  # /final and /preview, LRU by mtime
 RENDERS = core.DATA / "renders"  # /<cid>/preview.mp4, .srt, <mode>-sheet.jpg
@@ -494,38 +495,28 @@ def _audio_tail(acc, fx, first_in):
     return p
 
 
-SFX_DIR = core.DATA / "sfx"
-# (aevalsrc / anoisesrc graph, seconds, seconds before the seam the sound starts). Synthesized, so there is nothing to licence.
-SFX_SYNTH = {
-    "whoosh": ("anoisesrc=c=pink:d=0.6:a=0.6,highpass=f=500,lowpass=f=5000,afade=t=in:d=0.42:curve=exp,afade=t=out:st=0.42:d=0.18", 0.6, 0.4),
-    "hit": ("aevalsrc='0.9*sin(2*PI*(45+90*exp(-t*28))*t)*exp(-t*7)+0.25*(random(0)-0.5)*exp(-t*60)':d=0.7", 0.7, 0.0),
-    "riser": ("aevalsrc='0.35*sin(2*PI*(180+1600*t*t/2.25)*t)+0.25*(random(0)-0.5)':d=1.5,highpass=f=300,afade=t=in:d=1.45:curve=qsin", 1.5, 1.5),
-}
+# Curated CC0 sounds (engine/sfx/MANIFEST.json lists the source and licence of each). Per sound: file, dur (s), before (s the
+# file runs before its moment lands on the seam) and volume.
+SFX_SRC = Path(__file__).resolve().parent / "sfx"
+SFX_META = json.loads((SFX_SRC / "MANIFEST.json").read_text())
 
 
 def sfx_file(name):
-    """data/sfx/<name>.wav, synthesized on first use."""
-    graph, _, _ = SFX_SYNTH[name]
-    out = SFX_DIR / f"{name}.wav"
-    if not out.is_file():
-        SFX_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = SFX_DIR / f"{name}.{os.getpid()}.wav"
-        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", graph, "-ac", "2", "-ar", "48000", str(tmp)],
-                       check=True, capture_output=True, timeout=60)
-        tmp.replace(out)
-    return out
+    return SFX_SRC / SFX_META[name]["file"]
 
 
 def sfx_tracks(tl):
-    """The seam sound effects as audio-track dicts (the same shape as spec audio), so the finish pass mixes them like music.
+    """The seam and title sound effects as audio-track dicts (the same shape as spec audio), so the finish pass mixes them
+    like music. A sound lands on the seam's frame, or on a title's first frame; it starts earlier by its "before".
     ponytail: they also key the ducking, which dips clip sound for the length of the effect."""
+    hits = [*tl.sfx, *((t["start_frame"], t["sfx"]) for t in tl.texts if t.get("sfx") in SFX_META)]
     out = []
-    for f, name in tl.sfx:
-        _, dur, before = SFX_SYNTH[name]
-        at = f / tl.fps - before
+    for f, name in hits:
+        m = SFX_META[name]
+        at = f / tl.fps - m["before"]
         cut = max(0.0, -at)  # an effect right at the start loses its lead-in
-        out.append({"id": f"sfx{f}", "path": str(sfx_file(name)), "start": at + cut, "in": cut, "out": dur, "volume": 0.8,
-                    "fade_in": 0.0, "fade_out": 0.0})
+        out.append({"id": f"sfx{f}{name}", "path": str(sfx_file(name)), "start": at + cut, "in": cut, "out": m["dur"],
+                    "volume": m["volume"], "fade_in": 0.0, "fade_out": 0.0})
     return out
 
 
@@ -587,7 +578,15 @@ def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=Non
             p.append(f"[{acca}][{i}:a]acrossfade=d={_n(tf / fps, 6)}[ja{i}]")
             accv, acca, acc = f"x{i}", f"ja{i}", acc + frames[i] - tf
         else:
-            p.append(f"[{accv}][{acca}][v{i}][{i}:a]concat=n=2:v=1:a=1[cv{i}][ja{i}]")
+            # a hard cut joins two waveforms mid-cycle: dip the audio for a few ms either side of the join so it cannot click
+            d = min(DECLICK, frames[i] / fps / 2, acc / fps / 2)
+            if d > 0:
+                p.append(f"[{acca}]afade=t=out:st={_n(acc / fps - d, 6)}:d={_n(d, 6)}[ao{i}]")
+                p.append(f"[{i}:a]afade=t=in:st=0:d={_n(d, 6)}[ai{i}]")
+                acca, ain = f"ao{i}", f"ai{i}"
+            else:
+                ain = f"{i}:a"
+            p.append(f"[{accv}][{acca}][v{i}][{ain}]concat=n=2:v=1:a=1[cv{i}][ja{i}]")
             p.append(f"[cv{i}]fps={fps}[x{i}]")  # concat resets the timebase; xfade needs it back
             accv, acca, acc = f"x{i}", f"ja{i}", acc + frames[i]
     if window:

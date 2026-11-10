@@ -56,7 +56,11 @@ MOTION_AMOUNT = 0.35    # default: 1.105x
 # ramp: (fraction of the clip's OUTPUT time, speed multiplier) phases; the clip's own audio is silenced
 RAMPS = {"slow-mid": ((0.3, 2.0), (0.4, 0.4), (0.3, 2.0)), "fast-in": ((0.4, 2.5), (0.6, 1.0)),
          "slow-out": ((0.6, 1.0), (0.4, 0.35))}
-SFX = ("whoosh", "hit", "riser")
+SFX = ("whoosh", "swish", "hit", "riser", "swell", "pop", "shutter")  # curated CC0 files: engine/sfx/MANIFEST.json
+# sfx="auto" on a seam picks by transition type. Anything not listed (cut, dissolve, squeeze) stays silent: a sound is a choice.
+AUTO_SFX = {"whip-left": "whoosh", "whip-right": "whoosh", "whip-up": "whoosh", "whip-down": "whoosh", "zoom-in": "whoosh", "slide-left": "swish", "slide-up": "swish",
+            "wipe-left": "swish", "wipe-right": "swish", "blur": "swish", "circle": "swish", "flash-white": "hit",
+            "fade-black": "swell"}
 MAX_BEATS = 32
 MIN_TRANS_FRAMES = 3
 SHORT_CLIP = 0.2
@@ -373,6 +377,9 @@ def compute_timeline(items, spec, grid=None):
             warnings.append(f"text {t['id']!r} starts after the edit ends and is not shown")
             continue
         texts.append({**titles.DEFAULT, **t, "start_frame": f0, "frames": n})
+    n_sfx, cap = len(sfx) + sum(1 for t in texts if t.get("sfx")), max(3, round(total / fps / 6))
+    if n_sfx > cap:  # a warning, not an error: older edits may already be over
+        warnings.append(f"{n_sfx} sounds on seams and titles; about {cap} is plenty for {total / fps:.0f}s. Remove the weakest")
     ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items], G],
                        sort_keys=True, separators=(",", ":"))
     return Timeline(fps=fps, aspect=spec["format"]["aspect"], size=spec["format"]["size"], segs=tuple(segs),
@@ -516,7 +523,7 @@ class TransitionPut(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     type: Literal["cut", *XFADE]
     duration: F = 0.5
-    sfx: Literal["none", "whoosh", "hit", "riser"] | None = None   # sound on this seam; omitted keeps it
+    sfx: Literal["none", "auto", *SFX] | None = None   # sound on this seam (auto: by transition type); omitted keeps it
 
 
 # field -> (path in the clip entry, default, lo, hi); lo is None for enums
@@ -753,10 +760,11 @@ def put_transition(cid: int, item_id: int, body: TransitionPut):
         if not any(i["item_id"] == item_id for i in col["items"]):
             raise HTTPException(404, "no such item")
         if "sfx" in body.model_fields_set:
-            if body.sfx in (None, "none"):
+            name = AUTO_SFX.get(body.type) if body.sfx == "auto" else body.sfx  # stored resolved, so a later edit never changes it
+            if name in (None, "none"):
                 spec["sfx"].pop(str(item_id), None)
             else:
-                spec["sfx"][str(item_id)] = body.sfx
+                spec["sfx"][str(item_id)] = name
         if body.type == "cut":
             spec["transitions"].pop(str(item_id), None)
             return []
@@ -786,6 +794,7 @@ class TextPut(BaseModel):
     font: Literal["auto", *titles.FONTS] | None = None
     color: str | None = Field(None, pattern=HEX)
     accent: str | None = Field(None, pattern=HEX)
+    sfx: Literal["none", *SFX] | None = None   # sound on the title's first frame; omitted keeps it
 
 
 MAX_TEXT_DUR = 15.0
@@ -818,6 +827,11 @@ def put_text(cid: int, text_id: str, body: TextPut):
         for k in ("template", "position", "font", "color", "accent"):
             if getattr(body, k) is not None:
                 t[k] = getattr(body, k)
+        if body.sfx is not None:
+            if body.sfx == "none":
+                t.pop("sfx", None)
+            else:
+                t["sfx"] = body.sfx
         if text is not None:
             t["text"] = text
         notes = []

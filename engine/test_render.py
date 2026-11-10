@@ -684,7 +684,7 @@ db.execute("insert into collections(id, name, kind, created, updated) values (77
 db.commit()
 res, n = go(77)
 assert n == 3 and abs(duration(res["path"]) - PLAN[77].duration) < 0.1, (res, duration(res["path"]))
-assert any("whoosh.wav" in " ".join(map(str, cmd)) and "hit.wav" in " ".join(map(str, cmd)) for cmd in RUNS), "seam sounds not mixed"
+assert any("whoosh.m4a" in " ".join(map(str, cmd)) and "hit.m4a" in " ".join(map(str, cmd)) for cmd in RUNS), "seam sounds not mixed"
 assert_clean()
 # Export for Resolve: clips already on disk are cloned in, only the rest is downloaded (and a rerun re-copies nothing)
 asked = []
