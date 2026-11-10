@@ -26,6 +26,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from pydantic import BaseModel, Field
+
 import core
 import library
 import projects
@@ -130,6 +132,7 @@ async def lifespan(_app):
     log.info("engine starting; log file %s", LOG_FILE)
     core.query_model()  # CPU text model only; the GPU model lives in the indexer process
     load()
+    projects.mark_interrupted()
     log.info("ready: %d items indexed", len(state["index"].assets))
     yield
 
@@ -180,6 +183,18 @@ async def unhandled(request: Request, exc: Exception):
 
 # The version this process started with; the app replaces an engine whose version differs from its own.
 VERSION = tomllib.loads((Path(__file__).parent / "pyproject.toml").read_text())["project"]["version"]
+
+
+class ClientLog(BaseModel):
+    message: str = Field(max_length=2000)
+    stack: str = Field("", max_length=8000)
+    where: str = Field("", max_length=300)
+
+
+@app.post("/client-log", status_code=204)
+def client_log(body: ClientLog):
+    """The app's own uncaught errors, written to engine.log: release builds have no dev tools to read them in."""
+    log.warning("app error at %s: %s\n%s", body.where, body.message, body.stack)
 
 
 @app.get("/health")
@@ -397,4 +412,4 @@ def reindex(since: date | None = None, newer: bool = False):
 
 if __name__ == "__main__":
     # localhost only: this exposes your photo library's previews and file paths
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    uvicorn.run(app, host="127.0.0.1", port=8765, timeout_graceful_shutdown=5)  # never hang on long requests when asked to stop

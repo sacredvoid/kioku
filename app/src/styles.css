@@ -334,15 +334,15 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
 .tile.sel img { transform: scale(.92); border-radius: 6px }
 .tile.sel .check { opacity: 1; transform: none; background: var(--accent) no-repeat center / 13px; border-color: #fff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") }
-.empty { margin: 90px auto; max-width: 42ch; text-align: center; color: var(--text-2); font-size: 16px; line-height: 1.55; text-wrap: balance }
+#empty { margin: 90px auto; max-width: 42ch; text-align: center; color: var(--text-2); font-size: 16px; line-height: 1.55; text-wrap: balance }
 
 /* ---------- view change: content settles in (only on navigation; live refreshes don't re-animate) */
-.main.enter .view-head > *, .main.enter .summary, .main.enter .project > *, .main.enter .empty { animation: rise .5s var(--ease) both }
+.main.enter .view-head > *, .main.enter .summary, .main.enter #project > *, .main.enter #empty { animation: rise .5s var(--ease) both }
 .main.enter .summary { animation-delay: .04s }
-.main.enter .project > :nth-child(2) { animation-delay: .05s }
-.main.enter .project > :nth-child(3) { animation-delay: .08s }
-.main.enter .project > :nth-child(4) { animation-delay: .11s }
-.main.enter .project > :nth-child(n+5) { animation-delay: .14s }
+.main.enter #project > :nth-child(2) { animation-delay: .05s }
+.main.enter #project > :nth-child(3) { animation-delay: .08s }
+.main.enter #project > :nth-child(4) { animation-delay: .11s }
+.main.enter #project > :nth-child(n+5) { animation-delay: .14s }
 .main.enter .grid { animation: fade .45s var(--ease) both }
 @keyframes rise { from { opacity: 0; translate: 0 8px } }
 @keyframes fade { from { opacity: 0 } }
@@ -367,7 +367,7 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
 @keyframes drop { from { opacity: 0; translate: 0 8px } }
 
 /* ---------- project */
-.project { display: flex; flex-direction: column; gap: 12px; padding-top: 10px }
+#project { display: flex; flex-direction: column; gap: 12px; padding-top: 10px }
 .brief-box { padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: var(--r); background: var(--surface) }
 .brief-box .k-h2 { margin: 0 }
 .brief-hint { margin: 2px 0 10px; font-size: 12.5px; color: var(--text-3) }
@@ -415,7 +415,6 @@ body.selecting .tile .check, .tile:hover .check { opacity: 1; transform: none }
 .clip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 520 }
 
 /* ---------- Claude's history: one compact line that opens into every past run */
-.claude:has(> .ask-out:empty):has(> .runs[hidden]) { display: none }
 .claude { display: flex; flex-direction: column; gap: 8px }
 .runs { border-radius: var(--r); background: var(--surface); border: 1px solid var(--line-soft); transition: background-color .2s var(--ease), border-color .2s var(--ease) }
 .runs.open { background: var(--surface-solid); border-color: var(--line) }
@@ -538,8 +537,8 @@ button.chip:hover { border-color: var(--line); color: var(--text); transform: tr
 .ld-index path { stroke-width: 2.6 }         /* points, not lines */
 .ld-index.mini path { stroke-width: 2.3 }
 .ld-think .hot { stroke-width: 1.5 }
-.empty .ld { display: block; margin: 0 auto 22px }
-.empty p { margin: 0 }
+#empty .ld { display: block; margin: 0 auto 22px }
+#empty p { margin: 0 }
 
 /* activity center: mini indicator in the top bar, popover under it */
 .k-tools { position: relative }
@@ -792,3 +791,35 @@ li[data-state="error"] .live-ico { background: var(--danger); -webkit-mask: url(
 .font-opt .fn { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .live-media { border-style: dashed; background: transparent }
 .live-media .live-spin { border-top-color: var(--text-2) }
+
+/* collapsible brief: the heading row is the toggle; folded, it shows the brief's first line */
+.brief-fold { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none; text-align: left; color: var(--text); min-width: 0 }
+.brief-fold .ico-chev { flex: none; color: var(--text-3); transform: rotate(-90deg); transition: transform .25s var(--ease) }
+.brief-fold[aria-expanded="true"] .ico-chev { transform: none }
+.brief-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px }
+.brief-peek { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--text-3) }
+.brief-fold[aria-expanded="true"] .brief-peek { display: none }
+.brief-box.folded { padding-block: 11px }
+.brief-more { padding-top: 2px }
+
+/* floating "Claude is editing" pill (live.ts) and a glow on the editor while an edit runs */
+.edit-pill { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 10px;
+  max-width: min(760px, calc(100vw - 32px)); padding: 9px 9px 9px 16px; border-radius: 999px; border: 1px solid color-mix(in oklch, var(--accent) 45%, var(--line));
+  background: color-mix(in oklch, var(--surface-solid) 88%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--shadow-lg), 0 0 0 4px var(--accent-soft); font-size: 13.5px; color: var(--text-2); animation: rise .35s var(--ease) both }
+.edit-pill[hidden] { display: none }
+.edit-pill .pill-kicker { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); white-space: nowrap }
+.edit-pill strong { color: var(--text); font-weight: 600; white-space: nowrap }
+.edit-pill .pill-what { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3) }
+.edit-pill .live-time { font-variant-numeric: tabular-nums; color: var(--text-2) }
+.edit-pill .pill-show { flex: none; padding: 6px 14px; border-radius: 999px; border: 0; background: var(--accent-fill); color: var(--on-accent); font-weight: 600 }
+body.selecting .edit-pill { bottom: 86px } /* clear the selection bar */
+/* the glow is a pseudo-element fading its opacity: cheap to animate for a 20-minute edit, unlike box-shadow */
+body.claude-editing .tl-host { position: relative; border-radius: 14px }
+body.claude-editing .tl-host::after { content: ""; position: absolute; inset: -2px; border-radius: 16px; pointer-events: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 60%, transparent), 0 0 24px var(--accent-soft); animation: edit-glow 2.4s ease-in-out infinite }
+@keyframes edit-glow { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
+@media (max-width: 760px) { .edit-pill { bottom: 64px } .edit-pill .pill-what { display: none } }
+@media (prefers-reduced-motion: reduce) { body.claude-editing .tl-host::after { animation: none; opacity: .6 } .edit-pill { animation: none } }
+.brief-h { margin: 0 }
+.brief-label { font-weight: 600; flex: none }

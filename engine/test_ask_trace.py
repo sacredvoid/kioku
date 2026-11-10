@@ -45,3 +45,20 @@ snap = projects.job(9, "ask")
 snap["trace"][0]["state"] = "x"
 assert state["trace"][0]["state"] == "done"  # the snapshot is a copy
 print("ask trace ok")
+
+# an edit is recorded as running when it starts; a restart turns it into a visible failure with Retry text
+import core  # noqa: E402
+import library  # noqa: E402
+with library.conn() as c:
+    cid = c.execute("insert into collections(name, kind) values ('t', 'project')").lastrowid
+    c.commit()
+rid = projects.open_run(cid, "make it", 1.0)
+projects.mark_interrupted()
+row = core.connect().execute("select status, error from ask_runs where id = ?", (rid,)).fetchone()
+assert row[0] == "failed" and "restarted" in row[1], row
+rid2 = projects.open_run(cid, "again", 2.0)
+projects.save_run(cid, "again", {"run_id": rid2, "status": "done", "steps": ["a"], "output": "ok", "model": "opus"})
+row = core.connect().execute("select status, output, steps from ask_runs where id = ?", (rid2,)).fetchone()
+assert row == ("done", "ok", '["a"]'), row
+assert core.connect().execute("select count(*) from ask_runs where collection_id = ?", (cid,)).fetchone()[0] == 2
+print("run history ok")

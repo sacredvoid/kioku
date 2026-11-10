@@ -46,15 +46,20 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly path: string) { super(message); }
 }
 
-export async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+/** Every request has a deadline: WebKit allows ~6 connections per host, so one that never answers would queue every
+ * poll behind it and the app would look frozen. Long work (iCloud downloads) passes its own timeout and signal. */
+export async function api<T>(path: string, method = "GET", body?: unknown, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<T> {
   let r: Response;
+  const limit = AbortSignal.timeout(opts.timeout ?? (method === "GET" ? 20_000 : 120_000));
   try {
     r = await fetch(API + path, {
       method,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: opts.signal ? AbortSignal.any([limit, opts.signal]) : limit,
     });
   } catch (e) {
+    if (opts.signal?.aborted) throw e;  // the caller cancelled: not an engine problem
     // fetch only throws when there's no response at all: engine stopped, restarting, or still loading
     throw new ApiError("The engine isn't responding. If you restarted it, give it a few seconds.", 0, path);
   }

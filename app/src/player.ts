@@ -402,7 +402,8 @@ export class LivePlayer implements Player {
   private analyze(uuid: string) {
     if (this.busy.has(uuid) || this.gaveUp.has(uuid)) return;
     this.busy.add(uuid);
-    api(`/media/${uuid}/analyze`, "POST").then(() => {
+    // cancelled with the player (leaving the project) so it never holds one of WebKit's few connections afterwards
+    api(`/media/${uuid}/analyze`, "POST", undefined, { timeout: 600_000, signal: this.ac.signal }).then(() => {
       if (this.ac.signal.aborted) return;
       for (const s of this.slots) if (s.uuid === uuid) { s.uuid = ""; s.idx = -1; s.failed = false; }
     }).catch((e) => {
