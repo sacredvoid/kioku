@@ -51,9 +51,13 @@ fn stop_stale_engine() {
     }
 }
 
-// ponytail: engine path is baked in at compile time (fine for a personal app); bundle it as a sidecar to ship elsewhere.
-fn engine_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engine")
+/// Where the engine code lives. Release builds run the copy bundled in Kioku.app/Contents/Resources/engine, so an
+/// installed version never changes when the repo checkout does. `tauri dev` runs the repo's live code.
+fn engine_dir(app: &tauri::App) -> PathBuf {
+    if cfg!(debug_assertions) {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engine");
+    }
+    app.path().resource_dir().expect("resource dir").join("engine")
 }
 
 fn uv_path() -> PathBuf {
@@ -86,7 +90,7 @@ fn request_photos_access() {
     }
 }
 
-fn start_engine() -> Option<Child> {
+fn start_engine(engine: PathBuf) -> Option<Child> {
     if engine_running() {
         if engine_is_ours() {
             return None;
@@ -97,7 +101,14 @@ fn start_engine() -> Option<Child> {
     // and claude by name, which live in Homebrew and ~/.local/bin.
     let home = std::env::var("HOME").unwrap_or_default();
     let path = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default());
-    match Command::new(uv_path()).args(["run", "server.py"]).current_dir(engine_dir()).env("PATH", path).spawn() {
+    let mut cmd = Command::new(uv_path());
+    cmd.args(["run", "server.py"]).current_dir(&engine).env("PATH", path);
+    if !cfg!(debug_assertions) {
+        // The bundle is read-only and signed: the venv and bytecode go to ~/Kioku, and uv.lock is used as shipped.
+        let data = PathBuf::from(&home).join("Kioku");
+        cmd.env("UV_PROJECT_ENVIRONMENT", data.join("venv")).env("UV_FROZEN", "1").env("PYTHONPYCACHEPREFIX", data.join("pycache"));
+    }
+    match cmd.spawn() {
         Ok(child) => Some(child),
         Err(e) => {
             eprintln!("kioku: could not start engine: {e}");
@@ -129,7 +140,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             request_photos_access();
-            app.manage(Engine(Mutex::new(start_engine())));
+            app.manage(Engine(Mutex::new(start_engine(engine_dir(app)))));
             enable_login_item_once(app);
             Ok(())
         })

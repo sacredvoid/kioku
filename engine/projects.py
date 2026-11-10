@@ -5,6 +5,7 @@ Export is the one place originals get copied: editors need real files. They go t
 """
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -221,10 +222,12 @@ def claude_bin():
 
 
 def mcp_config():
+    """The engine's own Python runs the MCP server: `uv run --directory` would make a .venv inside the signed,
+    read-only app bundle. The bytecode prefix is passed on so Python doesn't write __pycache__ there either."""
     cfg = core.DATA / "mcp.json"
-    uv = next((str(p) for p in (Path.home() / ".local/bin/uv", Path("/opt/homebrew/bin/uv")) if p.exists()), "uv")
+    env = {k: os.environ[k] for k in ("PYTHONPYCACHEPREFIX",) if k in os.environ}
     cfg.write_text(json.dumps({"mcpServers": {"kioku": {
-        "command": uv, "args": ["run", "--directory", str(ENGINE), "mcp_server.py"]}}}))
+        "command": sys.executable, "args": [str(ENGINE / "mcp_server.py")], "env": env}}}))
     return cfg
 
 
