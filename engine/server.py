@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from contextlib import asynccontextmanager, closing
 from datetime import date
 from pathlib import Path
@@ -171,10 +172,14 @@ async def unhandled(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": f"Engine error ({type(exc).__name__}): {exc}"[:500]})
 
 
+# The version this process started with; the app replaces an engine whose version differs from its own.
+VERSION = tomllib.loads((Path(__file__).parent / "pyproject.toml").read_text())["project"]["version"]
+
+
 @app.get("/health")
 def health():
     idx = fresh_index()
-    out = {"assets": len(idx.assets) if idx else 0, "reindex": state["reindex"]}
+    out = {"assets": len(idx.assets) if idx else 0, "reindex": state["reindex"], "version": VERSION}
     if state["reindex"] == "running":
         out["progress"] = index_progress()
     return out

@@ -17,6 +17,40 @@ fn engine_running() -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
+/// True if the engine on the port answers /health with this app's version. An engine left over from an older
+/// build (or one that is frozen) keeps the port and the new app would talk to old code.
+fn engine_is_ours() -> bool {
+    use std::io::{Read, Write};
+    let addr: SocketAddr = ENGINE_ADDR.parse().expect("valid engine address");
+    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else { return false };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(1)));
+    if s.write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").is_err() {
+        return false;
+    }
+    let mut body = String::new();
+    let _ = s.read_to_string(&mut body);
+    body.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION")))
+}
+
+/// Stop whatever is listening on the engine port (SIGTERM, then SIGKILL), and wait for the port to free.
+fn stop_stale_engine() {
+    let pids = Command::new("/usr/sbin/lsof").args(["-ti", "tcp:8765", "-sTCP:LISTEN"]).output().map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().map(String::from).collect::<Vec<_>>()).unwrap_or_default();
+    if pids.is_empty() {
+        return;
+    }
+    eprintln!("kioku: replacing an engine from another version (pid {})", pids.join(" "));
+    for sig in ["-TERM", "-KILL"] {
+        let _ = Command::new("/bin/kill").arg(sig).args(&pids).status();
+        for _ in 0..30 {
+            if !engine_running() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 // ponytail: engine path is baked in at compile time (fine for a personal app); bundle it as a sidecar to ship elsewhere.
 fn engine_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engine")
@@ -54,7 +88,10 @@ fn request_photos_access() {
 
 fn start_engine() -> Option<Child> {
     if engine_running() {
-        return None;
+        if engine_is_ours() {
+            return None;
+        }
+        stop_stale_engine();
     }
     // Launched from Finder or at login, the app gets PATH=/usr/bin:/bin:...; the engine calls ffmpeg, ffprobe
     // and claude by name, which live in Homebrew and ~/.local/bin.

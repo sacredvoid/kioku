@@ -203,7 +203,7 @@ async function loadDates(kind: string) {
 function fillMonths() {
   const y = fYear.value, keep = fMonth.value;
   const months = Object.entries(dateCounts).filter(([ym]) => ym.startsWith(`${y}-`)).sort((a, b) => a[0].localeCompare(b[0]));
-  fMonth.replaceChildren(new Option("All months", ""), ...months.map(([ym, n]) => new Option(`${monthName.format(new Date(`${ym}-15T12:00:00`))} (${n.toLocaleString()})`, ym)));
+  fMonth.replaceChildren(new Option(y ? "All months" : "Month: pick a year", ""), ...months.map(([ym, n]) => new Option(`${monthName.format(new Date(`${ym}-15T12:00:00`))} (${n.toLocaleString()})`, ym)));
   fMonth.disabled = !y;
   fMonth.value = months.some(([ym]) => ym === keep) ? keep : "";
   dateFilter = fMonth.value || y;
