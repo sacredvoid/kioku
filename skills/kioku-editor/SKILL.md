@@ -46,7 +46,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 ### 2b. Reference video (only when the user gave one)
 
-`analyze_reference(path)` on the file or link (YouTube and most video sites are downloaded once, up to 15 min). Read its frame grid and its PLAN: sync grid, beats-per-shot pattern, motion / flash / punch budgets, transition mix with sounds, text style, look. Use the plan's numbers instead of the defaults below for the rest of the edit.
+`analyze_reference(path)` on the file or link (YouTube and most video sites are downloaded once; longer links use their first 15 min). Read its frame grid and its PLAN: sync grid, beats-per-shot pattern, motion / flash / punch budgets, transition mix with sounds, text style, look. Use the plan's numbers instead of the defaults below for the rest of the edit.
 
 ## 3. Find the moments
 

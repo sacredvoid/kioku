@@ -621,7 +621,7 @@ def is_link(s):
 
 
 def fetch_link(url):
-    """Download a reference link once (at most 1080p, 15 min) into DATA/references/src and return the local path.
+    """Download a reference link once (at most 1080p, the first 15 min) into DATA/references/src and return the local path.
     The user asked for this video as a style reference; it never leaves this Mac."""
     url = url.strip()
     if not is_link(url):
@@ -636,7 +636,9 @@ def fetch_link(url):
     tmpl = str(out.with_suffix("")) + ".part-dl.%(ext)s"
     try:
         r = subprocess.run([exe, "--no-playlist", "--no-progress", "--max-filesize", "800M",
-                            "--match-filter", f"duration <= {MAX_SECONDS}",
+                            # longer videos: keep the first 15 min (plenty for the style) instead of refusing them;
+                            # cut a second short because sections overshoot and the analysis caps at MAX_SECONDS
+                            "--download-sections", f"*0-{MAX_SECONDS - 1}",
                             "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b[height<=1080]/b",
                             "--merge-output-format", "mp4", "-o", tmpl, "--", url],
                            capture_output=True, text=True, timeout=900, env=tool_env())
@@ -647,7 +649,7 @@ def fetch_link(url):
     if r.returncode != 0 or not vid:
         for f in got:
             f.unlink(missing_ok=True)
-        why = (r.stderr.strip().splitlines() or ["no video was downloaded (longer than 15 min, or not a video page?)"])[-1]
+        why = (r.stderr.strip().splitlines() or ["no video was downloaded (not a video page?)"])[-1]
         if "403" in r.stderr or "JavaScript runtime" in r.stderr:  # YouTube changes often; old yt-dlp builds get blocked
             why = "the site refused this yt-dlp (it is out of date or has no JavaScript runtime). Run `brew install yt-dlp deno`, then try again"
         raise ValueError(f"could not download the reference: {why[:300]}")

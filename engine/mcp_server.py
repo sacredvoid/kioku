@@ -558,7 +558,7 @@ def render_status(collection_id: int, mode: str = "preview", wait_seconds: int =
 @server.tool(annotations=READ_ONLY)
 def analyze_reference(path: str) -> list:
     """Learn the style of a reference video the user gave you: a local .mp4/.mov/.m4v file or a link (YouTube and most
-    video sites, downloaded once at up to 1080p and kept on this Mac), up to 15 minutes. Measures pacing in seconds and beats, cuts on the beat, transitions, camera motion, punch-ins, flashes,
+    video sites, downloaded once at up to 1080p and kept on this Mac); longer links use their first 15 minutes, local files must be 15 minutes or less. Measures pacing in seconds and beats, cuts on the beat, transitions, camera motion, punch-ins, flashes,
     on-screen text and color, then returns a short summary, a concrete PLAN in Kioku's own settings (sync grid, beats per
     clip, motion/flash budgets, transitions with sounds, captions, look) and a frame grid of the reference's shots.
     Takes about 10 s per minute of video; the result is cached. Follow the plan with set_edit, set_clip_fx, set_transition."""
