@@ -3,13 +3,17 @@
 // Each art also sets the accent hue. Capped at 24 fps, paused while the window is hidden, one still frame under
 // prefers-reduced-motion.
 
-export const ARTS = ["vortex", "flow", "hilbert", "grid"] as const;
+export const ARTS = ["vortex", "flow", "hilbert", "grid", "harmonograph", "moire", "truchet", "lattice"] as const;
 export type Art = (typeof ARTS)[number];
 export const ART_INFO: Record<Art, { name: string; hue: number; note: string }> = {
   vortex: { name: "Vortex", hue: 70, note: "Polar curves twisting round a centre" },
   flow: { name: "Flow field", hue: 150, note: "Streamlines drifting through a slow current" },
   hilbert: { name: "Hilbert", hue: 230, note: "A space-filling curve, traced end to end" },
   grid: { name: "Grid", hue: 30, note: "Recursive subdivision, lines gliding" },
+  harmonograph: { name: "Harmonograph", hue: 350, note: "Two decaying pendulums drawing one line" },
+  moire: { name: "Moiré", hue: 195, note: "Two ripple sets drifting through each other" },
+  truchet: { name: "Truchet", hue: 280, note: "Quarter-arc tiles that turn now and then" },
+  lattice: { name: "Lattice", hue: 110, note: "Triangles breathing in a slow wave" },
 };
 const LEGACY: Record<string, Art> = { sunflower: "vortex", meadow: "flow", pond: "hilbert", honeycomb: "grid" }; // keep a saved hue
 
@@ -109,6 +113,64 @@ const draw: Record<Art, Draw> = {
       else { c.moveTo(x, y + h * r); c.lineTo(x + w, y + h * r); c.stroke(); cut(x, y, w, h * r, d + 1, id * 2); cut(x, y + h * r, w, h * (1 - r), d + 1, id * 2 + 1); }
     };
     cut(0, 0, W, H, 0, 1);
+  },
+  harmonograph(c, W, H, t, ink) { // x and y each a pair of damped sines; the phases drift so the figure keeps reweaving
+    const cx = W * .8, cy = H * .74, R = Math.min(W, H) * .3, N = 1800, seg = 60;
+    const p = t * .03;
+    const at = (u: number) => {
+      const e = Math.exp(-u * .011);
+      return [cx + R * e * (Math.sin(u * .2 * 2.01 + p) + Math.sin(u * .2 * 3 + 1.3)),
+              cy + R * e * (Math.sin(u * .2 * 3.005 + p * 1.3 + .5) + Math.sin(u * .2 * 2 + 2.1))] as const;
+    };
+    c.lineWidth = 1;
+    for (let s = 0; s < N; s += seg) { // outer loops brightest, fading as the pendulums settle
+      c.strokeStyle = ink(.3 * (1 - s / N) + .04);
+      c.beginPath();
+      for (let i = s; i <= Math.min(s + seg, N); i++) c.lineTo(...at(i));
+      c.stroke();
+    }
+  },
+  moire(c, W, H, t, ink) { // two sets of concentric rings on slow orbits; their overlap draws the interference bands
+    const R = Math.min(W, H) * .8, gap = 9;
+    const ctr = (k: number) => [W * .82 + Math.cos(t * .05 + k * 3.1) * R * .09, H * .78 + Math.sin(t * .04 + k * 3.1) * R * .09] as const;
+    c.lineWidth = 1;
+    for (const k of [0, 1]) {
+      const [x, y] = ctr(k);
+      for (let r = gap; r < R; r += gap) {
+        c.strokeStyle = ink(.28 * (1 - r / R));
+        c.beginPath(); c.arc(x, y, r, 0, 6.2832); c.stroke();
+      }
+    }
+  },
+  truchet(c, W, H, t, ink) { // quarter-arc tiles; each one now and then swings a quarter turn to its next orientation
+    const S = Math.max(28, Math.min(W, H) / 18), hs = S / 2, ease = (u: number) => u * u * (3 - 2 * u);
+    c.lineWidth = 1.2;
+    for (let gy = 0; gy * S < H; gy++) for (let gx = 0; gx * S < W; gx++) {
+      const x = gx * S + hs, y = gy * S + hs, f = fall(x, y, W, H);
+      if (f < .05) continue;
+      const id = gx * 131 + gy * 17, ph = t * .06 + rnd(id) * 9, k = Math.floor(ph), u = ph - k;
+      const o0 = rnd(id * 1.3 + k) > .5 ? 1 : 0, o1 = rnd(id * 1.3 + k + 1) > .5 ? 1 : 0;
+      const a = (o0 + (o1 - o0) * ease(Math.max(0, (u - .85) / .15))) * Math.PI / 2;
+      c.save(); c.translate(x, y); c.rotate(a);
+      c.strokeStyle = ink(.34 * f);
+      c.beginPath(); c.arc(-hs, -hs, hs, 0, Math.PI / 2); c.stroke();
+      c.beginPath(); c.arc(hs, hs, hs, Math.PI, Math.PI * 1.5); c.stroke();
+      c.restore();
+    }
+  },
+  lattice(c, W, H, t, ink) { // triangle grid; a wave rolling out from the corner fills the triangles it passes
+    const S = Math.max(26, Math.min(W, H) / 20), h = S * .866;
+    c.lineWidth = 1;
+    for (let row = 0; row * h < H + h; row++) for (let col = -1; col * S / 2 < W + S; col++) {
+      const up = (row + col) % 2 === 0, x = col * S / 2, y = row * h;
+      const pts: [number, number][] = up ? [[x, y + h], [x + S / 2, y], [x + S, y + h]] : [[x, y], [x + S, y], [x + S / 2, y + h]];
+      const mx = x + S / 2, my = y + h / 2, f = fall(mx, my, W, H);
+      if (f < .05) continue;
+      const w = .5 + .5 * Math.sin(Math.hypot(W - mx, H - my) * .012 - t * .5);
+      c.beginPath(); c.moveTo(...pts[0]); c.lineTo(...pts[1]); c.lineTo(...pts[2]); c.closePath();
+      if (w > .7) { c.fillStyle = ink(.1 * f * (w - .7) / .3); c.fill(); }
+      c.strokeStyle = ink(.18 * f); c.stroke();
+    }
   },
 };
 
