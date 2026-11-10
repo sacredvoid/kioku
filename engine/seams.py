@@ -239,10 +239,10 @@ def _place(c, ua, ub, ca, cb):
     ia, ib = c.execute(q, (ua,)).fetchone(), c.execute(q, (ub,)).fetchone()
     change = None
     if ia and ib:
-        if ia[0] and ib[0]:
-            change = ia[0].strip().lower() != ib[0].strip().lower()
-        elif None not in (ia[1], ia[2], ib[1], ib[2]):
+        if None not in (ia[1], ia[2], ib[1], ib[2]):  # coordinates first: names differ in detail ("Salem" vs a street in Salem)
             change = _km(ia[1:], ib[1:]) >= PLACE_KM
+        elif ia[0] and ib[0]:
+            change = ia[0].strip().lower() != ib[0].strip().lower()
     da, db = _when(ca), _when(cb)
     return change, (round(abs((db - da).total_seconds()) / 3600, 1) if da and db else None)
 

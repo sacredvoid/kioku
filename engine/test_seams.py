@@ -96,6 +96,8 @@ rows = [("A", "2026-11-01T10:00:00", "Kyoto", 35.0, 135.7), ("B", "2026-11-01T10
 for u, cr, pl, la, lo in rows:
     db.execute("insert into assets(uuid, kind, duration, meta, created) values (?,?,?,?,?)", (u, "video", 12.0, "", cr))
     db.execute("insert into asset_info(uuid, place, lat, lon) values (?,?,?,?)", (u, pl, la, lo))
+db.execute("insert into asset_info(uuid, place, lat, lon) values ('E', 'Gion, Kyoto', 35.01, 135.71)")  # named finer, 1.4 km from A
+assert seams._place(db, "A", "E", None, None)[0] is False, "same town named at a different detail is not a new place"
 for u, vec in (("A", [1, 0]), ("B", [.99, .141]), ("C", [0, 1])):  # A and B alike; D has no vector and no proxy
     db.execute("insert into segments(uuid, t0, t1, source, vec) values (?,?,?,?,?)", (u, 0, 12, "scene", np.array(vec, np.float32).tobytes()))
 db.commit()
