@@ -849,13 +849,18 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                 part.replace(cdir / f"{k}.mov")
                 prog.add(L)
             # 4. captions
-            cap_file, cues, all_cues = None, [], []
+            cap_file, cues, all_cues, cap = None, [], [], None
+            wsec = (win[0] / fps, win[1] / fps) if win else None
             if on:
                 prog.stage("Captions")
                 cues = all_cues = captions.map_cues(tl, transcripts, picked)
-                wsec = (win[0] / fps, win[1] / fps) if win else None
                 cap = captions.build(tl, spec["captions"], dims, cues, work, wsec)
                 cap_file = cap.list_file
+            if tl.texts:  # titles and captions share one overlay stream, so the finish pass keeps one overlay input
+                import titles
+                prog.stage("Titles")
+                cap_file = titles.build(tl, dims, work, wsec, cap,
+                                        avoid_bottom=bool(cap_file) and spec["captions"].get("position", "bottom") == "bottom")
             # 5. join levels, then the finish pass
             if mode == "preview":
                 rdir.mkdir(parents=True, exist_ok=True)
@@ -875,7 +880,7 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
             for li, (cs, fr, tr) in enumerate(plan):
                 last = len(cs) == 1
                 if last:
-                    prog.stage("Joining" if not cap_file else "Joining and adding captions")
+                    prog.stage("Joining" if not cap_file else "Joining and adding text")
                     fl = (sum(fr) - sum(t[1] for t in tr if t)) / fps
                     D = (window[1] - window[0]) if window else fl
                     cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size),

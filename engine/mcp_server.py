@@ -283,6 +283,26 @@ def set_transition(collection_id: int, after_item_id: int, type: str, duration: 
 
 
 @server.tool()
+def set_text(collection_id: int, text_id: str, template: str = "", text: str = "", start: float | None = None,
+             dur: float | None = None, position: str = "", font: str = "", color: str = "", accent: str = "") -> dict:
+    """Add, change or remove an animated title. text_id: any short name; a new id needs template and text, an existing id
+    changes only what you pass; template="none" removes it. template: title-pop (big opener), title-slide (clean
+    subtitle-style title), word-stagger (words appear one by one), lower-third (name or caption on a bar),
+    location-tag (small pin label, top-left), big-number (a year or count that counts up). text: at most 80 characters,
+    best under 6 words. start / dur: output seconds (start snaps to the beat when synced; dur 0.5 to 15).
+    position: auto (default; keeps off the middle), top, middle, bottom. font: auto, inter, anton, playfair, grotesk.
+    color / accent: #RRGGBB (accent colours the bar, rule or pin). Returns the edit."""
+    p = f"/collections/{collection_id}/edit/texts/{text_id}"
+    if template.lower() == "none":
+        return call("DELETE", p)
+    body = drop_unset(template=template or None, text=text or None, start=start, dur=dur, position=position or None,
+                      font=font or None, color=color or None, accent=accent or None)
+    if not body:
+        return {"error": "Nothing to change: pass template and text for a new title, or at least one setting."}
+    return call("PUT", p, body)
+
+
+@server.tool()
 def set_audio(collection_id: int, track_id: str, path: str = "", start: float | None = None, source_in: float | None = None,
               source_out: float | None = None, volume: float | None = None, fade_in: float | None = None,
               fade_out: float | None = None, remove: bool = False) -> dict:

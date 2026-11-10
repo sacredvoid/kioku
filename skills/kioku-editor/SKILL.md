@@ -59,6 +59,14 @@ Photos have no scenes. Look at every candidate photo with `look_at([uuids])` (up
 - `set_clip_fx` only for a specific reason: a slow-mo moment with `speed` 0.5, a boring stretch at 1.5 to 2, a different `look` on one clip, `reframe_*` when the crop cuts off the subject.
 - `set_transition` sparingly on calm edits: dissolve 0.4 to 0.6 s between scenes of different places, no transition inside one scene, never wipes or whips on a calm edit. Unsynced transitions shorten the total, so recheck the length with `get_edit`.
 
+### Titles
+
+- Only when the brief wants them (a reel opener, places, a year). `set_text` per title.
+- An opening `title-pop` or `title-slide` on the first downbeat (a `grid` time from `get_edit`), 1.5 to 2.5 s long.
+- A `location-tag` when the place changes, starting on that clip's first beat. `big-number` for a year or a count.
+- At most 1 text on screen at a time, under 6 words each. Keep `position="auto"`: it stays off the middle, where faces are. Never put a title in the middle over a face.
+- Looks also include film LUTs (`teal-orange`, `warm-film`, `bleach`, `clean-pop`) at strength 0.5 to 0.8.
+
 ## 6. Check
 
 - `render_preview` (use `start` and `end` for one section), then `render_status(wait_seconds=60)` and look at the contact sheet. Fix what you see (cuts, crop, color, caption position) and repeat at most 3 times.
