@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.0 (2026-11-10)
+
+- Edit versions, titles lane, cached originals, versioned render names
+
 ## v0.8.0 (2026-11-10)
 
 - Editor: FCP-style inspector sections, captions in inspector, growing Ask box
