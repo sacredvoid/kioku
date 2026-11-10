@@ -49,11 +49,16 @@ export class Viewer {
   }
 
   get open() { return !this.root.hidden; }
+  /** aria-modal alone left the grid behind reachable with VoiceOver; the toast stays live */
+  private inertRest(on: boolean) {
+    for (const c of document.body.children) if (c !== this.root && c.id !== "toast") (c as HTMLElement).inert = on;
+  }
 
   async start(items: Item[], i: number) {
     this.items = items;
     this.root.hidden = false;
     document.body.classList.add("viewing");
+    this.inertRest(true);
     api<{ tag: string }[]>("/tags").then((t) => (this.allTags = t.map((x) => x.tag))).catch(() => {});
     this.show(i);
   }
@@ -65,6 +70,7 @@ export class Viewer {
     this.video.load();
     this.root.hidden = true;
     document.body.classList.remove("viewing");
+    this.inertRest(false);
     this.i = -1;
   }
 
