@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.12.0 (2026-11-10)
+
+- suggest_seams: read-only per-seam facts and one suggested transition (roadmap #7, X4)
+- Curated CC0 seam and text sounds, declick at hard cuts
+- Auto reframe for 9:16: follow faces then saliency with a smoothed crop path
+
 ## v0.11.0 (2026-11-10)
 
 - Face-aware text placement, 9:16 safe area, auto legibility backing
