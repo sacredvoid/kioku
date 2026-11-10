@@ -4,6 +4,13 @@
 @import "@fontsource/unbounded/600.css";
 @import "@fontsource/unbounded/700.css";
 @import "@fontsource-variable/hanken-grotesk/index.css";
+/* font pairs for Appearance > Font (bundled, so they work offline; each file loads only when its pair is picked) */
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource-variable/fraunces/index.css";
+@import "@fontsource-variable/playfair-display/index.css";
+@import "@fontsource-variable/space-grotesk/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
+@import "@fontsource/anton/400.css";
 
 :root { --h: 70 }
 :root {
@@ -763,3 +770,21 @@ li[data-state="error"] .live-ico { background: var(--danger); -webkit-mask: url(
   background: color-mix(in oklch, var(--danger) 9%, transparent); font-size: 13px; color: var(--text-2); animation: rise .35s var(--ease) both }
 .live-problem[hidden] { display: none }
 .live-problem b { color: var(--danger); font-weight: 600 }
+
+/* ---------- font pairs (main.ts FONTS): --font for text, --display for headings */
+:root[data-font="editorial"] { --font: "Inter Variable", -apple-system, sans-serif; --display: "Fraunces Variable", Georgia, serif }
+:root[data-font="classic"] { --font: "Hanken Grotesk Variable", -apple-system, sans-serif; --display: "Playfair Display Variable", Georgia, serif }
+:root[data-font="grotesk"] { --font: "Space Grotesk Variable", -apple-system, sans-serif; --display: "Space Grotesk Variable", -apple-system, sans-serif }
+:root[data-font="poster"] { --font: "Inter Variable", -apple-system, sans-serif; --display: "Anton", Impact, sans-serif }
+:root[data-font="terminal"] { --font: "JetBrains Mono Variable", ui-monospace, monospace; --display: "JetBrains Mono Variable", ui-monospace, monospace }
+:root[data-font="system"] { --font: -apple-system, BlinkMacSystemFont, sans-serif; --display: ui-rounded, -apple-system, sans-serif }
+:root[data-font="poster"] body { font-synthesis-weight: none } /* Anton has one weight: never fake-bold it */
+.font-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; margin-bottom: 14px }
+.font-opt { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 10px 11px; border-radius: 12px; border: 1px solid var(--line); cursor: pointer;
+  background: var(--surface-2); transition: border-color .2s var(--ease), transform .2s var(--ease) }
+.font-opt:hover { border-color: color-mix(in oklch, var(--accent) 50%, var(--line)) }
+.font-opt input { position: absolute; opacity: 0; pointer-events: none }
+.font-opt:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft) }
+.font-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px }
+.font-opt .fa { font-size: 24px; line-height: 1.1; font-weight: 600; color: var(--text) }
+.font-opt .fn { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }

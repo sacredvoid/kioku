@@ -26,6 +26,21 @@ function applyTheme(t: string) {
   else delete document.documentElement.dataset.theme;
 }
 try { applyTheme(localStorage.getItem("kioku.theme") ?? ""); } catch { /* storage blocked: follow the system */ }
+// font pairs: [id, name, text font, heading font]; the CSS for each lives in styles.css under :root[data-font]
+const FONTS = [
+  ["", "Kioku", '"Hanken Grotesk Variable"', '"Unbounded"'],
+  ["editorial", "Editorial", '"Inter Variable"', '"Fraunces Variable"'],
+  ["classic", "Classic", '"Hanken Grotesk Variable"', '"Playfair Display Variable"'],
+  ["grotesk", "Grotesk", '"Space Grotesk Variable"', '"Space Grotesk Variable"'],
+  ["poster", "Poster", '"Inter Variable"', '"Anton"'],
+  ["terminal", "Terminal", '"JetBrains Mono Variable"', '"JetBrains Mono Variable"'],
+  ["system", "System", "-apple-system", "ui-rounded, -apple-system"],
+] as const;
+function applyFont(f: string) {
+  if (FONTS.some(([id]) => id && id === f)) document.documentElement.dataset.font = f;
+  else delete document.documentElement.dataset.font;
+}
+try { applyFont(localStorage.getItem("kioku.font") ?? ""); } catch { /* storage blocked: default font */ }
 initArt();
 document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
   applyTheme(r.value);
@@ -34,6 +49,20 @@ document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((r) =
 }));
 // the picker's cards: a still of each art in its own hue, redrawn when the mode changes the ink
 const lookPop = $("look-pop");
+$("look-fonts").append(...FONTS.map(([id, name, text, display]) => {
+  const card = el("label", "font-opt"), input = el("input") as HTMLInputElement;
+  input.type = "radio"; input.name = "font"; input.value = id;
+  input.checked = (document.documentElement.dataset.font ?? "") === id;
+  input.onchange = () => {
+    applyFont(id);
+    try { localStorage.setItem("kioku.font", id); } catch { /* applies for this session only */ }
+  };
+  const sample = el("span", "fa", "Aa"), label = el("span", "fn", name);
+  sample.style.fontFamily = display;
+  label.style.fontFamily = text;
+  card.append(input, sample, label);
+  return card;
+}));
 $("look-arts").append(...ARTS.map((a) => {
   const card = el("label", "look-opt"), input = el("input") as HTMLInputElement, txt = el("span", "look-txt");
   input.type = "radio"; input.name = "art"; input.value = a;
