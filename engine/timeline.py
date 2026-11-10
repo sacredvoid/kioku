@@ -23,6 +23,7 @@ class Seg:
     ramp: str | None = None                     # edit.RAMPS name; own audio already silenced via volume
     beat_frames: tuple[int, ...] = ()           # grid points inside the clip, frames from its first frame
     track: tuple | None = None                  # reframe "auto": subject centres ((cx, cy), ...) evenly over the clip (reframe.track)
+    match: tuple[float, float, float] | None = None   # colour match: per-channel power (color.solve); None = unchanged
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class Timeline:
     duck: bool = True              # lower clip audio under the extra tracks
     sfx: tuple = ()                # (output frame, edit.SFX name) sound effects on seams
     texts: tuple = ()              # spec texts plus start_frame (snapped to the grid when synced) and frames, in spec order
+    finish: dict | None = None     # resolved finish layer (color.resolve): grain, vignette, bloom, halation, letterbox
 
     @property
     def duration(self) -> float:

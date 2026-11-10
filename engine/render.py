@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
+import color
 import core
 import library
 import media
@@ -266,6 +267,8 @@ def seg_key(seg, sid, mode, dims, fps):
         d["ease"] = 1  # eased motion and punch: re-renders only moving clips (no RENDER_V bump for the rest)
     if seg.track:  # the subject path and the algorithm version decide the crop, so both are in the key
         d.update(track=seg.track, reframe_v=reframe.VERSION)
+    if seg.match:  # colour match on and this clip moved
+        d["match"] = seg.match
     return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -416,6 +419,8 @@ def seg_graph(seg, src, dims, fps, mode):
     if mf:
         chain.append(mf)
     chain.append(f"scale={W}:{H}:flags={'bicubic' if mode == 'preview' else 'lanczos'}")
+    if seg.match:  # before the look, so the look grades clips that already agree
+        chain.append(color.match_filter(seg.match))
     look = edit.look_filters(seg.look)
     if look:
         chain.append(look)
@@ -561,11 +566,11 @@ def seam_blur(name, tf, o, fps, dims):
             f",dblur=angle={ang}:radius={_n(r, 2)}:enable='between(t,{_n(m0, 6)},{_n(m1, 6)})'")
 
 
-def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=None):
+def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=None, finish=""):
     """Join n inputs (frames[i] long, trans[i] = (xfade name, frames) or None between i and i+1), then optionally
-    trim to window (start, end) in seconds and overlay the caption input (index n). fx (audio_fx) adds fades and
-    the extra audio tracks (inputs after the caption input). dims (W, H) sizes the whip and zoom-in blur.
-    Ends in [vout][aout]."""
+    trim to window (start, end) in seconds, apply the finish layer (color.finish_filters text) and overlay the caption
+    input (index n), so titles and captions stay clean. fx (audio_fx) adds fades and the extra audio tracks (inputs
+    after the caption input). dims (W, H) sizes the whip and zoom-in blur. Ends in [vout][aout]."""
     p = [f"[{i}:v]fps={fps}[v{i}]" for i in range(n)]
     accv, acca, acc = "v0", "0:a", frames[0]
     for i in range(1, n):
@@ -594,6 +599,9 @@ def _graph(n, frames, trans, fps, window=None, has_cues=False, fx=None, dims=Non
         p.append(f"[{accv}]trim=start={_n(s, 6)}:end={_n(e, 6)},setpts=PTS-STARTPTS[w]")
         p.append(f"[{acca}]atrim=start={_n(s, 6)}:end={_n(e, 6)},asetpts=PTS-STARTPTS[aw]")
         accv, acca = "w", "aw"
+    if finish:
+        p.append(f"[{accv}]{finish}[fin]")
+        accv = "fin"
     if has_cues:  # never shortest=1: it would end the video when the cue list ends
         p.append(f"[{n}:v]fps={fps},format=rgba[cap]")
         p.append(f"[{accv}][cap]overlay=0:0:eof_action=pass[o]")
@@ -626,10 +634,10 @@ def join_command(seg_files, frames, trans, fps, out, workdir, codec, dims=None):
     return _run_cmd(seg_files, _graph(len(seg_files), frames, trans, fps, dims=dims), out, workdir, codec)
 
 
-def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None, dims=None):
-    """Last pass: join (when several files are left), window trim, caption overlay, fades, audio mix, colour tags,
-    delivery encode."""
-    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx, dims)
+def finish_command(files, frames, trans, window, cue_list, fps, out, workdir, codec, fx=None, dims=None, finish=""):
+    """Last pass: join (when several files are left), window trim, finish layer, caption overlay, fades, audio mix,
+    colour tags, delivery encode."""
+    g = _graph(len(files), frames, trans, fps, window, bool(cue_list), fx, dims, finish)
     return _run_cmd(files, g, out, workdir, codec, cue_list, [t["path"] for t in fx["tracks"]] if fx else ())
 
 
@@ -654,13 +662,16 @@ def levels(frames, trans, K):
         trans = [None] * (len(cs) - 1)
 
 
-def delivery(mode, codec, size):
+def delivery(mode, codec, size, grain=0.0):
+    """Encoder arguments. grain (finish layer, 0 to 1) raises the final bitrate: VideoToolbox holds the bitrate, so
+    without more bits the grain is smeared into blotches."""
     if mode == "preview":
         return ["-c:v", "h264_videotoolbox", "-b:v", "3M", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"]
+    k = 1 + color.GRAIN_MBPS * grain
     if codec == "h264":
-        v = ["-c:v", "h264_videotoolbox", "-b:v", {720: "8M", 1080: "16M", 2160: "50M"}.get(size, "16M")]
+        v = ["-c:v", "h264_videotoolbox", "-b:v", f"{_n({720: 8, 1080: 16, 2160: 50}.get(size, 16) * k, 1)}M"]
     else:
-        v = ["-c:v", "hevc_videotoolbox", "-b:v", f"{FINAL_MBPS.get(size, 12)}M", "-tag:v", "hvc1"]
+        v = ["-c:v", "hevc_videotoolbox", "-b:v", f"{_n(FINAL_MBPS.get(size, 12) * k, 1)}M", "-tag:v", "hvc1"]
     return v + ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart"]
 
 
@@ -806,6 +817,10 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
     if mode not in ("preview", "final"):
         raise ValueError(f"mode must be preview or final, not {mode!r}")
     tl, spec = edit.snapshot(cid)
+    if (spec.get("match_color") or {}).get("on"):  # measure new clips first (a preview builds missing proxies, as it would anyway)
+        projects.jobs.setdefault((cid, mode), {})["stage"] = "Measuring colour"
+        if color.ensure([(s.uuid, s.kind) for s in tl.segs], build=mode == "preview"):
+            tl, spec = edit.snapshot(cid)
     name = library.get_collection(cid)["name"]
     # the file is named after the version it shows (saved now if it isn't yet), so every render maps to one in the app
     ver = versions.number(cid, "Rendered") if mode == "final" and tl.segs else None
@@ -883,7 +898,8 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         if mode == "final":
             folder = EXPORTS / projects.slug(name)
             _free_check(CACHE, miss_s * 10e6 + 2e9, "the render cache")
-            _free_check(folder, out_s * FINAL_MBPS.get(tl.size, 12) * 1e6 / 8 * 2 + 2e9, "the finished video")
+            mbps = FINAL_MBPS.get(tl.size, 12) * (1 + color.GRAIN_MBPS * (tl.finish or {}).get("grain", 0))
+            _free_check(folder, out_s * mbps * 1e6 / 8 * 2 + 2e9, "the finished video")
         # progress weights: the join plan only needs frame counts, so progress can cover the downloads too
         frames = [s.frames for s in sel]
         trans = [s.trans_after for s in sel[:-1]]
@@ -1004,8 +1020,9 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
                     prog.stage("Joining" if not cap_file else "Joining and adding text")
                     fl = (sum(fr) - sum(t[1] for t in tr if t)) / fps
                     D = (window[1] - window[0]) if window else fl
-                    cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size),
-                                         audio_fx(tl, win, D), dims)
+                    grain = tl.finish["grain"] if tl.finish else 0.0
+                    cmd = finish_command(files, fr, tr, window, cap_file, fps, fpart, work, delivery(mode, codec, tl.size, grain),
+                                         audio_fx(tl, win, D), dims, color.finish_filters(tl.finish, dims))
                     run_ffmpeg(cmd, D, prog.cb(fl), cancel, _timeout(fl), work)
                     prog.add(fl)
                     break

@@ -250,7 +250,8 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
              caption_highlight_color: str = "", caption_highlight: bool | None = None, caption_uppercase: bool | None = None,
              caption_max_words: int = -1, fade_in: float = -1, fade_out: float = -1,
              clip_volume: float = -1, duck: bool | None = None, sync_track: str = "", sync_grid: str = "",
-             sync_lead: int = -1) -> dict:
+             sync_lead: int = -1, match_color: bool | None = None, match_ref: int = -1, finish: str = "",
+             finish_strength: float = -1) -> dict:
     """Project-wide settings. Unset arguments keep their value. aspect: 16:9, 9:16, 1:1, 4:5 (use 9:16 for reels and
     stories; clips are center-cropped to fit, set_clip_fx reframe moves the crop, reframe_mode=auto follows the subject). size: short side 720, 1080 or 2160.
     fps: 24, 25, 30, 60. look: a name from get_edit, or "none" to clear; one look for the whole edit, strength 0.6 to 0.8
@@ -270,7 +271,14 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
     Beat sync: sync_track = the audio track id of the music (add it first with add_sound / set_audio), "none" turns it off.
     Every cut then lands on the music's beat grid; get_edit returns `grid` (beat times on the output timeline).
     sync_grid: beat (default), half (every 2nd beat, calmer) or downbeat (bar starts, slowest). sync_lead 0 to 3 frames the
-    cut lands before the beat (default 1; it reads as on time). Set each clip's length in beats with set_clip_fx(beats=)."""
+    cut lands before the beat (default 1; it reads as on time). Set each clip's length in beats with set_clip_fx(beats=).
+    Colour: match_color=true evens exposure and white balance across clips (measured from each clip's frames, applied
+    under the look): every clip moves toward match_ref (an item_id, e.g. the best-looking shot) or, with match_ref=0, the
+    edit's median. Small camera differences are corrected; a night shot or a sunset far from the rest keeps its colour
+    (get_edit warns which). get_edit shows each matched clip's "match" (per-channel strength; 1 = unchanged). Opt one clip
+    out with set_clip_fx(match_color=false). finish: none, clean (soft vignette and glow), film (grain, vignette,
+    halation round highlights), cinematic (light grain, vignette, glow, 2.39 letterbox bars on 16:9 edits); applied to
+    the whole video under titles and captions. finish_strength 0 to 1 (default 1)."""
     body = drop_unset(aspect=aspect or None, size=size or None, fps=fps or None, look_strength=None if look_strength < 0 else look_strength,
                       captions=captions, caption_style=caption_style or None, caption_clips=caption_clips,
                       caption_position=caption_position or None, caption_font=caption_font or None, caption_size=caption_size or None,
@@ -279,7 +287,11 @@ def set_edit(collection_id: int, aspect: str = "", size: int = 0, fps: int = 0, 
                       caption_max_words=None if caption_max_words < 0 else caption_max_words,
                       fade_in=None if fade_in < 0 else fade_in, fade_out=None if fade_out < 0 else fade_out,
                       clip_volume=None if clip_volume < 0 else clip_volume, duck=duck,
-                      sync_grid=sync_grid or None, sync_lead=None if sync_lead < 0 else sync_lead)
+                      sync_grid=sync_grid or None, sync_lead=None if sync_lead < 0 else sync_lead,
+                      match_color=match_color, finish=finish or None,
+                      finish_strength=None if finish_strength < 0 else finish_strength)
+    if match_ref >= 0:
+        body["match_ref"] = match_ref or None
     if sync_track:
         body["sync_track"] = None if sync_track.lower() == "none" else sync_track
     if look:
@@ -296,7 +308,8 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
                 reframe_mode: str | None = None, reframe_pos: float | None = None, reframe_from: float | None = None,
                 reframe_to: float | None = None, mute: bool | None = None, beats: int | None = None,
                 hit: float | None = None, motion: str | None = None, motion_amount: float | None = None,
-                flash: bool | None = None, shake: bool | None = None, ramp: str | None = None) -> dict:
+                flash: bool | None = None, shake: bool | None = None, ramp: str | None = None,
+                match_color: bool | None = None) -> dict:
     """Change one clip's look and motion. Only the arguments you pass change; speed also scales its audio (0.25 to 4;
     photos cannot change speed). volume 0 to 2. exposure and warmth -1 to 1, contrast 0.8 to 1.3, saturation 0 to 1.6.
     look: a name from get_edit, or "none" for no look on this clip even when the project has one.
@@ -311,11 +324,12 @@ def set_clip_fx(collection_id: int, item_id: int, speed: float | None = None, vo
     beat and eases back out before the next), none. Push, pull and drift ease in and out, so they read at low amounts:
     motion_amount 0 to 1 (default 0.35, 1 = 1.3x), 0.25 to 0.4 is usually right. flash=true: white pulse on the clip's first frame
     (a drop or a big moment). shake=true: a short shake on each beat in the clip (at most half the clips; peaks only).
-    ramp: slow-mid (fast, slow-motion middle, fast), fast-in, slow-out, none; silences the clip's own sound."""
+    ramp: slow-mid (fast, slow-motion middle, fast), fast-in, slow-out, none; silences the clip's own sound.
+    match_color=false keeps this clip out of the project colour match (set_edit match_color); true puts it back."""
     body = drop_unset(speed=speed, volume=volume, exposure=exposure, contrast=contrast, saturation=saturation,
                       warmth=warmth, look_strength=look_strength, reframe_mode=reframe_mode, reframe_pos=reframe_pos,
                       reframe_from=reframe_from, reframe_to=reframe_to, mute=mute, beats=beats, hit=hit, motion=motion,
-                      motion_amount=motion_amount, flash=flash, shake=shake, ramp=ramp)
+                      motion_amount=motion_amount, flash=flash, shake=shake, ramp=ramp, match_color=match_color)
     if look is not None:
         body["look"] = look.lower() if look.lower() == "none" else look  # engine: "none" = no look on this clip
     if not body:
