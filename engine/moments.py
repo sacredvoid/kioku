@@ -120,7 +120,8 @@ def vision_signals(proxy, dur, n):
             reqs = [Vision.VNCalculateImageAestheticsScoresRequest.alloc().init(), Vision.VNDetectFaceCaptureQualityRequest.alloc().init(),
                     Vision.VNDetectHumanRectanglesRequest.alloc().init(), Vision.VNGenerateAttentionBasedSaliencyImageRequest.alloc().init()]
             h = Vision.VNImageRequestHandler.alloc().initWithURL_options_(NSURL.fileURLWithPath_(str(f)), {})
-            ok, _ = h.performRequests_error_(reqs, None)
+            with core.VISION_SLOTS:  # see core.VISION_SLOTS: unbounded parallel Vision calls deadlock
+                ok, _ = h.performRequests_error_(reqs, None)
             if not ok:
                 return None
             aes, face, hum, sal = ([r.results() or [] for r in reqs])

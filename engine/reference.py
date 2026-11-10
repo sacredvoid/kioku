@@ -270,7 +270,8 @@ def _text(p: Path):
             with objc.autorelease_pool():
                 req = Vision.VNRecognizeTextRequest.alloc().init()
                 req.setRecognitionLevel_(0)
-                Vision.VNImageRequestHandler.alloc().initWithURL_options_(NSURL.fileURLWithPath_(str(f)), None).performRequests_error_([req], None)
+                with core.VISION_SLOTS:  # shared with moments: unbounded parallel Vision calls deadlock
+                    Vision.VNImageRequestHandler.alloc().initWithURL_options_(NSURL.fileURLWithPath_(str(f)), None).performRequests_error_([req], None)
                 hits = []
                 for o in req.results() or []:
                     c = o.topCandidates_(1)[0]
