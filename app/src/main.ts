@@ -1342,7 +1342,7 @@ async function showIndex() {
     const i = await api<IndexInfo>("/index/info");
     const k = i.kinds;
     const rows: [string, string][] = [
-      ["Items", `${((k.image ?? 0) + (k.video ?? 0) + (k.poster ?? 0)).toLocaleString()} (${(k.image ?? 0).toLocaleString()} photos, ${((k.video ?? 0) + (k.poster ?? 0)).toLocaleString()} videos)`],  // unreadable ones have their own row
+      ["Items", `${i.assets.toLocaleString()} (${(k.image ?? 0).toLocaleString()} photos, ${((k.video ?? 0) + (k.poster ?? 0)).toLocaleString()} videos)`],
       ["Covers", `${day(i.oldest)} to ${day(i.newest)}`],
       ["Last indexed", at(i.last_indexed)],
       ["Model", `${i.model}, ${i.image_tokens} image tokens`],

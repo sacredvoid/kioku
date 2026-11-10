@@ -233,7 +233,8 @@ def index_info():
     kinds = {r[0]: r[1] for r in rows}
     pick = lambda i, f: f([r[i] for r in rows if r[i] is not None], default=None)  # noqa: E731
     newest, oldest, last = pick(2, max), pick(3, min), pick(4, max)
-    return {"assets": sum(kinds.values()), "kinds": kinds, "newest": newest, "oldest": oldest, "last_indexed": last,
+    # items that could not be read (kind "missing") count under "failed", not as library items
+    return {"assets": sum(v for k, v in kinds.items() if k != "missing"), "kinds": kinds, "newest": newest, "oldest": oldest, "last_indexed": last,
             "failed": sum(r[5] or 0 for r in rows),
             "model": core.MODEL_ID, "image_tokens": core.IMAGE_TOKENS,
             "reindex": state["reindex"], "last_run": state["last_run"]}

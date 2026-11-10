@@ -136,11 +136,11 @@ holder.rollback()
 # index info + "fetch new photos": counts and span come from the db; newer=true starts from the newest item's day
 db = core.connect()
 for u, kind, created, err in [("i1", "image", "2026-11-05T10:00:00-05:00", None), ("v1", "video", "2015-11-02T09:00:00-05:00", None),
-                              ("p1", "poster", "2026-11-07T21:30:00-05:00", "bad file")]:
+                              ("p1", "poster", "2026-11-07T21:30:00-05:00", "bad file"), ("m1", "missing", None, "no local file")]:
     db.execute("insert into assets(uuid, kind, created, indexed_at, error) values (?,?,?,?,?)", (u, kind, created, 1.0, err))
 db.commit()
 info = c.get("/index/info").json()
-assert info["assets"] == 3 and info["kinds"] == {"image": 1, "video": 1, "poster": 1} and info["failed"] == 1, info
+assert info["assets"] == 3 and info["kinds"] == {"image": 1, "video": 1, "poster": 1, "missing": 1} and info["failed"] == 2, info  # unreadable: failed, not an item
 assert info["newest"].startswith("2026-11-07") and info["oldest"].startswith("2015-11-02") and info["model"] == core.MODEL_ID, info
 started = []
 def fake_run(since):
