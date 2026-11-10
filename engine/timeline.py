@@ -39,6 +39,7 @@ class Timeline:
     clip_volume: float = 1.0       # scales every clip's own audio in the final mix
     duck: bool = True              # lower clip audio under the extra tracks
     sfx: tuple = ()                # (output frame, edit.SFX name) sound effects on seams
+    texts: tuple = ()              # spec texts plus start_frame (snapped to the grid when synced) and frames, in spec order
 
     @property
     def duration(self) -> float:

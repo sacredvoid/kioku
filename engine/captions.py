@@ -80,6 +80,7 @@ class Cue:
 class Captions:
     cues: tuple[Cue, ...]
     list_file: Path | None  # ffconcat list; None when there is nothing to draw
+    runs: tuple = ()        # ((PNG name in the workdir or None for blank, frames), ...): what titles.build merges with
 
 
 # ---------- setup
@@ -572,7 +573,7 @@ def build(tl: Timeline, style, dims, cues, workdir: Path, window=None):
     lines += [f"file '{png(None, None)}'", f"option framerate {fps}"]  # the demuxer ignores the last duration
     lst = workdir / "cues.txt"
     lst.write_text("\n".join(lines) + "\n")
-    return Captions(tuple(drawn), lst)
+    return Captions(tuple(drawn), lst, tuple((png(t, a) if t else None, n) for t, a, n in entries))
 
 
 # ---------- job + routes

@@ -2,7 +2,7 @@
 // Edits the same spec Claude edits (engine/edit.py). Layout comes from GET /edit (server truth); drags are optimistic
 // and send one request on pointerup. Design: notes/timeline-design.md. Mount API at the bottom of the file.
 import { API, api, errMsg, thumb, type Collection, type Item } from "./api";
-import type { AudioTrack, ClipFx, Cue, CaptionClip, CuesReply, Edit, Model, Peaks, Player, RenderStatus, Scene, SearchHit, TransitionType } from "./edit-types";
+import type { AudioTrack, ClipFx, Cue, CaptionClip, CuesReply, Edit, Model, Peaks, Player, RenderStatus, Scene, SearchHit, TextSpec, TransitionType } from "./edit-types";
 import { LivePlayer } from "./player";
 import { soundsPanel, stopPreview, type Sound } from "./sounds";
 
@@ -46,6 +46,8 @@ const STILL = 3;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const TR_LABEL: Record<string, string> = { cut: "Cut", dissolve: "Dissolve", "fade-black": "Fade black", "wipe-left": "Wipe left", "wipe-right": "Wipe right", "slide-left": "Slide left",
   "slide-up": "Slide up", "zoom-in": "Zoom in", "whip-left": "Whip left", "whip-right": "Whip right", "flash-white": "Flash", blur: "Blur", circle: "Circle", squeeze: "Squeeze" };
+const TEMPLATE_LABEL: Record<string, string> = { "title-pop": "Pop title", "title-slide": "Slide title", "word-stagger": "Word by word",
+  "lower-third": "Lower third", "location-tag": "Location tag", "big-number": "Big number" };
 const MOTION_LABEL: Record<string, string> = { none: "None", push: "Push in", pull: "Pull out", "drift-left": "Drift left", "drift-right": "Drift right", punch: "Punch on beats" };
 const RAMP_LABEL: Record<string, string> = { none: "None", "slow-mid": "Fast, slow, fast", "fast-in": "Fast start", "slow-out": "Slow finish" };
 const SFX_LABEL: Record<string, string> = { none: "No sound", whoosh: "Whoosh", hit: "Hit", riser: "Riser" };
@@ -430,6 +432,21 @@ class Editor {
     const full = { path: t.path, start: t.start, in: t.in, out: t.out, volume: t.volume, fade_in: t.fade_in, fade_out: t.fade_out };
     this.sel = null;
     return this.act("Remove audio", () => api(url, "DELETE"), () => api(url, "PUT", full));
+  }
+  putText(id: string, body: Flat, old: Flat | null, label: string) {
+    const url = `/collections/${this.cid}/edit/texts/${encodeURIComponent(id)}`;
+    return this.act(label, () => api(url, "PUT", body), () => (old ? api(url, "PUT", old) : api(url, "DELETE")));
+  }
+  removeText(t: TextSpec) {
+    const url = `/collections/${this.cid}/edit/texts/${encodeURIComponent(t.id)}`;
+    const { id: _id, ...full } = t;
+    return this.act("Remove text", () => api(url, "DELETE"), () => api(url, "PUT", full));
+  }
+  addText() {
+    const max = this.model.edit.options.max_texts ?? 30;
+    if ((this.spec.texts ?? []).length >= max) return this.deps.toast(`At most ${max} texts: remove one first`, true);
+    const start = round2(Math.min(Math.max(0, this.player.time), Math.max(0, this.dur - 2)));
+    return this.putText(uid(), { template: "title-pop", text: "Title", start, dur: 2 }, null, "Add text");
   }
   roomForAudio() {
     const max = this.model.edit.options.max_audio ?? 3;
@@ -1293,6 +1310,27 @@ class Editor {
         f.append(row("Grid", gs));
         f.append(row("Cut early", range(0, 3, 1, sy.lead, (v) => this.patchEdit({ sync_lead: v }, "Change cut lead", { sync_lead: sy.lead }), (v) => `${v} fr`)));
       }
+      const tx = el("div", "tl-texts");
+      tx.append(el("span", "tl-fl", "Texts"));
+      for (const t of this.spec.texts ?? []) {
+        const r = el("div", "tl-text");
+        const inp = document.createElement("input");
+        inp.type = "text"; inp.maxLength = 80; inp.value = t.text;
+        inp.setAttribute("aria-label", "Text");
+        inp.onchange = () => { const v = inp.value.trim(); if (v && v !== t.text) this.putText(t.id, { text: v }, { text: t.text }, "Edit text"); else inp.value = t.text; };
+        const tp = document.createElement("select");
+        tp.setAttribute("aria-label", "Text style");
+        (this.model.edit.options.text_templates ?? [t.template]).forEach((v) => tp.append(new Option(TEMPLATE_LABEL[v] ?? v, v)));
+        tp.value = t.template;
+        tp.onchange = () => this.putText(t.id, { template: tp.value }, { template: t.template }, "Change text style");
+        const at = btn(`${t.start.toFixed(1)}s`, "ghost", () => this.seek(t.start), "Jump to this text");
+        r.append(inp, tp, at, btn("Remove", "ghost danger", () => this.removeText(t), "Remove this text"));
+        tx.append(r);
+      }
+      const ta = el("div", "tl-acts");
+      ta.append(btn("Add text at playhead", "", () => this.addText()));
+      tx.append(ta);
+      f.append(tx);
       f.append(el("p", "muted tl-hint", "Click a clip to edit it. Drag to reorder, drag its edges to trim, click a seam for a transition, press S to split."));
     }
     this.insp.replaceChildren(f);

@@ -131,3 +131,6 @@
 .tl-tools button.danger, .tl-acts button.danger { color: var(--danger) }
 .tl-panel .chip { padding: 5px 12px; cursor: pointer }
 .tl-chips .chip { padding: 5px 11px; cursor: pointer }
+.tl-texts { display: grid; gap: 6px; margin-top: 6px; font-size: 12.5px }
+.tl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center }
+.tl-text input[type="text"], .tl-text select { min-width: 0 }
