@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.14.0 (2026-11-10)
+
+- Colour match across clips and a finish layer (roadmap #10, X7 + X8)
+
 ## v0.13.0 (2026-11-10)
 
 - Seam clip engine: zoom-through, light leak, luma fade, glitch (roadmap #8, X3)
