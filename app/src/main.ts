@@ -1379,6 +1379,7 @@ const LABELS: Record<string, [string, string]> = {
   ask_minutes: ["Ask time limit", "min"],
   download_seconds: ["iCloud download timeout", "s per video"],
   proxy_height: ["Playable copy quality", "p"],
+  jamendo_client_id: ["Jamendo client id (optional)", ""],
 };
 async function renderSettings() {
   const form = $<HTMLFormElement>("settings-form");
@@ -1394,6 +1395,9 @@ async function renderSettings() {
     if (f.enum) {
       input = document.createElement("select");
       f.enum.forEach((v) => { const o = document.createElement("option"); o.value = String(v); o.textContent = `${v}${unit}`; input.append(o); });
+    } else if (f.type === "string") {  // free text, e.g. an API key: optional and not shown on screen
+      input = document.createElement("input");
+      input.type = "password"; input.autocomplete = "off";
     } else {
       input = document.createElement("input");
       input.type = "number"; input.step = "1"; input.required = true;

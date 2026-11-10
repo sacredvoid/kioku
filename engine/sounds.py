@@ -1,9 +1,11 @@
-"""Free music and sound effects from Openverse, plus the user's own files under ~/Music.
+"""Free music and sound effects (Openverse, plus Jamendo and Incompetech for music, see music_sources.py), and the
+user's own files under ~/Music, searchable by feel.
 
 Every byte goes through the engine: the app's CSP only allows the engine, and a download URL is never taken from
 the client. For a free sound the engine re-reads the Openverse record server-side and only fetches that record's own
 https URL, capped at 50 MB, then checks with ffprobe that it really is audio before it lands in ~/Kioku/sounds.
 """
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -23,6 +25,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import core
 import edit
+import music
+import music_sources
 import settings
 
 router = APIRouter()
@@ -35,7 +39,11 @@ MUSIC = Path(os.environ.get("KIOKU_MUSIC") or Path.home() / "Music")
 MAX_BYTES = 50 * 1024 * 1024
 TIMEOUT = 60
 TTL = 600  # search / record / waveform cache, seconds
-ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")  # Openverse
+ID = re.compile(r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|jm-\d{1,12}|ic-[0-9a-f]{12})$")  # + Jamendo, Incompetech
+ANALYZE_BUDGET = 45  # seconds a search waits for candidate analysis; unfinished ones carry on in the background and cache
+_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="shortlist")
+PROVIDERS = ("all", "openverse", "jamendo", "incompetech")
 EXTS = {e.lstrip(".") for e in edit.AUDIO_EXT}  # what the timeline can mix
 # Openverse filetype spellings -> file extension (Jamendo reports its MP3s as mp32). ffprobe checks the real content.
 # ponytail: ogg/flac/opus results are dropped; transcode to m4a on download if too much good music is missing
@@ -92,31 +100,122 @@ def norm(r: dict) -> dict:
             "provider": r.get("provider") or r.get("source"), "duration_s": round((r.get("duration") or 0) / 1000, 1),
             "tags": [t["name"] for t in (r.get("tags") or []) if t.get("name")][:8],
             "filetype": FILETYPE.get(ft := (r.get("filetype") or "").lower(), ft), "preview": f"/sounds/{r['id']}/preview",
-            "needs_credit": r.get("license", "").startswith("by")}
+            "needs_credit": r.get("license", "").startswith("by"),
+            # what the source says (None = it does not say). `text` only feeds ranking; search drops it before replying.
+            "tempo": r.get("bpm"), "instrumental": r.get("instrumental"), "speed": r.get("speed"), "text": r.get("text"),
+            "searched": r.get("provider") != "incompetech"}  # matched the query server side (Incompetech is matched here)
 
 
-@router.get("/sounds/search")
-def search(q: str = Query(..., min_length=1, max_length=200), kind: str = "music", max_dur: float | None = None,
-           page: int = Query(1, ge=1, le=20)):
-    if kind not in ("music", "sfx"):
-        raise HTTPException(422, "kind must be music or sfx")
-    lic = allowed()
+def _openverse(q, kind, page, lic):
     # Freesound records carry no category, so category=sound_effect finds nothing; ask Freesound itself for effects
     where = {"category": "music"} if kind == "music" else {"source": "freesound"}
     params = {"q": q, **where, "license": ",".join(lic),
               "page": page, "page_size": 20}  # anonymous max; more needs an API key (401)
     data = _cached(json.dumps(params, sort_keys=True), lambda: _ov("/audio/", params))
-    out = [norm(r) for r in data.get("results", [])]
-    # Openverse's license filter is trusted but re-checked; formats the timeline can't mix are dropped
+    return [norm(r) for r in data.get("results", [])], data
+
+
+def _analyse(sid):
+    """Music-map summary of one candidate: downloads it once (capped, checked) and analyses it; both are cached."""
+    return music.summary(music.analyze(download(sid)))
+
+
+def _shortlist(out, n, notes):
+    """Attach `analysis` (tempo, energy curve, drop, length) to the first n results. Bounded: n at most 5 (the caller
+    clamps), 3 at a time, and the search waits at most ANALYZE_BUDGET seconds; anything unfinished keeps running in
+    the background and is cached, so the same search again returns it."""
+    futs = {_pool.submit(_analyse, s["id"]): s for s in out[:n]}
+    done, _ = concurrent.futures.wait(futs, timeout=ANALYZE_BUDGET)
+    for f, s in futs.items():
+        if f not in done:
+            s["analysis_error"] = "still analysing; search again in a minute and it will be there"
+            continue
+        try:
+            s["analysis"] = f.result()
+        except HTTPException as e:
+            s["analysis_error"] = str(e.detail)
+        except Exception as e:  # analysis is optional: a model or decode failure must not sink the search
+            log.warning("analysis of %s failed: %s", s["id"], e)
+            s["analysis_error"] = str(e) or "analysis failed"
+    if any("analysis_error" in s for s in out[:n]):
+        notes.append("some candidates could not be analysed (see analysis_error); judge those by their tags and length")
+
+
+@router.get("/sounds/search")
+def search(q: str = Query(..., min_length=1, max_length=200), kind: str = "music", max_dur: float | None = None,
+           page: int = Query(1, ge=1, le=20), provider: str = "all",
+           tempo_min: float | None = Query(None, ge=20, le=300), tempo_max: float | None = Query(None, ge=20, le=300),
+           instrumental: bool | None = None, target_seconds: float | None = Query(None, gt=0, le=3600),
+           analyze: int = Query(0, ge=0, le=5), limit: int = Query(20, ge=1, le=40)):
+    """Music search over Openverse, Jamendo (needs a free key) and Incompetech, ranked by fit to the request. With
+    analyze=N the top N get a music-map summary so a pick is made on data. Sound effects only come from Openverse."""
+    if kind not in ("music", "sfx"):
+        raise HTTPException(422, "kind must be music or sfx")
+    if provider not in PROVIDERS:
+        raise HTTPException(422, f"provider must be one of {', '.join(PROVIDERS)}")
+    lic = allowed()
+    notes: list[str] = []
+    more = False
+    if kind == "sfx" or provider == "openverse":
+        out, data = _openverse(q, kind, page, lic)
+        more = page < (data.get("page_count") or 1)
+    else:
+        out, errs, live = [], [], 0
+        want = lambda p: provider in ("all", p)  # noqa: E731
+        if want("jamendo") and page == 1:
+            try:
+                out += [norm(r) for r in music_sources.jamendo_search(q, tempo_min, tempo_max, instrumental, max_dur)]
+                live += 1
+            except music_sources.SourceError as e:
+                (notes if str(e) == music_sources.NEED_KEY else errs).append(str(e))
+        if want("incompetech") and page == 1:
+            try:
+                out += [norm(r) for r in music_sources.incompetech_search(q, tempo_min, tempo_max)]
+                live += 1
+            except music_sources.SourceError as e:
+                errs.append(str(e))
+        if want("openverse"):
+            try:
+                ov, data = _openverse(q, kind, page, lic)
+                out += ov
+                more, live = page < (data.get("page_count") or 1), live + 1
+            except HTTPException as e:
+                errs.append(str(e.detail))
+        if not live and not out and errs:
+            raise HTTPException(502, "; ".join([*errs, *notes]) or "no music source answered")
+        notes += [f"a source failed: {e}" for e in errs]
+    # every source's license is re-checked here; formats the timeline can't mix are dropped
     out = [s for s in out if s["license"] in lic and s["filetype"] in EXTS]
     if max_dur:
         out = [s for s in out if 0 < s["duration_s"] <= max_dur]
-    return {"results": out, "page": page, "more": page < (data.get("page_count") or 1), "licenses": lic}
+    if kind == "music":
+        out = music_sources.rank(out, q, tempo_min, tempo_max, instrumental, target_seconds)
+    out = out[:limit]
+    if analyze and kind == "music" and out:
+        _shortlist(out, analyze, notes)
+        for s in out:
+            a = s.get("analysis")
+            if a and s["tempo"] is None:
+                s["tempo"] = a["tempo"]  # the source did not say; the analysis did
+        out = music_sources.rank(out, q, tempo_min, tempo_max, instrumental, target_seconds)
+    for s in out:
+        s.pop("text", None)
+        s.pop("searched", None)
+        if target_seconds and s["duration_s"] and s["duration_s"] < target_seconds * 0.9:
+            s["length_note"] = f"{s['duration_s']:.0f}s is shorter than the {target_seconds:.0f}s edit; it would play once and end"
+    return {"results": out, "page": page, "more": more, "licenses": lic, "notes": notes}
 
 
 def record(sid: str) -> dict:
+    """The source's own record of a sound, re-read server side. Openverse ids are UUIDs; jm- and ic- are Jamendo and Incompetech."""
     if not ID.match(sid):
-        raise HTTPException(422, "not an Openverse sound id")
+        raise HTTPException(422, "not a known sound id")
+    if sid[:3] in ("jm-", "ic-"):
+        fn = music_sources.jamendo_record if sid[:3] == "jm-" else music_sources.incompetech_record
+        try:
+            return _cached(f"rec:{sid}", lambda: fn(sid))
+        except music_sources.SourceError as e:
+            raise HTTPException(404 if "gone" in str(e) or "not in" in str(e) else 502, str(e))
     return _cached(f"rec:{sid}", lambda: _ov(f"/audio/{sid}/"))
 
 
@@ -176,8 +275,10 @@ def preview(sid: str):
 @router.get("/sounds/{sid}/waveform")
 def waveform(sid: str):
     if not ID.match(sid):
-        raise HTTPException(422, "not an Openverse sound id")
-    pts = _cached(f"wave:{sid}", lambda: _ov(f"/audio/{sid}/waveform/").get("points") or [])
+        raise HTTPException(422, "not a known sound id")
+    if not UUID.match(sid):
+        return {"points": []}  # Jamendo and Incompetech have no waveform endpoint; the row works without one
+    pts =_cached(f"wave:{sid}", lambda: _ov(f"/audio/{sid}/waveform/").get("points") or [])
     step = max(1, len(pts) // 120)
     return {"points": [round(max(pts[i:i + step]), 3) for i in range(0, len(pts), step)]}
 
@@ -259,7 +360,7 @@ _local_at = 0.0
 
 def _probe(p: Path) -> dict | None:
     try:
-        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags=title,artist,album"
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags"
                             ":stream=codec_type,codec_name,codec_tag_string", "-of", "json", str(p)],
                            capture_output=True, text=True, timeout=15)
         j = json.loads(r.stdout or "{}")
@@ -277,8 +378,12 @@ def _probe(p: Path) -> dict | None:
         dur = 0
     if dur <= 0:
         return None
+    try:  # a BPM tag is the artist's own number, better than our estimate (ID3 TBPM, m4a tmpo)
+        bpm = float(next((tags[k] for k in ("bpm", "tbpm", "tmpo") if tags.get(k)), 0)) or None
+    except ValueError:
+        bpm = None
     return {"path": str(p), "title": tags.get("title") or p.stem, "artist": tags.get("artist") or "",
-            "album": tags.get("album") or "", "duration_s": round(dur, 1)}
+            "album": tags.get("album") or "", "genre": tags.get("genre") or "", "bpm_tag": bpm, "duration_s": round(dur, 1)}
 
 
 def local_index(force=False) -> list[dict]:
@@ -294,7 +399,10 @@ def local_index(force=False) -> list[dict]:
             key, mt = str(p), p.stat().st_mtime
             seen.add(key)
             if key not in _local or _local[key][0] != mt:
-                _local[key] = (mt, _probe(p))
+                info = _probe(p)
+                if info and (f := music.cached_quick(p)):
+                    info["feat"] = f  # computed in an earlier session
+                _local[key] = (mt, info)
         for k in set(_local) - seen:
             del _local[k]
         _local_at = time.time()
@@ -312,17 +420,87 @@ def in_music(path: str) -> Path:
     return p
 
 
+HIGH = {"upbeat", "energetic", "driving", "hype", "lively", "punchy", "intense", "party", "workout", "pumping"}
+LOW = {"calm", "chill", "relaxing", "relaxed", "mellow", "soft", "quiet", "gentle", "peaceful", "ambient", "sleepy"}
+FAST, SLOW = {"fast", "uptempo", "quick"}, {"slow", "downtempo"}
+FILLER = {"music", "song", "songs", "track", "tracks", "a", "the", "for", "some", "and", "with"}
+BG_INDEX = True  # tests switch the background thread off and call index_features() themselves
+_idx_lock = threading.Lock()
+
+
+def _feel(q: str):
+    """(plain words, wanted feel, bpm) from a query: 'upbeat summer 120 bpm' -> (['summer'], {'high'}, 120.0)."""
+    m = re.search(r"(\d{2,3})\s*bpm", q, re.I)
+    bpm = float(m.group(1)) if m else None
+    if m:
+        q = q[:m.start()] + " " + q[m.end():]
+    words = [w for w in re.findall(r"[\w'-]+", q.lower()) if w not in FILLER]
+    feel = {n for n, ws in (("high", HIGH), ("low", LOW), ("fast", FAST), ("slow", SLOW)) if ws & set(words)}
+    return [w for w in words if not (w in HIGH | LOW | FAST | SLOW)], feel, bpm
+
+
+def _tempo(s):
+    """(bpm, 'tag' | 'estimate') of a library file, or (None, None) while unanalysed."""
+    f = s.get("feat") or {}
+    return (s["bpm_tag"], "tag") if s.get("bpm_tag") else (f.get("tempo"), "estimate") if f.get("tempo") else (None, None)
+
+
+def index_features(max_files: int | None = None) -> int:
+    """Quick tempo/energy for library files that have none yet, one at a time (cached on disk, so each file once per
+    change). Returns how many were done. Does nothing when another pass is already running."""
+    if not _idx_lock.acquire(blocking=False):
+        return 0
+    try:
+        todo = [s for s in local_index() if "feat" not in s][:max_files]
+        for s in todo:
+            s["feat"] = music.library_features(s["path"], s["duration_s"])
+        return len(todo)
+    finally:
+        _idx_lock.release()
+
+
 @router.get("/sounds/local")
 def local(q: str = "", limit: int = Query(60, ge=1, le=500)):
+    """Your ~/Music by words (title, artist, album, genre, file name) and by feel: 'upbeat', 'calm', 'fast', 'slow',
+    '120 bpm'. Feel needs a quick analysis of each file (tempo and energy from 45 s of audio), done in the background
+    the first time and cached; `indexing` says how far it is. With feel words, other words only rank."""
     if not MUSIC.is_dir():
         return {"results": [], "root": str(MUSIC), "message": "no ~/Music folder"}
-    words = q.lower().split()
-    hits = [s for s in local_index() if all(w in f"{s['title']} {s['artist']} {s['album']} {Path(s['path']).name}".lower()
-                                            for w in words)]
-    hits.sort(key=lambda s: (s["artist"].lower(), s["title"].lower()))
-    return {"results": [{**s, "id": hashlib.sha1(s["path"].encode()).hexdigest()[:16],
-                         "preview": f"/sounds/local/file?path={urllib.parse.quote(s['path'])}"} for s in hits[:limit]],
-            "root": str(MUSIC)}
+    words, feel, bpm = _feel(q)
+    files = local_index()
+    need = bool(feel or bpm)
+    if need and any("feat" not in s for s in files) and BG_INDEX and not _idx_lock.locked():
+        threading.Thread(target=index_features, daemon=True, name="music-index").start()
+    ready = [s for s in files if "feat" in s]
+    hits = []
+    for s in (ready if need else files):
+        f = s.get("feat") or {}
+        t, src = _tempo(s)
+        e = f.get("energy")
+        hay = f"{s['title']} {s['artist']} {s['album']} {s.get('genre', '')} {Path(s['path']).name}".lower()
+        n = sum(w in hay for w in words)
+        if not need and n < len(words):
+            continue
+        if ("high" in feel and (e is None or e < 6)) or ("low" in feel and (e is None or e > 3)):
+            continue
+        if ("fast" in feel and not (t and t >= 125)) or ("slow" in feel and not (t and t <= 95)):
+            continue
+        if bpm and not (t and abs(t - bpm) <= 8):
+            continue
+        hits.append((n, s, t, src, e))
+    # most word matches first; then the most (or least) energetic for upbeat (or calm); then closest to the asked bpm
+    hits.sort(key=lambda h: (-h[0], -(h[4] or 0) if "high" in feel else (h[4] or 0) if "low" in feel else 0,
+                             abs(h[2] - bpm) if bpm and h[2] else 0, h[1]["artist"].lower(), h[1]["title"].lower()))
+    out = {"results": [{**{k: v for k, v in s.items() if k not in ("feat", "bpm_tag")}, "tempo": t, "tempo_source": src,
+                        "energy": e, "id": hashlib.sha1(s["path"].encode()).hexdigest()[:16],
+                        "preview": f"/sounds/local/file?path={urllib.parse.quote(s['path'])}"}
+                       for _, s, t, src, e in hits[:limit]], "root": str(MUSIC)}
+    if need:
+        out["indexing"] = {"analysed": len(ready), "total": len(files)}
+        if len(ready) < len(files):
+            out["message"] = (f"{len(files) - len(ready)} of {len(files)} files are still being analysed for tempo and "
+                              "energy; ask again in a minute for the rest")
+    return out
 
 
 @router.get("/sounds/local/file")

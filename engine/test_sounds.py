@@ -21,6 +21,7 @@ import core  # noqa: E402
 sys.modules["captions"] = types.SimpleNamespace(start_transcription=lambda cid: None, likely_speech=lambda u: False)
 import edit  # noqa: E402
 import library  # noqa: E402
+import music_sources  # noqa: E402
 import sounds  # noqa: E402
 
 app = FastAPI()
@@ -96,6 +97,13 @@ def fake_urlopen(req, timeout=None):
 
 
 sounds._ov = fake_ov
+
+
+def offline(url):
+    raise music_sources.SourceError("offline in tests")
+
+
+music_sources._get = offline  # no network: Incompetech (no key) is tried by the default search and reports it is down
 sounds.urllib.request.urlopen = fake_urlopen
 
 # search: normalized, license-filtered (no NC by default), unmixable formats dropped
