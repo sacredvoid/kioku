@@ -242,6 +242,13 @@ kbd { font: 500 11px var(--font); color: var(--text-3); background: var(--surfac
 #projects .nav-item, #albums .nav-item, #board-projects .nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px 10px; padding: 0; border: 0; border-radius: 12px }
 #projects .cover, #albums .cover, #board-projects .cover { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 12px; box-shadow: var(--shadow);
   transition: transform .3s var(--ease), box-shadow .3s var(--ease) }
+.cover { display: grid; gap: 2px; overflow: hidden; background-color: var(--surface-3) }
+.cover > span { background: center / cover no-repeat; min-width: 0; min-height: 0 }
+.cover[data-n="2"] { grid-template-columns: 1fr 1fr }
+.cover[data-n="3"] { grid-template: 1fr 1fr / 2fr 1fr }
+.cover[data-n="3"] > span:first-child { grid-row: 1 / -1 }
+.k-page .cover > span:not(:first-child) { display: none }
+.k-page .cover { grid-template: 1fr / 1fr }
 #projects .nav-item:hover .cover, #albums .nav-item:hover .cover, #board-projects .nav-item:hover .cover { transform: translateY(-2px); box-shadow: var(--shadow-lg) }
 #projects .nav-item:focus-visible, #albums .nav-item:focus-visible, #board-projects .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px }
 #projects .name, #albums .name, #board-projects .name { padding-left: 2px }

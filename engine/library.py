@@ -144,7 +144,17 @@ def list_collections(kind: Literal["album", "project"] | None = None):
             "from collections c left join collection_items i on i.collection_id = c.id "
             + ("where c.kind = ? " if kind else "") + "group by c.id order by c.updated desc",
             (kind,) if kind else ()).fetchall()
-        return [dict(zip(("id", "name", "kind", "updated", "count", "cover"), r)) for r in rows]
+        # collage covers: first, middle and last clip, so one dull opening frame doesn't stand for the project
+        covers: dict[int, list[str]] = {}
+        for cid, uuid in c.execute(
+                "select collection_id, uuid from (select collection_id, uuid, pos, "
+                "row_number() over (partition by collection_id order by pos) rn, "
+                "count(*) over (partition by collection_id) n from collection_items) "
+                "where rn = 1 or rn = (n + 1) / 2 or rn = n order by collection_id, pos"):
+            if uuid not in covers.setdefault(cid, []):
+                covers[cid].append(uuid)
+        return [dict(zip(("id", "name", "kind", "updated", "count", "cover"), r), covers=covers.get(r[0], []))
+                for r in rows]
 
 
 @router.post("/collections", status_code=201)

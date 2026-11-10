@@ -110,6 +110,19 @@ review.init({ root: $("review"), toast, fail, openViewer: (items, i) => viewer.s
   go: (v) => go(v), changed: () => loadCollections() });
 
 // ---------- sidebar
+/** Cover tile: a 1-big + 2-small collage of the project's first, middle and last clips. */
+function coverEl(c: Collection) {
+  const cover = el("span", "cover");
+  const ids = c.covers?.length ? c.covers : c.cover ? [c.cover] : [];
+  cover.dataset.n = String(ids.length);
+  for (const u of ids) {
+    const t = el("span");
+    t.style.backgroundImage = `url(${thumb(u)})`;
+    cover.append(t);
+  }
+  return cover;
+}
+
 async function loadCollections() {
   // keep the last good list on failure: an empty sidebar would look like your albums were deleted
   try { collections = await api<Collection[]>("/collections"); } catch (e) { console.warn("collections:", errMsg(e)); return; }
@@ -120,9 +133,7 @@ async function loadCollections() {
       const b = el("button", "nav-item col", "") as HTMLButtonElement;
       b.type = "button";
       b.dataset.nav = `col:${c.id}`;
-      const cover = el("span", "cover");
-      if (c.cover) cover.style.backgroundImage = `url(${thumb(c.cover)})`;
-      b.append(cover, el("span", "name", c.name), el("span", "count", String(c.count)));
+      b.append(coverEl(c), el("span", "name", c.name), el("span", "count", String(c.count)));
       return b;
     }));
     if (!list.length) box.append(el("p", "hint", kind === "album" ? "No albums yet. Select photos in Library, then Add to album." : "No projects yet. Ask Kioku to make one, or press New project."));
@@ -1015,7 +1026,7 @@ async function syncCollections() {
   review.loadDrafts();
   let cols: (Collection & { updated: number })[];
   try { cols = await api(`/collections`); } catch { return; }
-  const sig = JSON.stringify(cols.map((c) => [c.id, c.name, c.count, c.cover, c.updated]));
+  const sig = JSON.stringify(cols.map((c) => [c.id, c.name, c.count, c.covers, c.updated]));
   if (sig === lastSig) return;
   const before = new Map(collections.map((c) => [c.id, (c as Collection & { updated: number }).updated]));
   lastSig = sig;
@@ -1378,9 +1389,7 @@ async function renderBoard() {
   $("board-projects").replaceChildren(...projects.slice(0, 4).map((c) => {
     const b = el("button", "nav-item") as HTMLButtonElement;
     b.type = "button"; b.onclick = () => go({ type: "col", id: c.id });
-    const cover = el("span", "cover");
-    if (c.cover) cover.style.backgroundImage = `url(${thumb(c.cover)})`;
-    b.append(cover, el("span", "name", c.name), el("span", "count", `${c.count} clip${c.count === 1 ? "" : "s"}`));
+    b.append(coverEl(c), el("span", "name", c.name), el("span", "count", `${c.count} clip${c.count === 1 ? "" : "s"}`));
     return b;
   }));
   if (!projects.length) $("board-projects").append(el("p", "hint", "No projects yet. Ask for one above."));
