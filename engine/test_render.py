@@ -672,6 +672,8 @@ assert "data/index.db" not in str(core.DB_PATH)
 projects.jobs.pop((1, "preview"), None)
 j = c.get("/collections/1/render/preview").json()
 assert j["status"] == "done" and j.get("saved") and j["path"] == render.saved_preview(1)["path"], j
+f = c.get("/collections/1/render/preview/file")  # the file must be servable too, or Exact plays a 404
+assert f.status_code == 200 and f.content[4:8] == b"ftyp", f.status_code
 # rhythm: moving clips, a ramp, a held last frame and seam sounds go through the whole preview pipeline
 from dataclasses import replace  # noqa: E402
 r14 = mk([("A", "video", 0, 1, 1, None), ("C", "video", 0, 1.5, 1, ("whipleft", 6)), ("E", "photo", 0, 1, 1, None)])

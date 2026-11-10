@@ -1194,6 +1194,8 @@ def render_cancel(cid: int, mode: Mode):
 def _recorded(cid, mode, field):
     """Only the exact path the finished job recorded, and only inside our own output folders."""
     j = projects.job(cid, mode)
+    if j.get("status") == "idle" and mode == "preview":
+        j = {**(saved_preview(cid) or {}), "status": "done"}  # same fallback as render_status, else Exact plays a 404 after a restart
     if j.get("status") != "done" or not j.get(field):
         raise HTTPException(404, "nothing rendered yet")
     p = Path(j[field]).resolve()
