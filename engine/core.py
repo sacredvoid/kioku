@@ -271,3 +271,10 @@ class Index:
                             moment=dict(t0=t0, t1=t1) if src == "scene" else None))
         out.sort(key=lambda h: -h["score"])
         return out[:k]
+
+
+# Apple Vision deadlocks when many threads call performRequests at once: its internal capacity queue fills with
+# callers that each wait for work queued behind them (seen 2026-11-10: four find_moments calls, every thread parked in
+# VNControlledCapacityTasksQueue, the edit frozen for 20+ min). Every Vision call in the engine takes one of these.
+# ponytail: 2 slots, a guess well under the queue's capacity; raise it only after a parallel find_moments stress run
+VISION_SLOTS = threading.BoundedSemaphore(2)
