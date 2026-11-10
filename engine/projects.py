@@ -87,6 +87,8 @@ def job(cid, kind):
     snap = dict(j)
     if "steps" in snap:
         snap["steps"] = list(snap["steps"])
+    if "trace" in snap:  # entries change state when their tool returns
+        snap["trace"] = [dict(e) for e in list(snap["trace"])]
     return snap
 
 
@@ -265,7 +267,40 @@ STEP_LABELS = {
     "render_preview": lambda i: "Rendering a preview",
     "render_final": lambda i: "Rendering the finished video",
     "render_status": lambda i: "Checking the render",
+    "find_moments": lambda i: f"Finding the best moments in {len(i.get('uuids', []))} clip(s)",
+    "analyze_reference": lambda i: "Studying the reference video",
+    "compare_to_reference": lambda i: "Comparing the cut to the reference",
+    "search_sounds": lambda i: f"Looking for {'sound effects' if i.get('kind') == 'sfx' else 'music'}: “{i.get('query', '')}”",
+    "set_audio": lambda i: "Removing an audio track" if i.get("remove") else "Laying in the audio track",
+    "add_sound": lambda i: "Adding a sound effect",
+    "set_text": lambda i: f"Adding text: “{i.get('text', '')[:40]}”" if i.get("text") else "Editing on-screen text",
+    "tag_media": lambda i: "Tagging clips",
 }
+
+
+def step_detail(short, inp):
+    """Second line for a live step: which clips, which link, what query. Never raises."""
+    try:
+        if short in ("find_moments", "look_at", "add_to_collection") and inp.get("uuids"):
+            return " / ".join(media.label_for(u) for u in inp["uuids"][:6])
+        if short == "analyze_reference":
+            return str(inp.get("path", ""))[:200]
+        if short == "search_media" and (inp.get("kind") or inp.get("k")):
+            return " · ".join(x for x in (inp.get("kind") and f"{inp['kind']}s only", inp.get("k") and f"top {inp['k']}") if x)
+        if short == "set_clip_fx":
+            return ", ".join(f"{k} {v}" for k, v in inp.items() if k not in ("collection_id", "pos", "item_id"))[:160]
+        if short in ("set_edit",):
+            return ", ".join(f"{k} {v}" for k, v in inp.items() if k != "collection_id" and v not in ("", None, -1, 0))[:160]
+    except Exception:
+        pass
+    return ""
+
+
+def tool_text(content):
+    """Plain text of a tool_result's content (a string or a list of text/image blocks)."""
+    if isinstance(content, str):
+        return content
+    return " ".join(b.get("text", "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text")
 
 
 def step_label(name, inp):
@@ -309,6 +344,7 @@ def do_ask(cid, prompt):
     col = library.get_collection(cid)
     job_state = jobs[(cid, "ask")]
     job_state["steps"] = []
+    job_state["trace"] = []  # one entry per tool call: label, detail, start/end times, running / done / error
     agent_slot(job_state)
     try:
         return run_claude(exe, cid, col, prompt, job_state)
@@ -334,6 +370,7 @@ def run_claude(exe, cid, col, prompt, job_state):
     timer = threading.Timer(minutes * 60, lambda: (timed_out.set(), proc.kill()))
     timer.start()
     final, err = None, None
+    by_id = {}  # tool_use id -> its trace entry, so the result can close it
     try:
         for line in proc.stdout:  # one JSON event per line; surface tool calls as live steps
             try:
@@ -343,9 +380,25 @@ def run_claude(exe, cid, col, prompt, job_state):
             if ev.get("type") == "assistant":
                 for block in ev.get("message", {}).get("content", []):
                     if block.get("type") == "tool_use":
-                        job_state["steps"].append(step_label(block.get("name", ""), block.get("input")))
+                        name, inp = block.get("name", ""), block.get("input") or {}
+                        label = step_label(name, inp)
+                        job_state["steps"].append(label)
+                        entry = {"tool": name.split("__")[-1], "label": label, "detail": step_detail(name.split("__")[-1], inp),
+                                 "t0": time.time(), "state": "running"}
+                        by_id[block.get("id")] = entry
+                        job_state["trace"].append(entry)
                     elif block.get("type") == "text" and block.get("text", "").strip():
                         job_state["note"] = block["text"].strip()[:300]
+            elif ev.get("type") == "user":  # tool results come back as the "user" turn
+                for block in ev.get("message", {}).get("content", []):
+                    entry = by_id.pop(block.get("tool_use_id"), None) if isinstance(block, dict) and block.get("type") == "tool_result" else None
+                    if entry is None:
+                        continue
+                    text = tool_text(block.get("content")).strip()
+                    failed = bool(block.get("is_error")) or text.startswith(('{"error"', "Error", "error"))
+                    entry.update(t1=time.time(), state="error" if failed else "done")
+                    if failed:
+                        entry["error"] = text[:240]
             elif ev.get("type") == "result":
                 final = ev.get("result", "")
                 if ev.get("is_error"):

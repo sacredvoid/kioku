@@ -8,6 +8,7 @@ import { timeline } from "./timeline";
 import { openComposer, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
+import { renderLive } from "./live";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = (tag: string, cls = "", text = "") => {
@@ -695,7 +696,7 @@ async function pollJob(cid: number, kind: PollKind, out: HTMLElement, btn: { dis
   if (label) btn.textContent = "Working…";
   out.className = "ask-out running";
   const row = el("div", "prog-row");
-  row.append(ldFor(out, MOTIF[kind], kind === "ask" ? 22 : 30).el,
+  row.append(ldFor(out, MOTIF[kind], kind === "ask" ? 40 : 30).el,
     el("span", "", kind === "ask" ? "Claude is searching your library and editing…" : kind === "export" ? "Exporting: downloading originals from iCloud if needed…" : "Starting…"));
   out.replaceChildren(row);
   let misses = 0;
@@ -918,23 +919,9 @@ async function watchExternalAsk() {
   } catch { /* heartbeat reports the engine being down */ }
 }
 
-const stepsSeen = new Map<number, number>(); // per project: steps already shown, so only new ones animate in
-function renderSteps(out: HTMLElement, j: Job, cid: number) {
-  const secs = Math.round(Date.now() / 1000 - (j.started ?? Date.now() / 1000));
-  const head = el("div", "steps-head");
-  head.append(ldFor(out, "think", 22).el, el("span", "", `Claude is editing${j.model ? ` · ${j.model}` : ""}`), el("span", "spacer"), el("span", "muted", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
-  const list = el("ol", "steps");
-  const steps = j.steps ?? [];
-  const seen = stepsSeen.get(cid) ?? 0;
-  stepsSeen.set(cid, steps.length);
-  steps.slice(-6).forEach((t, k, arr) => {
-    const fresh = steps.length - arr.length + k >= seen;
-    list.append(el("li", `${k === arr.length - 1 ? "now" : ""}${fresh ? " new" : ""}`, t));
-  });
-  if (!steps.length) list.append(el("li", "now", "Reading the brief…"));
-  out.replaceChildren(head, list);
-  if (j.note) out.append(el("p", "note", j.note));
-  if (steps.length > 6) out.append(el("p", "muted", `${steps.length} steps so far`));
+const stepsSeen = new Map<number, number>(); // kept for pollJob's cleanup; the live panel tracks its own rows
+function renderSteps(out: HTMLElement, j: Job, _cid: number) {
+  renderLive(out, j, ldFor(out, "think", 40).el);
 }
 
 let refreshT = 0;
