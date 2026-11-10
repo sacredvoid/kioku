@@ -41,6 +41,7 @@ import albums  # noqa: E402
 import captions
 import edit
 import moments
+import seams
 import sounds
 import reference
 import direction
@@ -166,6 +167,7 @@ app.include_router(media.router)
 app.include_router(moments.router)
 app.include_router(settings.router)
 app.include_router(edit.router)
+app.include_router(seams.router)
 app.include_router(versions.router)
 app.include_router(render.router)
 app.include_router(captions.router)

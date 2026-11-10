@@ -86,6 +86,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
   - Never put a sound on every seam, never stack a riser and a hit on the same one, never use sounds in a calm or sentimental edit unless the user asks.
   - Hard cuts are declicked automatically (a few ms of fade each side), so clip audio never pops; do nothing for that.
   - Calm: `dissolve` 0.4 to 0.6 s between places, no transition inside one scene, never whips or wipes.
+- **After assembling and syncing the cut, call `suggest_seams(collection_id)` once.** It is read-only and returns, per seam, the beat and bar position, energy either side, motion and its direction either side, how alike the two shots are, place and time change, the current transition and one suggestion with a reason. Hard cut is the default; a transition needs a reason from the tool (place change, loud downbeat with motion to follow, energy drop). Apply the suggestions that fit the brief with `set_transition` (use its `duration` and `sfx`), skip the ones that fight it, and keep seams marked `type: "cut"`. Null means not analysed yet, not "no": run `analyze_music` or `analyze_clip` and call it again if it matters. Its caps (one whip per 8 s, transitions on at most 30% of seams) are the limits, not targets. A "match cut" hint means line the subject up with `reframe_pos`.
 - Unsynced transitions shorten the total; recheck with `get_edit`.
 
 ## 7. Format, look, text, captions
