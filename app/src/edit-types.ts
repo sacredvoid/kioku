@@ -46,6 +46,13 @@ export type AudioTrack = {
   volume: number; fade_in: number; fade_out: number;
 };
 
+export type TextTemplate = "title-pop" | "title-slide" | "word-stagger" | "lower-third" | "location-tag" | "big-number";
+// An animated title; start / dur are output seconds as entered (start snaps to the beat grid in the render when synced)
+export type TextSpec = {
+  id: string; template: TextTemplate; text: string; start: number; dur: number;
+  position: "auto" | "top" | "middle" | "bottom"; font: string; color: string; accent: string;
+};
+
 export type Spec = {
   version: 1;
   format: { aspect: "16:9" | "9:16" | "1:1" | "4:5"; size: 720 | 1080 | 2160; fps: 24 | 25 | 30 | 60; fade_in: number; fade_out: number };
@@ -58,6 +65,7 @@ export type Spec = {
   captions: CaptionConfig;
   sync: { track: string | null; grid: "beat" | "half" | "downbeat"; lead: number };
   sfx: Record<string, Sfx>;                            // key = item_id of the clip BEFORE the seam
+  texts: TextSpec[];                                   // up to Edit.options.max_texts
 };
 
 // GET /collections/{cid}/edit.clips[]: output-time layout, transition overlaps already applied
@@ -68,6 +76,7 @@ export type EditOptions = {
   caption_styles: string[]; caption_fonts: string[]; caption_positions: string[]; caption_sizes: string[];
   audio_ext: string[]; max_audio: number; max_fade: number;
   motions: Motion[]; ramps: Ramp[]; sfx: ("none" | Sfx)[]; sync_grids: string[];
+  text_templates: TextTemplate[]; text_fonts: string[]; text_positions: string[]; max_texts: number;
 };
 
 // GET /collections/{cid}/edit
@@ -75,6 +84,7 @@ export type Edit = {
   spec: Spec; rev: number; edit_hash: string; duration: number; fps: number; total_frames: number;
   clips: EditClip[]; warnings: string[]; options: EditOptions;
   grid: number[] | null;   // beat grid in output seconds when sync is on
+  texts: { id: string; start: number; end: number }[];   // where each text plays, after grid snapping
 };
 
 // Mutation replies (PATCH/PUT/DELETE under /edit): the new spec, not a full Edit
