@@ -173,7 +173,10 @@ input, textarea { caret-color: var(--accent) }
 /* ---------- main column */
 .main { max-width: 1680px; margin: 0 auto; padding: 0 clamp(20px, 3.5vw, 56px) 120px; min-width: 0 }
 .main.narrow { max-width: 1120px } /* History: reading width */
-.k-libbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 22px }
+/* sticks under the 56px top bar so filters stay in reach on a long scroll; shadow + clip-path bleed the backdrop past .main's side padding */
+.k-libbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 56px; z-index: 6; margin-top: 10px; padding: 12px 0;
+  background: color-mix(in oklch, var(--bg) 88%, transparent); box-shadow: 0 0 0 100vmax color-mix(in oklch, var(--bg) 88%, transparent); clip-path: inset(0 -100vmax);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px) }
 .k-seg { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface-2) }
 .k-seg button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; font-size: 13px; color: var(--text-2) }
 .k-seg button.on { background: var(--surface-solid); color: var(--text); box-shadow: var(--shadow) }
