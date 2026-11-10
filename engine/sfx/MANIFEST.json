@@ -1,0 +1,86 @@
+{
+  "whoosh": {
+    "file": "whoosh.m4a",
+    "title": "Whoosh #1",
+    "author": "Kinoton",
+    "source_url": "https://freesound.org/people/Kinoton/sounds/427823/",
+    "audio_url": "https://cdn.freesound.org/previews/427/427823_2247456-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 0.8,
+    "before": 0.2,
+    "volume": 0.8
+  },
+  "swish": {
+    "file": "swish.m4a",
+    "title": "Swish 4",
+    "author": "ihitokage",
+    "source_url": "https://freesound.org/people/ihitokage/sounds/395369/",
+    "audio_url": "https://cdn.freesound.org/previews/395/395369_1675920-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 0.595,
+    "before": 0.12,
+    "volume": 0.7
+  },
+  "hit": {
+    "file": "hit.m4a",
+    "title": "BOOM IMPACT 2",
+    "author": "XHALE303",
+    "source_url": "https://freesound.org/people/XHALE303/sounds/535592/",
+    "audio_url": "https://cdn.freesound.org/previews/535/535592_9015615-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 1.3,
+    "before": 0.0,
+    "volume": 0.85
+  },
+  "riser": {
+    "file": "riser.m4a",
+    "title": "Riser",
+    "author": "Rizzard",
+    "source_url": "https://freesound.org/people/Rizzard/sounds/561207/",
+    "audio_url": "https://cdn.freesound.org/previews/561/561207_10825267-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 2.0,
+    "before": 2.0,
+    "volume": 0.6
+  },
+  "swell": {
+    "file": "swell.m4a",
+    "title": "reverse fx 9.wav",
+    "author": "neezen.",
+    "source_url": "https://freesound.org/people/neezen./sounds/503799/",
+    "audio_url": "https://cdn.freesound.org/previews/503/503799_9637845-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 1.846,
+    "before": 1.8,
+    "volume": 0.55
+  },
+  "pop": {
+    "file": "pop.m4a",
+    "title": "Pop 2",
+    "author": "greenvwbeetle",
+    "source_url": "https://freesound.org/people/greenvwbeetle/sounds/244654/",
+    "audio_url": "https://cdn.freesound.org/previews/244/244654_3624044-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 0.138,
+    "before": 0.03,
+    "volume": 0.6
+  },
+  "shutter": {
+    "file": "shutter.m4a",
+    "title": "Camera Shutter",
+    "author": "roachpowder",
+    "source_url": "https://freesound.org/people/roachpowder/sounds/170229/",
+    "audio_url": "https://cdn.freesound.org/previews/170/170229_3133582-hq.mp3",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "dur": 0.295,
+    "before": 0.05,
+    "volume": 0.6
+  }
+}

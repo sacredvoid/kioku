@@ -75,7 +75,13 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 - **Motion** (`set_clip_fx`): snappy edits give most shots `push` or `drift-left` / `drift-right` at `motion_amount` 0.3 to 0.5, and photos always move. Calm: `push` 0.2 to 0.3 on some shots.
 - **Accents**, peaks only and at most one per shot: `punch` on 1 to 3 shots, `flash` on the drop or the single biggest moment, `shake` on 1 or 2 hard hits, `ramp="slow-mid"` on one hero action shot (its own sound goes silent).
 - **Seams** (`set_transition`): mostly hard cuts.
-  - Snappy: `whip-left` / `whip-right` / `zoom-in` with `sfx="whoosh"` for a change of place, `flash-white` into the drop, `sfx="hit"` on a hard cut at the drop. Not every seam needs a sound; 3-5 sounds in 30 s is plenty.
+  - Snappy: `whip-left` / `whip-right` / `zoom-in` with `sfx="auto"` for a change of place, `flash-white` into the drop, `sfx="hit"` on a hard cut at the drop. Not every seam needs a sound.
+- **Sounds** (`sfx` on `set_transition`, on `set_text`): real CC0 recordings, quiet on purpose. 3 to 5 in 30 s is the ceiling; `get_edit` warns past it. A sound is a choice, so silence is the default.
+  - `auto` picks by transition type: `whoosh` for whips and zoom, `swish` for slides, wipes and blur, `hit` for `flash-white`, `swell` for `fade-black`. Dissolves and plain cuts stay silent.
+  - `hit` on a hard cut at the drop (once, maybe twice). `riser` builds into one big seam, at most once per edit. `swell` is the softer lead-in: use it instead of `riser` when the music is soft or the edit is calm.
+  - `shutter` only on a photo burst or a freeze-frame moment. `pop` on a title's first frame (`set_text(sfx="pop")`), for the opener or a `location-tag`, not on every text.
+  - Never put a sound on every seam, never stack a riser and a hit on the same one, never use sounds in a calm or sentimental edit unless the user asks.
+  - Hard cuts are declicked automatically (a few ms of fade each side), so clip audio never pops; do nothing for that.
   - Calm: `dissolve` 0.4 to 0.6 s between places, no transition inside one scene, never whips or wipes.
 - Unsynced transitions shorten the total; recheck with `get_edit`.
 

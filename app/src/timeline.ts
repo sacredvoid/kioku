@@ -50,7 +50,7 @@ const TEMPLATE_LABEL: Record<string, string> = { "title-pop": "Pop title", "titl
   "lower-third": "Lower third", "location-tag": "Location tag", "big-number": "Big number" };
 const MOTION_LABEL: Record<string, string> = { none: "None", push: "Push in", pull: "Pull out", "drift-left": "Drift left", "drift-right": "Drift right", punch: "Punch on beats" };
 const RAMP_LABEL: Record<string, string> = { none: "None", "slow-mid": "Fast, slow, fast", "fast-in": "Fast start", "slow-out": "Slow finish" };
-const SFX_LABEL: Record<string, string> = { none: "No sound", whoosh: "Whoosh", hit: "Hit", riser: "Riser" };
+const SFX_LABEL: Record<string, string> = { none: "No sound", whoosh: "Whoosh", swish: "Swish", hit: "Hit", riser: "Riser", swell: "Swell", pop: "Pop", shutter: "Shutter" };
 const ADJ: [string, string, number, number, number, number][] = [  // flat key, label, min, max, step, default
   ["exposure", "Exposure", -1, 1, .05, 0], ["contrast", "Contrast", .8, 1.3, .02, 1], ["saturation", "Saturation", 0, 1.6, .05, 1], ["warmth", "Warmth", -1, 1, .05, 0]];
 const DEFAULTS: Flat = { speed: 1, volume: 1, mute: false, captions: false, exposure: 0, contrast: 1, saturation: 1, warmth: 0, reframe_mode: "center", reframe_pos: .5, reframe_from: .5, reframe_to: .5,
