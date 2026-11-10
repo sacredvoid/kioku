@@ -99,11 +99,10 @@ def still_for(uuid, mode, tmp, orig=None):
     """A JPEG with orientation baked in (no EXIF guesswork left for ffmpeg). Preview: the indexed preview image.
     Final: the original, already downloaded by fetch_originals when `orig` is given (HEIC goes through sips first)."""
     if mode == "preview":
-        with core.connect() as c:
-            row = c.execute("select path from assets where uuid = ?", (uuid,)).fetchone()
-        src = Path(row[0]) if row and row[0] else None
-        if not src or not src.is_file():
-            raise RuntimeError("no preview image on disk")
+        try:
+            src = media.preview_source(uuid)
+        except media.NoPreview:
+            raise RuntimeError("no preview image on disk") from None
     elif orig:
         src = orig
     else:

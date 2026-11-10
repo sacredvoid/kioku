@@ -185,6 +185,8 @@ class Editor {
   // ---------- data
   async loadItems() {
     const col = await api<{ items: Raw[] }>(`/collections/${this.cid}`);
+    // Copy this project's previews out of Photos in one burst (one macOS prompt), not one read per scrub. Cheap when done.
+    api(`/collections/${this.cid}/warm`, "POST").catch(() => {});
     this.model.items = col.items.map((r) => ({ item_id: r.item_id, uuid: r.uuid, pos: r.pos, t0: r.t0, t1: r.t1, kind: r.kind, video: r.kind !== "image", dur: r.duration, meta: r.meta, created: r.created })) as TItem[];
   }
   async refresh() {

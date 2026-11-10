@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from contextlib import closing
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +30,8 @@ SHEETS = core.DATA / "sheets"
 STRIPS = core.DATA / "strips"
 STRIP_W, STRIP_H, STRIP_MAX = 160, 90, 120
 VIDEO_EXT = {".mov", ".mp4", ".m4v"}
+PREVIEWS = core.DATA / "previews"  # copies of project items' ~1024px previews, see preview_source
+PREVIEW_EXT = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
 MAX_SCENE = 8.0  # split longer scenes into even pieces so cuts can land inside long takes
 _locks: dict[str, threading.Lock] = {}
 # live work, for the app's progress panel: uuid -> {stage, started, label}; plus counters since engine start
@@ -94,6 +97,38 @@ def download_original(uuid, dest):
     if "authorization" in out.lower():
         raise RuntimeError("no Photos access for the app running the engine (System Settings > Privacy & Security > Photos)")
     raise RuntimeError("iCloud download failed: " + (out.splitlines()[-1] if out else "no file returned"))
+
+
+class NoPreview(LookupError):
+    pass
+
+
+def preview_source(uuid, keep=True):
+    """An indexed item's ~1024px preview image. Every read inside Photos Library.photoslibrary can raise macOS's
+    "access data from other apps" prompt, so items being worked on (projects, the viewer) get a copy in
+    data/previews on first use (keep=True) and are never read from the library again. keep=False (grid tiles)
+    uses the copy if there is one, else the library file, so browsing doesn't copy the whole library.
+    Raises NoPreview, or PermissionError when macOS refuses the read."""
+    with closing(core.connect()) as c:
+        row = c.execute("select path from assets where uuid = ?", (uuid,)).fetchone()
+    src = Path(row[0]) if row and row[0] else None
+    if not src or src.suffix.lower() not in PREVIEW_EXT:
+        raise NoPreview("no preview image indexed")
+    out = PREVIEWS / uuid[:2] / f"{uuid}{src.suffix.lower()}"  # uuid is a real indexed id here, safe in a path
+    if out.is_file():
+        return out
+    if not keep:
+        return src
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f"{out.name}.{threading.get_ident()}.tmp")  # per-thread: parallel requests can't clobber
+    try:
+        shutil.copyfile(src, tmp)
+        tmp.replace(out)  # atomic: a reader never sees half a file
+    except FileNotFoundError:
+        raise NoPreview("the preview image is no longer in the Photos library") from None
+    finally:
+        tmp.unlink(missing_ok=True)
+    return out
 
 
 def local_original(uuid):

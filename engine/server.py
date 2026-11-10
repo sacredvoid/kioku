@@ -257,12 +257,19 @@ def timeline(kind: str | None = None):
                          "dur": [round(r[2] or 0) for r in rows], "created": [(r[3] or "")[:10] for r in rows]})
 
 
-def preview_path(uuid):
-    """Local preview for an indexed item. Only paths stored in the index are ever served."""
-    row = next(iter(one("select path from assets where uuid = ?", (uuid,))), None)
-    if not row or not row[0] or Path(row[0]).suffix.lower() not in THUMB_EXT or not Path(row[0]).is_file():
-        raise HTTPException(404, "no local preview")
-    return Path(row[0])
+PHOTOS_BLOCKED = ("macOS blocked reading the Photos library. Open the project again and choose Allow when macOS "
+                  "asks to access data from other apps.")
+UUID = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+def preview(uuid, keep=True):
+    """media.preview_source as an HTTP answer. Only paths stored in the index are ever served."""
+    try:
+        return media.preview_source(uuid, keep)
+    except media.NoPreview as e:
+        raise HTTPException(404, str(e))
+    except PermissionError:
+        raise HTTPException(403, PHOTOS_BLOCKED)
 
 
 CACHE = {"Cache-Control": "max-age=604800, immutable"}
@@ -270,18 +277,64 @@ CACHE = {"Cache-Control": "max-age=604800, immutable"}
 
 @app.get("/thumb/{uuid}")
 def thumb(uuid: str):
-    """Grid tile: ~400px JPEG (~25 KB), generated once and cached on disk."""
-    src = preview_path(uuid)  # validates uuid against the index before touching the filesystem
+    """Grid tile: ~400px JPEG (~25 KB), generated once and cached on disk. A cached tile is served without
+    touching the index or the Photos library."""
+    if not UUID.fullmatch(uuid):
+        raise HTTPException(404, "no local preview")
     out = THUMBS / uuid[:2] / f"{uuid}.jpg"
     if not out.is_file():
-        make_thumb(src, out)
+        src = preview(uuid, keep=False)  # validates uuid against the index before reading anything
+        try:
+            make_thumb(src, out)
+        except PermissionError:
+            raise HTTPException(403, PHOTOS_BLOCKED)
     return FileResponse(out, media_type="image/jpeg", headers=CACHE)
 
 
 @app.get("/full/{uuid}")
 def full(uuid: str):
-    """Viewer: the full local preview (~1024px)."""
-    return FileResponse(preview_path(uuid), headers=CACHE)
+    """Viewer and player: the full local preview (~1024px), from Kioku's own copy after the first read."""
+    return FileResponse(preview(uuid), headers=CACHE)
+
+
+warming = set()  # collection ids with a warm running
+warming_lock = threading.Lock()
+
+
+@app.post("/collections/{cid}/warm", status_code=202)
+def warm(cid: int):
+    """Copy a project's previews (and build its tiles) in one burst when it opens, so macOS asks about the Photos
+    library at most once per project instead of on every scrub and play. Already-copied items cost nothing."""
+    uuids = [r[0] for r in one("select uuid from collection_items where collection_id = ?", (cid,))]
+    with warming_lock:
+        if cid in warming:
+            return {"items": len(uuids), "started": False}
+        warming.add(cid)
+    threading.Thread(target=run_warm, args=(cid, uuids), daemon=True).start()
+    return {"items": len(uuids), "started": True}
+
+
+def run_warm(cid, uuids):
+    copied = 0
+    try:
+        for u in uuids:
+            try:
+                src = media.preview_source(u)
+                out = THUMBS / u[:2] / f"{u}.jpg"
+                if not out.is_file():
+                    make_thumb(src, out)
+                copied += 1
+            except media.NoPreview:
+                pass  # a video without a poster image: nothing to copy
+            except PermissionError:
+                log.warning("warm %s: macOS blocked reading the Photos library; stopped after %d items", cid, copied)
+                return
+            except Exception:
+                log.exception("warm %s: %s failed", cid, u)
+        log.info("warm %s: %d of %d previews ready", cid, copied, len(uuids))
+    finally:
+        with warming_lock:
+            warming.discard(cid)
 
 
 def make_thumb(src, out):
