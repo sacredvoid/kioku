@@ -42,7 +42,18 @@ HEX = r"^#[0-9a-fA-F]{6}$"
 CAPTIONS_DEFAULT = {"on": False, "style": "bold", "position": "bottom", "font": "arial", "size": "M", "color": "#FFFFFF",
                     "highlight_color": "#FFD400", "highlight": False, "uppercase": False, "max_words": 0}
 XFADE = {"dissolve": "fade", "fade-black": "fadeblack", "wipe-left": "wipeleft",
-         "wipe-right": "wiperight", "slide-left": "slideleft"}
+         "wipe-right": "wiperight", "slide-left": "slideleft", "slide-up": "slideup", "zoom-in": "zoomin",
+         "whip-left": "smoothleft", "whip-right": "smoothright", "flash-white": "fadewhite", "blur": "hblur",
+         "circle": "circleopen", "squeeze": "squeezeh"}
+SYNC_DEFAULT = {"track": None, "grid": "beat", "lead": 1}
+MOTIONS = ("none", "push", "pull", "drift-left", "drift-right", "punch")
+MAX_ZOOM = 0.3          # motion_amount 1 = 1.3x; sources go soft past that
+MOTION_AMOUNT = 0.35    # default: 1.105x
+# ramp: (fraction of the clip's OUTPUT time, speed multiplier) phases; the clip's own audio is silenced
+RAMPS = {"slow-mid": ((0.3, 2.0), (0.4, 0.4), (0.3, 2.0)), "fast-in": ((0.4, 2.5), (0.6, 1.0)),
+         "slow-out": ((0.6, 1.0), (0.4, 0.35))}
+SFX = ("whoosh", "hit", "riser")
+MAX_BEATS = 32
 MIN_TRANS_FRAMES = 3
 SHORT_CLIP = 0.2
 AUDIO_EXT = {".mp3", ".m4a", ".wav", ".aac", ".aiff", ".caf"}
@@ -100,7 +111,7 @@ def look_filters(look):
 def default_spec():
     return {"version": 1, "format": {"aspect": "16:9", "size": 1080, "fps": 30, "fade_in": 0.0, "fade_out": 0.0}, "audio": [], "clip_volume": 1.0, "duck": True,
             "look": {"name": None, "strength": 1.0}, "clips": {}, "transitions": {},
-            "captions": dict(CAPTIONS_DEFAULT)}
+            "captions": dict(CAPTIONS_DEFAULT), "sync": dict(SYNC_DEFAULT), "sfx": {}}
 
 
 def output_size(aspect, size, preview):
@@ -121,7 +132,7 @@ def conn():
 
 def _prune(spec, col):
     ids = {str(i["item_id"]) for i in col["items"]}
-    for k in ("clips", "transitions"):
+    for k in ("clips", "transitions", "sfx"):
         spec[k] = {i: v for i, v in spec[k].items() if i in ids}
 
 
@@ -129,8 +140,9 @@ def _fill(spec):
     """Specs saved before fades / audio existed gain the defaults."""
     for k, v in (("fade_in", 0.0), ("fade_out", 0.0)):
         spec["format"].setdefault(k, v)
-    for k, v in (("audio", []), ("clip_volume", 1.0), ("duck", True)):
+    for k, v in (("audio", []), ("clip_volume", 1.0), ("duck", True), ("sfx", {})):
         spec.setdefault(k, v)
+    spec["sync"] = {**SYNC_DEFAULT, **spec.get("sync", {})}
 
 
 def _read(c, col):
@@ -193,35 +205,75 @@ def _clamp(notes, field, v, lo, hi):
 
 # ---------- timeline (pure)
 
-def compute_timeline(items, spec):
+def ramp_factor(name):
+    """Average speed multiplier of a ramp preset: source seconds used per output second (1 for none)."""
+    return sum(f * k for f, k in RAMPS[name]) if name else 1.0
+
+
+def _grid_frames(grid, fps, lead):
+    """Grid seconds -> strictly increasing output frames, each cut `lead` frames early; frame 0 is always a boundary."""
+    out = [0]
+    for t in grid:
+        f = round(t * fps) - lead
+        if f > out[-1]:
+            out.append(f)
+    return out
+
+
+def compute_timeline(items, spec, grid=None):
+    """grid: output-time seconds of the beat grid (beats.grid) when spec["sync"]["track"] is set and its music was analysed.
+    With a grid every cut lands on a grid point (absolute frames, so nothing drifts); without one, clip lengths come from
+    their in / out points as before."""
     fps = spec["format"]["fps"]
+    sync = spec.get("sync") or SYNC_DEFAULT
+    G = _grid_frames(grid, fps, sync["lead"]) if grid and sync["track"] else None
     warnings, raw = [], []
     for it in items:
         e = spec["clips"].get(str(it["item_id"]), {})
         photo = it["kind"] == "image"
         t0 = it["t0"] or 0.0
+        ramp = None if photo else e.get("ramp")
         if photo:
             speed, a, b = 1.0, 0.0, (it["t1"] - t0 if it["t1"] is not None else STILL_SECONDS)
         else:
             speed = e.get("speed", 1.0)
             a = t0
             b = it["t1"] if it["t1"] is not None else (it["duration"] or STILL_SECONDS)
-        n = max(1, round((b - a) / speed * fps))
+        rate = speed * ramp_factor(ramp)  # source seconds per output second
+        n = max(1, round((b - a) / rate * fps))
         adj, rf = e.get("adjust", {}), e.get("reframe", {})
         pos, pf, pt = rf.get("pos", .5), rf.get("pos_from", .5), rf.get("pos_to", .5)
         reframe = {"center": ("center", .5, .5), "manual": ("manual", pos, pos),
                    "pan": ("pan", pf, pt)}[rf.get("mode", "center")]
         lk = e["look"] if "look" in e else spec["look"]
+        mo = e.get("motion", "none")
         raw.append(dict(item_id=it["item_id"], uuid=it["uuid"], kind="photo" if photo else "video",
-                        src_in=a, src_out=b, speed=speed, volume=0.0 if e.get("mute") else e.get("volume", 1.0),
+                        src_in=a, src_out=b, speed=speed, volume=0.0 if (e.get("mute") or ramp) else e.get("volume", 1.0),
                         adjust=(adj.get("exposure", 0.0), adj.get("contrast", 1.0), adj.get("saturation", 1.0),
                                 adj.get("warmth", 0.0)),
                         look=(lk["name"], lk.get("strength", 1.0)) if lk["name"] else None,
-                        reframe=reframe, frames=n))
-        if n / fps < SHORT_CLIP:
-            warnings.append(f"clip {len(raw)} is only {n / fps:.2f}s long")
+                        reframe=reframe, frames=n,
+                        motion=(mo, e.get("motion_amount", MOTION_AMOUNT)) if mo != "none" else None,
+                        flash=bool(e.get("flash")), shake=bool(e.get("shake")), ramp=ramp))
+        raw[-1]["_rate"], raw[-1]["_avail"] = rate, (None if photo else (it["duration"] or b))
+        raw[-1]["_beats"], raw[-1]["_hit"] = e.get("beats"), (None if photo else e.get("hit"))
     if raw and spec["transitions"].get(str(raw[-1]["item_id"]), {"type": "cut"})["type"] != "cut":
         warnings.append("the transition after the last clip does nothing (there is no next clip)")
+    bounds = None
+    if G:  # cut frames on the grid: clip k covers grid points g_k .. g_k + beats_k
+        unit = (G[-1] - G[0]) / max(len(G) - 1, 1)
+        g, bounds = 0, [0]
+        for r in raw:
+            k = r["_beats"] or max(1, round(r["frames"] / unit))
+            if g + k >= len(G):
+                warnings.append("the edit runs past the beat grid; the last clips keep their own length")
+                bounds = None
+                break
+            g += k
+            bounds.append(G[g])
+        if bounds:
+            for r, x, y in zip(raw, bounds, bounds[1:]):
+                r["frames"] = y - x
     tf = [0] * len(raw)  # transition frames after each clip
     for i in range(len(raw) - 1):
         t = spec["transitions"].get(str(raw[i]["item_id"]))
@@ -236,18 +288,85 @@ def compute_timeline(items, spec):
             warnings.append(f"transition after clip {i + 1} shortened from {want} to {got} frames "
                             "(at most half of each neighbouring clip)")
         tf[i] = got
+    if bounds:  # each overlap is centred on its beat: start_k = bound_k - tf/2, so clips grow by the overlaps they own
+        starts = [0] + [bounds[i + 1] - tf[i] // 2 for i in range(len(raw) - 1)]
+        ends = [starts[i + 1] + tf[i] for i in range(len(raw) - 1)] + [bounds[len(raw)]]
+        for i, r in enumerate(raw):
+            r["frames"] = ends[i] - starts[i]
     segs, start = [], 0
     for i, r in enumerate(raw):
+        n = r["frames"]
+        if r["kind"] == "video" and (bounds or r["_hit"] is not None):
+            r["src_in"], r["src_out"], note = _fit_source(r, n, fps, start, bounds and bounds[i], G)
+            if note:
+                warnings.append(f"clip {i + 1} {note}")
+        if n / fps < SHORT_CLIP:
+            warnings.append(f"clip {i + 1} is only {n / fps:.2f}s long")
+        beat_frames = tuple(f - start for f in (G or ()) if start < f < start + n)
         t = spec["transitions"].get(str(r["item_id"]))
-        segs.append(Seg(start_frame=start, trans_after=(XFADE[t["type"]], tf[i]) if tf[i] else None, **r))
-        start += r["frames"] - tf[i]
+        seg = {k: v for k, v in r.items() if not k.startswith("_")}
+        segs.append(Seg(start_frame=start, trans_after=(XFADE[t["type"]], tf[i]) if tf[i] else None,
+                        beat_frames=beat_frames, **seg))
+        start += n - tf[i]
     total = segs[-1].start_frame + segs[-1].frames if segs else 0
-    ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items]],
+    sfx = tuple(sorted((segs[i + 1].start_frame + (segs[i].trans_after[1] // 2 if segs[i].trans_after else 0), name)
+                       for i, s in enumerate(segs[:-1]) for name in [spec.get("sfx", {}).get(str(s.item_id))] if name))
+    ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items], G],
                        sort_keys=True, separators=(",", ":"))
     return Timeline(fps=fps, aspect=spec["format"]["aspect"], size=spec["format"]["size"], segs=tuple(segs),
                     total_frames=total, warnings=tuple(warnings), edit_hash=hashlib.sha1(ident.encode()).hexdigest(),
                     fade_in=spec["format"].get("fade_in", 0.0), fade_out=spec["format"].get("fade_out", 0.0),
-                    audio=tuple(spec.get("audio", ())), clip_volume=spec.get("clip_volume", 1.0), duck=spec.get("duck", True))
+                    audio=tuple(spec.get("audio", ())), clip_volume=spec.get("clip_volume", 1.0), duck=spec.get("duck", True),
+                    sfx=sfx)
+
+
+def _fit_source(r, n, fps, start, bound, G):
+    """(src_in, src_out, warning or None) for a video clip that must fill n output frames. A hit (source seconds) slides
+    the in point so the hit lands on the grid point nearest to where it would fall (or stays put without a grid).
+    ponytail: hit placement ignores ramps (it assumes a constant rate)."""
+    rate, avail = r["_rate"], r["_avail"]
+    need = n / fps * rate
+    a, note = r["src_in"], None
+    if r["_hit"] is not None:
+        h = r["_hit"]
+        at = (h - a) / rate * fps  # frames from clip start where the hit falls now
+        pts = [f - start for f in (G or ()) if start <= f <= start + n]
+        if bound is not None:
+            pts.append(bound - start)
+        if pts:
+            p = min(pts, key=lambda p: abs(p - at))
+            a = h - p / fps * rate
+        a = min(max(a, 0.0), max(avail - need, 0.0))
+    b = a + need
+    if b > avail + 1e-6:
+        note = f"needs {need:.2f}s of source but only {avail - a:.2f}s is there; its last frame holds"
+        b = avail
+    return a, b, note
+
+
+def grid_for(spec):
+    """(output-time beat grid in seconds, or None; warning or None) for the spec's sync track. Analyses the music on first use
+    (a few seconds, cached by file)."""
+    sid = (spec.get("sync") or {}).get("track")
+    if not sid:
+        return None, None
+    t = next((t for t in spec.get("audio", ()) if t["id"] == sid), None)
+    if not t:
+        return None, f"beat sync is on but audio track {sid!r} is gone; cuts are not synced"
+    import beats
+    try:
+        return beats.grid(t, beats.analyze(t["path"]), spec["sync"]["grid"], MAX_SECONDS), None
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as e:
+        return None, f"could not find the beat of {Path(t['path']).name} ({str(e)[:120]}); cuts are not synced"
+
+
+def timeline_for(items, spec):
+    g, why = grid_for(spec)
+    tl = compute_timeline(items, spec, g)
+    if why:
+        from dataclasses import replace
+        tl = replace(tl, warnings=(why, *tl.warnings))
+    return tl, g
 
 
 def snapshot(cid):
@@ -256,7 +375,7 @@ def snapshot(cid):
     _require_project(col)
     with conn() as c:
         spec, _ = _read(c, col)
-    return compute_timeline(col["items"], spec), spec
+    return timeline_for(col["items"], spec)[0], spec
 
 
 # ---------- routes
@@ -286,6 +405,9 @@ class EditPatch(BaseModel):
     fade_out: F = 0.0
     clip_volume: F = 1.0               # 0 to 1: scales every clip's own audio
     duck: bool = True                  # lower clip audio under the audio tracks
+    sync_track: str | None = None      # audio track id whose beat the cuts follow; null or "none" turns sync off
+    sync_grid: Literal["beat", "half", "downbeat"] = "beat"
+    sync_lead: int = Field(1, ge=0, le=3)   # frames each cut lands before its beat
 
 
 class AudioPut(BaseModel):
@@ -316,12 +438,20 @@ class ClipPatch(BaseModel):
     reframe_to: F | None = None
     mute: bool | None = None           # silence this clip's own audio
     captions: bool | None = None       # caption this clip (project captions must also be on)
+    beats: int | None = Field(None, ge=0, le=MAX_BEATS)   # grid units this clip lasts when synced; 0 = from its length
+    hit: F | None = None               # source seconds that must land on a beat; negative clears
+    motion: Literal["none", "push", "pull", "drift-left", "drift-right", "punch"] | None = None
+    motion_amount: F | None = None     # 0 to 1 (1 = 1.3x zoom)
+    flash: bool | None = None
+    shake: bool | None = None
+    ramp: Literal["none", "slow-mid", "fast-in", "slow-out"] | None = None
 
 
 class TransitionPut(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    type: Literal["cut", "dissolve", "fade-black", "wipe-left", "wipe-right", "slide-left"]
+    type: Literal["cut", *XFADE]
     duration: F = 0.5
+    sfx: Literal["none", "whoosh", "hit", "riser"] | None = None   # sound on this seam; omitted keeps it
 
 
 # field -> (path in the clip entry, default, lo, hi); lo is None for enums
@@ -334,6 +464,9 @@ CLIP_FIELDS = {
     "reframe_pos": (("reframe", "pos"), .5, 0, 1), "reframe_from": (("reframe", "pos_from"), .5, 0, 1),
     "reframe_to": (("reframe", "pos_to"), .5, 0, 1),
     "mute": (("mute",), False, None, None),
+    "beats": (("beats",), 0, None, None), "motion": (("motion",), "none", None, None),
+    "motion_amount": (("motion_amount",), MOTION_AMOUNT, 0, 1), "flash": (("flash",), False, None, None),
+    "shake": (("shake",), False, None, None), "ramp": (("ramp",), "none", None, None),
 }
 
 
@@ -350,8 +483,9 @@ def get_edit(cid: int):
     _require_project(col)
     with conn() as c:
         spec, rev = _read(c, col)
-    tl = compute_timeline(col["items"], spec)
+    tl, grid = timeline_for(col["items"], spec)
     return {"spec": spec, "rev": rev, "edit_hash": tl.edit_hash, "duration": tl.duration,
+            "grid": [t for t in grid if t <= tl.duration + 0.01][:400] if grid else None,
             "fps": tl.fps, "total_frames": tl.total_frames,
             "clips": [{"item_id": s.item_id, "uuid": s.uuid, "start": s.start_frame / tl.fps,
                        "end": (s.start_frame + s.frames) / tl.fps, "frames": s.frames} for s in tl.segs],
@@ -360,13 +494,25 @@ def get_edit(cid: int):
                         "transitions": ["cut", *XFADE], "caption_styles": list(CAPTION_STYLES),
                         "caption_fonts": list(CAPTION_FONTS), "caption_positions": list(CAPTION_POSITIONS),
                         "caption_sizes": list(CAPTION_SIZES),
-                        "audio_ext": sorted(AUDIO_EXT), "max_audio": MAX_AUDIO, "max_fade": MAX_FADE}}
+                        "audio_ext": sorted(AUDIO_EXT), "max_audio": MAX_AUDIO, "max_fade": MAX_FADE,
+                        "motions": list(MOTIONS), "ramps": ["none", *RAMPS], "sfx": ["none", *SFX],
+                        "sync_grids": ["beat", "half", "downbeat"]}}
 
 
 @router.patch("/collections/{cid}/edit")
 def patch_edit(cid: int, body: EditPatch):
     given, flipped = body.model_fields_set, []
     picks = None
+    if body.sync_track not in (None, "none") and "sync_track" in given:  # find the beat before the write lock
+        spec0, _ = load(cid)
+        t = next((t for t in spec0["audio"] if t["id"] == body.sync_track), None)
+        if not t:
+            raise HTTPException(422, f"no audio track {body.sync_track!r}; add the music first (ids: {[t['id'] for t in spec0['audio']]})")
+        import beats
+        try:
+            beats.analyze(t["path"])
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+            raise HTTPException(422, f"could not find the beat of {Path(t['path']).name}: {str(e)[:200]}")
     if body.captions and "captions" in given:  # speech guesses read audio files: do them before the write lock
         import captions
         spec0, _ = load(cid)
@@ -390,6 +536,14 @@ def patch_edit(cid: int, body: EditPatch):
             spec["clip_volume"] = _clamp(notes, "clip_volume", body.clip_volume, 0, 1)
         if "duck" in given:
             spec["duck"] = body.duck
+        if "sync_track" in given:
+            tid = None if body.sync_track in (None, "none") else body.sync_track
+            if tid and not any(t["id"] == tid for t in spec["audio"]):
+                raise HTTPException(422, f"no audio track {tid!r}")
+            spec["sync"]["track"] = tid
+        for k in ("grid", "lead"):
+            if f"sync_{k}" in given:
+                spec["sync"][k] = getattr(body, f"sync_{k}")
         if "captions" in given:
             flipped.append(body.captions and not spec["captions"]["on"])
             spec["captions"]["on"] = body.captions
@@ -435,6 +589,10 @@ def patch_clip(cid: int, item_id: int, body: ClipPatch):
             raise HTTPException(422, "photos cannot change speed")
         if item["kind"] == "image" and body.captions:
             raise HTTPException(422, "photos have no speech to caption")
+        if item["kind"] == "image" and body.ramp not in (None, "none"):
+            raise HTTPException(422, "photos cannot ramp speed; use motion instead")
+        if item["kind"] == "image" and body.hit is not None and body.hit >= 0:
+            raise HTTPException(422, "photos have no moment to land on a beat")
         notes, e = [], spec["clips"].setdefault(str(item_id), {})
         for k in given & CLIP_FIELDS.keys():
             (*parents, leaf), default, lo, hi = CLIP_FIELDS[k]
@@ -463,6 +621,18 @@ def patch_clip(cid: int, item_id: int, body: ClipPatch):
                         raise HTTPException(422, "pick a look first; there is no project look to adjust")
                     _set_look(e, "look", spec["look"]["name"])
                 e["look"]["strength"] = _clamp(notes, "look_strength", body.look_strength, 0, 1)
+        if "hit" in given:
+            if body.hit is None or body.hit < 0:
+                e.pop("hit", None)
+            else:
+                dur = item["duration"] or 0
+                if dur and body.hit > dur:
+                    raise HTTPException(422, f"hit must be within the source (0 to {dur:.2f}s)")
+                e["hit"] = round(body.hit, 3)
+        if body.shake:
+            n = sum(1 for k, v in spec["clips"].items() if v.get("shake"))
+            if n > max(1, len(col["items"]) // 2):
+                raise HTTPException(422, "shake on more than half the clips looks cheap; keep it for the peaks")
         for p in ("adjust", "reframe"):
             if not e.get(p):
                 e.pop(p, None)
@@ -482,6 +652,11 @@ def put_transition(cid: int, item_id: int, body: TransitionPut):
     def fn(spec, col):
         if not any(i["item_id"] == item_id for i in col["items"]):
             raise HTTPException(404, "no such item")
+        if "sfx" in body.model_fields_set:
+            if body.sfx in (None, "none"):
+                spec["sfx"].pop(str(item_id), None)
+            else:
+                spec["sfx"][str(item_id)] = body.sfx
         if body.type == "cut":
             spec["transitions"].pop(str(item_id), None)
             return []
@@ -612,6 +787,8 @@ def delete_audio(cid: int, track_id: str):
         if not any(t["id"] == track_id for t in spec["audio"]):
             raise HTTPException(404, "no such audio track")
         spec["audio"] = [t for t in spec["audio"] if t["id"] != track_id]
+        if spec["sync"]["track"] == track_id:
+            spec["sync"]["track"] = None
         return []
 
     return mutate(cid, fn)

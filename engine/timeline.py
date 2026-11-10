@@ -17,6 +17,11 @@ class Seg:
     frames: int                    # output length in frames at Timeline.fps
     start_frame: int               # position on the output timeline, after transition overlaps
     trans_after: tuple[str, int] | None         # (xfade name, frames) joining this seg to the next
+    motion: tuple[str, float] | None = None     # (edit.MOTIONS name, amount 0..1)
+    flash: bool = False                         # white pulse on the first frame
+    shake: bool = False                         # short decaying shake on each beat inside the clip
+    ramp: str | None = None                     # edit.RAMPS name; own audio already silenced via volume
+    beat_frames: tuple[int, ...] = ()           # grid points inside the clip, frames from its first frame
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,7 @@ class Timeline:
     audio: tuple = ()              # extra tracks: dicts {id, path, start, in, out, volume, fade_in, fade_out}
     clip_volume: float = 1.0       # scales every clip's own audio in the final mix
     duck: bool = True              # lower clip audio under the extra tracks
+    sfx: tuple = ()                # (output frame, edit.SFX name) sound effects on seams
 
     @property
     def duration(self) -> float:

@@ -32,7 +32,7 @@ from timeline import Seg
 
 router = APIRouter()
 log = logging.getLogger("kioku.render")
-RENDER_V = 2  # bump to invalidate every cached segment (e.g. when a look preset changes)
+RENDER_V = 3  # bump to invalidate every cached segment (e.g. when a look preset changes)
 CACHE = core.DATA / "render_cache"  # /final and /preview, LRU by mtime
 RENDERS = core.DATA / "renders"  # /<cid>/preview.mp4, .srt, <mode>-sheet.jpg
 EXPORTS = projects.EXPORTS  # finals go to EXPORTS/<slug>/
@@ -223,7 +223,9 @@ def src_id(seg, mode):
 def seg_key(seg, sid, mode, dims, fps):
     d = {"v": RENDER_V, "mode": mode, "src": sid, "in": seg.src_in, "out": seg.src_out, "speed": seg.speed,
          "volume": seg.volume, "adjust": seg.adjust, "look": seg.look, "reframe": seg.reframe, "dims": dims,
-         "fps": fps, "kind": seg.kind}
+         "fps": fps, "kind": seg.kind, "frames": seg.frames}
+    if seg.motion or seg.flash or seg.shake or seg.ramp:  # absent when unused, so older cached segments keep their keys
+        d.update(motion=seg.motion, flash=seg.flash, shake=seg.shake, ramp=seg.ramp, beats=seg.beat_frames)
     return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -256,8 +258,61 @@ def atempo(speed):
     return out
 
 
-def seg_graph(seg, src, dims, fps, mode):
+def ramp_setpts(ramp, S, L):
+    """setpts expression (after PTS-STARTPTS) mapping source time T to output time for a ramp preset at base speed S over
+    an output length L: piecewise linear, so speed is constant inside each phase."""
     import edit
+    so = oo = 0.0
+    parts = []  # (source end of phase, output start, source start, rate)
+    for frac, k in edit.RAMPS[ramp]:
+        r = S * k
+        parts.append((so + frac * L * r, oo, so, r))
+        so += frac * L * r
+        oo += frac * L
+    expr = f"{_n(parts[-1][1], 6)}+(T-{_n(parts[-1][2], 6)})/{_n(parts[-1][3], 6)}"
+    for end, o0, s0, r in reversed(parts[:-1]):
+        expr = f"if(lt(T,{_n(end, 6)}),{_n(o0, 6)}+(T-{_n(s0, 6)})/{_n(r, 6)},{expr})"
+    return f"({expr})/TB"
+
+
+def motion_filter(seg):
+    """perspective filter (per frame, subpixel, so slow zooms do not jitter like zoompan) for motion, punch and shake.
+    `in` is the output frame index: this runs after fps. '' when the clip does not move."""
+    import edit
+    name, amt = seg.motion or ("none", 0.0)
+    A = edit.MAX_ZOOM * max(0.0, min(amt, 1.0))
+    N = max(seg.frames - 1, 1)
+    u = f"min(in/{N},1)"
+    z, dx = "1", "0"
+    if name == "push":
+        z = f"(1+{_n(A)}*{u})"
+    elif name == "pull":
+        z = f"(1+{_n(A)}*(1-{u}))"
+    elif name in ("drift-left", "drift-right"):
+        zc = 1 + max(A, 0.05)
+        m = (1 - 1 / zc) / 2 * 0.9
+        z = _n(zc)
+        dx = f"({'' if name == 'drift-left' else '-'}{_n(m)}*(1-2*{u}))"
+    elif name == "punch":
+        pts = seg.beat_frames[:24] or (seg.frames // 2,)
+        z = f"(1+{_n(A)}*mod({'+'.join(f'gte(in,{p})' for p in pts)},2))"
+    dy = "0"
+    if seg.shake and seg.beat_frames:
+        z = f"({z}*1.06)"  # room to move without showing edges: 0.012 offset needs 1/(1-0.024) zoom at least
+        terms = [f"gte(in,{p})*exp(-(in-{p})/2.5)" for p in seg.beat_frames[:24]]
+        env = "(" + "+".join(terms) + ")"
+        dx = f"({dx}+0.012*{env}*sin(in*2.1))"
+        dy = f"(0.012*{env}*cos(in*2.7))"
+    if z == "1" and dx == "0":
+        return ""
+    hw, hh = f"(W/(2*{z}))", f"(H/(2*{z}))"
+    cx, cy = f"(W/2+{dx}*W)", f"(H/2+{dy}*H)"
+    x0, x1, y0, y1 = f"{cx}-{hw}", f"{cx}+{hw}", f"{cy}-{hh}", f"{cy}+{hh}"
+    return (f"perspective=x0='{x0}':y0='{y0}':x1='{x1}':y1='{y0}':x2='{x0}':y2='{y1}':x3='{x1}':y3='{y1}'"
+            ":interpolation=cubic:eval=frame")
+
+
+def seg_graph(seg, src, dims, fps, mode):
     W, H = dims
     L = seg.frames / fps
     S = seg.speed
@@ -268,7 +323,16 @@ def seg_graph(seg, src, dims, fps, mode):
                   "format=p010le" if src.bits > 8 else "format=nv12", "format=yuv420p"]
         if TRANSPOSE[src.rot]:
             chain.append(TRANSPOSE[src.rot])
-    chain.append(f"setpts=(PTS-STARTPTS)/{_n(S, 6)}" if S != 1 else "setpts=PTS-STARTPTS")
+    if seg.ramp:
+        chain += ["setpts=PTS-STARTPTS", f"setpts='{ramp_setpts(seg.ramp, S, L)}'"]
+    else:
+        chain.append(f"setpts=(PTS-STARTPTS)/{_n(S, 6)}" if S != 1 else "setpts=PTS-STARTPTS")
+    # hold the last frame when the source is shorter than the clip (beat sync), then fix the frame rate here so the motion
+    # expressions below can count output frames
+    import edit
+    rate = S * edit.ramp_factor(seg.ramp)
+    hold = L - (seg.src_out - seg.src_in) / rate if seg.kind == "video" else 0.0
+    chain += [f"tpad=stop_mode=clone:stop_duration={_n(max(1.0, hold + 0.5), 3)}", f"fps={fps}"]
     cw, ch = crop_box(src.w, src.h, W, H)
     if (cw, ch) != (src.w, src.h):
         mode_, a, b = seg.reframe
@@ -281,6 +345,9 @@ def seg_graph(seg, src, dims, fps, mode):
             chain.append(f"crop={cw}:{ch}:x='(iw-{cw})*{e}':y=0")
         else:
             chain.append(f"crop={cw}:{ch}:x=0:y='(ih-{ch})*{e}'")
+    mf = motion_filter(seg)
+    if mf:
+        chain.append(mf)
     chain.append(f"scale={W}:{H}:flags={'bicubic' if mode == 'preview' else 'lanczos'}")
     look = edit.look_filters(seg.look)
     if look:
@@ -291,9 +358,11 @@ def seg_graph(seg, src, dims, fps, mode):
     if wa:
         k = wa
         chain.append(f"colorbalance=rs={_n(0.15 * k)}:bs={_n(-0.15 * k)}:rm={_n(0.1 * k)}:bm={_n(-0.1 * k)}")
-    chain += ["tpad=stop_mode=clone:stop_duration=1", f"fps={fps}", "format=yuv420p", "setsar=1"]
+    if seg.flash:
+        chain.append("eq=brightness='0.55*exp(-t*14)':contrast='1-0.25*exp(-t*14)':eval=frame")
+    chain += ["format=yuv420p", "setsar=1"]
     g = v[0] + ",".join(chain) + "[v]"
-    if seg.kind == "video" and src.has_audio:
+    if seg.kind == "video" and src.has_audio and not seg.ramp:
         a = atempo(S) + [f"volume={_n(seg.volume)}", "aresample=48000", "aformat=channel_layouts=stereo",
                          "asetpts=PTS-STARTPTS", f"apad=whole_dur={_n(L, 6)}"]
         g += ";\n[0:a:0]" + ",".join(a) + "[a]"
@@ -359,6 +428,41 @@ def _audio_tail(acc, fx, first_in):
     return p
 
 
+SFX_DIR = core.DATA / "sfx"
+# (aevalsrc / anoisesrc graph, seconds, seconds before the seam the sound starts). Synthesized, so there is nothing to licence.
+SFX_SYNTH = {
+    "whoosh": ("anoisesrc=c=pink:d=0.6:a=0.6,highpass=f=500,lowpass=f=5000,afade=t=in:d=0.42:curve=exp,afade=t=out:st=0.42:d=0.18", 0.6, 0.4),
+    "hit": ("aevalsrc='0.9*sin(2*PI*(45+90*exp(-t*28))*t)*exp(-t*7)+0.25*(random(0)-0.5)*exp(-t*60)':d=0.7", 0.7, 0.0),
+    "riser": ("aevalsrc='0.35*sin(2*PI*(180+1600*t*t/2.25)*t)+0.25*(random(0)-0.5)':d=1.5,highpass=f=300,afade=t=in:d=1.45:curve=qsin", 1.5, 1.5),
+}
+
+
+def sfx_file(name):
+    """data/sfx/<name>.wav, synthesized on first use."""
+    graph, _, _ = SFX_SYNTH[name]
+    out = SFX_DIR / f"{name}.wav"
+    if not out.is_file():
+        SFX_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = SFX_DIR / f"{name}.{os.getpid()}.wav"
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", graph, "-ac", "2", "-ar", "48000", str(tmp)],
+                       check=True, capture_output=True, timeout=60)
+        tmp.replace(out)
+    return out
+
+
+def sfx_tracks(tl):
+    """The seam sound effects as audio-track dicts (the same shape as spec audio), so the finish pass mixes them like music.
+    ponytail: they also key the ducking, which dips clip sound for the length of the effect."""
+    out = []
+    for f, name in tl.sfx:
+        _, dur, before = SFX_SYNTH[name]
+        at = f / tl.fps - before
+        cut = max(0.0, -at)  # an effect right at the start loses its lead-in
+        out.append({"id": f"sfx{f}", "path": str(sfx_file(name)), "start": at + cut, "in": cut, "out": dur, "volume": 0.8,
+                    "fade_in": 0.0, "fade_out": 0.0})
+    return out
+
+
 def audio_fx(tl, win, D):
     """What the finish pass needs beyond the clips: fades, clip volume, ducking and the extra tracks cut to the output
     (win = (start_frame, end_frame) of a window preview, D = output seconds). Fades only apply where the window
@@ -367,7 +471,7 @@ def audio_fx(tl, win, D):
     fi = min(tl.fade_in, D / 2) if o == 0 else 0.0
     fo = min(tl.fade_out, D / 2) if not win or win[1] == tl.total_frames else 0.0
     tracks = []
-    for t in tl.audio:
+    for t in (*tl.audio, *sfx_tracks(tl)):
         delay = t["start"] - o
         a = t["in"] + max(0.0, -delay)
         dur = min(t["out"] - a, D - max(delay, 0.0))
