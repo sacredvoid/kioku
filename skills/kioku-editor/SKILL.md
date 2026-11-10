@@ -55,6 +55,14 @@ Photos have no scenes. Look at every candidate photo with `look_at([uuids])` (up
 5. Seams: mostly hard cuts. `whip-left` / `whip-right` / `zoom-in` with `sfx="whoosh"` for a change of place, `flash-white` into the drop, `sfx="hit"` on a hard cut at the drop. `ramp="slow-mid"` for one hero action shot.
 6. Then render a preview and check the sheet: if it feels busy, remove effects before adding new ones.
 
+### Edit like a reference
+
+When the user gives a reference video ("cut it like this one", a local .mp4/.mov file; links are not downloaded):
+
+1. `analyze_reference(path)` first. Look at its contact sheet, then follow the PLAN: `sync_grid`, the `beats` pattern across the clips, the motion/flash/punch budgets, the transition mix with sounds, captions, and the look.
+2. Build the cut as in 4b, using the plan's numbers instead of your own habits. Keep Rules: effects stay within the caps.
+3. `render_preview`, then `compare_to_reference(collection_id, path)` once. Fix the top 2 gaps only and render again. Do not chase every number.
+
 ## 5. Polish (only if the brief or the user asks for it; a plain cut needs none of this)
 
 - One `set_edit` call first: `aspect="9:16"` for a reel, story or "vertical"; one `look` for the whole edit at `look_strength` 0.6 to 0.8 unless the user wants it strong (names are in `get_edit`); `captions=true` only if the clips contain speech, never on a montage with music. Turning captions on starts a transcription: check `get_edit` `captions_status.pending` reaches 0 before rendering. If `set_edit` says whisper is missing, tell the user the install command it returns.

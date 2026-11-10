@@ -426,5 +426,38 @@ def render_status(collection_id: int, mode: str = "preview", wait_seconds: int =
         return [{**j, "sheet_error": "no contact sheet available"}]
 
 
+# ---------- style reference
+
+@server.tool(annotations=READ_ONLY)
+def analyze_reference(path: str) -> list:
+    """Learn the style of a reference video the user gave you (a local .mp4/.mov/.m4v file, up to 15 minutes; links are
+    not downloaded). Measures pacing in seconds and beats, cuts on the beat, transitions, camera motion, punch-ins, flashes,
+    on-screen text and color, then returns a short summary, a concrete PLAN in Kioku's own settings (sync grid, beats per
+    clip, motion/flash budgets, transitions with sounds, captions, look) and a contact sheet of the reference's shots.
+    Takes about 10 s per minute of video; the result is cached. Follow the plan with set_edit, set_clip_fx, set_transition."""
+    res = call("POST", "/references/analyze", {"path": path}, timeout=900)
+    if "error" in res:
+        return [res]
+    out: list = [res["summary"] + f"\n\nreference_id: {res['id']}" + (f"\nlook cube: {res['profile']['cube']}" if res["profile"].get("cube") else "")]
+    try:
+        with urllib.request.urlopen(API + res["sheet"], timeout=60) as r:
+            out.append(Image(data=r.read(), format="jpeg"))
+    except (urllib.error.URLError, TimeoutError):
+        out.append("no contact sheet available")
+    return out
+
+
+@server.tool(annotations=READ_ONLY)
+def compare_to_reference(collection_id: int, path: str) -> dict:
+    """After render_preview, measure the project's preview the same way as the reference video at path and list the
+    biggest gaps (pacing, sync, motion, transitions, text, color) as short fixes. Call it once, fix the top two gaps,
+    and stop: matching every number would make the edit worse."""
+    res = call("POST", "/references/compare", {"path": path, "collection_id": collection_id}, timeout=900)
+    if "error" in res:
+        return res
+    return {"gaps": res["gaps"] or ["No big gaps: the preview matches the reference closely."], "preview": res["mine"],
+            **({"warning": "the preview is older than the latest edit; render_preview again first"} if res.get("stale") else {})}
+
+
 if __name__ == "__main__":
     server.run()
