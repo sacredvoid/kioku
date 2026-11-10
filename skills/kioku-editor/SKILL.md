@@ -59,16 +59,18 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 
 - `add_to_collection` the chosen moments. Each moment is its own item; the same uuid can appear more than once.
 - `set_clip_range(item_id, in, out)` from the moment's t0/t1 (a little wider is fine when synced: the beat grid sets the final length).
-- Variety: alternate wide and close, people and places. Never two near-identical shots back to back. Strongest moment near the end or on the music's drop.
+- Variety: alternate wide and close, people and places. Never two near-identical shots back to back. Strongest moment on the music's drop (real time from `fit` / `get_edit`), else near the end.
 - Reorder with `move_clip` (positions are floats: 2.5 goes between 2 and 3).
 
 ## 5. Music and rhythm (snappy, calm and reference edits)
 
 1. Music: `search_sounds` then `add_sound`, or `set_audio` with the user's own file. Pick music that matches the style (energy, tempo).
-2. `set_edit(sync_track=<track id>)`. Every cut now lands on the beat. `sync_grid`: `beat` for snappy, `half` or `downbeat` for calm. Read `grid` from `get_edit` to think in beats.
-3. Shot lengths in beats with `set_clip_fx(beats=)`. Snappy: mostly 2, bursts of 1 (2 to 4 shots in a row), a 4 or 8 for the hero shot. Calm: 4 to 8. Never the same length 4 times in a row.
-4. `hit`: set it to the moment's `peak` (the jump, the splash, the laugh starting) so it lands on a beat.
-5. Check `get_edit`: the total should land within ±15% of the target length. Drop or add shots to fit; don't stretch the beats.
+2. Fit and read the music (you cannot hear it): `set_audio(track_id, fit=true, target_seconds=<planned length>)` (or `fit=true` on `add_sound`; for reels add `drop_at` at 30 to 40% of the length). It picks `source_in` / `source_out` on bar lines, puts the drop where you asked and fades out over the last bar. Then `analyze_music(collection_id, track_id)`: tempo, `energy` (one digit 0 to 9 per bar), `sections`, `drop_s`. The fit result gives `drop_out_s` (output seconds where the drop lands) and `music_end_s` (where the music ends). Raw digits beat the guesses: if the sections or the drop look wrong for the song, say so and use the digits. `drop_s` null means no clear drop: open on the intro and put the hero shot on the loudest section.
+3. `set_edit(sync_track=<track id>)`. Every cut now lands on the beat. `sync_grid`: `beat` for snappy, `half` or `downbeat` for calm. Read `grid` from `get_edit` to think in beats.
+4. Shot lengths in beats with `set_clip_fx(beats=)`. Snappy: mostly 2, bursts of 1 (2 to 4 shots in a row), a 4 or 8 for the hero shot. Calm: 4 to 8. Never the same length 4 times in a row. Follow the energy: low bars (0 to 3) get 4 to 8 beat shots and calm motion, high bars (7 to 9) get 1 and 2 beat shots. `get_edit` gives each clip the energy digit under it. Open on the intro, not mid-chorus, unless the edit is under 15 s.
+5. Hero shot on the drop: the clip whose start is closest to `drop_out_s` (`get_edit` `music.drop_out_s`) is your strongest moment; give it `flash` or a `hit` there. Reorder with `move_clip` until it is, never invent a drop time.
+6. `hit`: set it to the moment's `peak` (the jump, the splash, the laugh starting) so it lands on a beat.
+7. Check `get_edit`: the total should land within ±15% of the target length, ideally ending at `music_end_s` so the last clip sits on the final bar and holds through the fade. Drop or add shots to fit; don't stretch the beats. If the music is shorter than the edit, say so in the summary.
 
 ## 6. Motion, seams, sound
 

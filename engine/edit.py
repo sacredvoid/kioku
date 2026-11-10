@@ -469,6 +469,9 @@ class AudioPut(BaseModel):
     volume: F | None = None            # 0 to 2
     fade_in: F | None = None
     fade_out: F | None = None
+    fit: bool = False                  # pick in / out / start / fades from the music map (music.fit); explicit values win
+    target_seconds: F | None = None    # fit: output length to fill; default the edit's current length
+    drop_at: F | None = None           # fit: output seconds where the track's drop should land
 
 
 class ClipPatch(BaseModel):
@@ -526,6 +529,34 @@ def _set_look(holder, key, name):
     holder[key] = {"name": None if name == "none" else name, "strength": (holder.get(key) or {}).get("strength", 1.0)}
 
 
+def _sync_music(spec):
+    """(track, cached music map) of the sync track, or (None, None). Never analyses: get_edit stays fast."""
+    sid = (spec.get("sync") or {}).get("track")
+    t = next((t for t in spec.get("audio", ()) if t["id"] == sid), None) if sid else None
+    if not t:
+        return None, None
+    import music
+    return t, music.cached(t["path"])
+
+
+def _clip_energy(spec, at):
+    """0 to 9 energy of the music bar under output time `at`, when the sync track has been mapped."""
+    t, m = _sync_music(spec)
+    if not m:
+        return None
+    import music
+    return music.level_at(m, t["in"] + at - t["start"])
+
+
+def _music_summary(spec):
+    t, m = _sync_music(spec)
+    if not m:
+        return None
+    d = m["drop_s"]
+    at = None if d is None else round(t["start"] + d - t["in"], 3)
+    return {"track": t["id"], "drop_out_s": at if at is not None and 0 <= at <= (t["out"] or 1e9) - t["in"] + t["start"] else None}
+
+
 @router.get("/collections/{cid}/edit")
 def get_edit(cid: int):
     col = library.get_collection(cid)
@@ -537,7 +568,10 @@ def get_edit(cid: int):
             "grid": [t for t in grid if t <= tl.duration + 0.01][:400] if grid else None,
             "fps": tl.fps, "total_frames": tl.total_frames,
             "clips": [{"item_id": s.item_id, "uuid": s.uuid, "start": s.start_frame / tl.fps,
-                       "end": (s.start_frame + s.frames) / tl.fps, "frames": s.frames} for s in tl.segs],
+                       "end": (s.start_frame + s.frames) / tl.fps, "frames": s.frames,
+                       **({"energy": lv} if (lv := _clip_energy(spec, s.start_frame / tl.fps)) is not None else {})}
+                      for s in tl.segs],
+            "music": _music_summary(spec),
             "warnings": list(tl.warnings),
             "options": {"looks": [*sorted(LOOKS), *LUTS], "aspects": list(ASPECTS), "sizes": list(SIZES), "fps": list(FPS),
                         "transitions": ["cut", *XFADE], "caption_styles": list(CAPTION_STYLES),
@@ -872,6 +906,27 @@ def put_audio(cid: int, track_id: str, body: AudioPut):
         raise HTTPException(422, "audio id must be 1 to 32 letters, digits, - or _")
     given = body.model_fields_set
     info = audio_info(body.path) if body.path else None  # probe before the write lock
+    plan = None
+    if body.fit:
+        import music
+        spec0, _ = load(cid)
+        old0 = next((t for t in spec0["audio"] if t["id"] == track_id), None)
+        if not info and not old0:
+            raise HTTPException(422, "path is required for a new track")
+        target = body.target_seconds
+        if target is None:
+            col0 = library.get_collection(cid)
+            target = timeline_for(col0["items"], spec0)[0].duration
+        if not target > 0:
+            raise HTTPException(422, "the edit has no length yet: pass target_seconds")
+        try:
+            plan = music.fit(music.analyze(info[0] if info else old0["path"]), min(target, MAX_SECONDS), body.drop_at)
+        except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as e:
+            raise HTTPException(422, f"could not fit the music: {str(e)[:200]}")
+        given = given | {k for k in ("start", "fade_in", "fade_out") if getattr(body, k) is None}
+        body = body.model_copy(update={"in_": body.in_ if body.in_ is not None else plan["in"],
+                                       "out": body.out if body.out is not None else plan["out"],
+                                       **{k: plan[k] for k in ("start", "fade_in", "fade_out") if getattr(body, k) is None}})
 
     def fn(spec, col):
         tracks = spec["audio"]
@@ -899,7 +954,20 @@ def put_audio(cid: int, track_id: str, body: AudioPut):
         spec["audio"] = [t if x["id"] == track_id else x for x in tracks] if old else [*tracks, t]
         return notes
 
-    return mutate(cid, fn)
+    res = mutate(cid, fn)
+    if plan:
+        res["fit"] = {k: v for k, v in plan.items() if k in ("in", "out", "drop_out_s", "music_end_s", "notes")}
+    return res
+
+
+@router.get("/collections/{cid}/edit/audio/{track_id}/map")
+def audio_map(cid: int, track_id: str):
+    """Music map of a track: tempo, bar starts, energy per bar (digits 0 to 9), sections, drop_s (source seconds or null)."""
+    import music
+    try:
+        return music.analyze(_track(cid, track_id))
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as e:
+        raise HTTPException(422, f"could not analyse the music: {str(e)[:200]}")
 
 
 @router.delete("/collections/{cid}/edit/audio/{track_id}")

@@ -194,6 +194,9 @@ class SoundAdd(BaseModel):
     volume: float | None = None
     fade_in: float | None = None
     fade_out: float | None = None
+    fit: bool = False
+    target_seconds: float | None = None
+    drop_at: float | None = None
 
 
 @router.post("/sounds/{sid}/add")
@@ -206,7 +209,8 @@ def add(sid: str, body: SoundAdd):
                   (sid, s["title"], s["creator"], s["license"], s["license_version"], s["license_url"],
                    s["attribution"], s["provider"], record(sid).get("foreign_landing_url"), str(path), time.time()))
     tid = body.track_id or f"s{sid[:8]}"
-    put = edit.AudioPut(path=str(path), start=body.start, volume=body.volume, fade_in=body.fade_in, fade_out=body.fade_out)
+    put = edit.AudioPut(path=str(path), start=body.start, volume=body.volume, fade_in=body.fade_in, fade_out=body.fade_out,
+                       fit=body.fit, target_seconds=body.target_seconds, drop_at=body.drop_at)
     out = edit.put_audio(body.cid, tid, put)
     return {**out, "track_id": tid, "credit": s["attribution"] if s["needs_credit"] else None}
 
