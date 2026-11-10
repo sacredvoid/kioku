@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.1 (2026-11-09)
+
+- Replace a leftover engine from another version at launch; Month says to pick a year
+
 ## v0.3.0 (2026-11-09)
 
 - Ask page: sections as cards with real headings
