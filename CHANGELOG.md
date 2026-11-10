@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.1 (2026-11-10)
+
+- Fix: cap concurrent Apple Vision calls at 2; parallel find_moments deadlocked Vision's capacity queue and froze edits
+
 ## v0.7.0 (2026-11-10)
 
 - Fable audit fixes: engine stops for good (process group, waits on the pid, then SIGKILL; busy engine not mistaken for stale); edits interrupted by a restart show as failed with Retry; request timeouts and cancellable iCloud analyze; Ask box never detached; drop the :has() rule that could hide the live panel in WebKit; pill Show works from any page; scoped #empty/#project; cheaper glow
