@@ -707,6 +707,7 @@ async function loadAudio(cid: number, box: HTMLElement) {
     return w;
   };
   const list = el("ul", "tracks");
+  const named = new Map<string, (title: string) => void>();  // searched music is saved as <uuid>.mp3: rename once credits arrive
   for (const t of audio) {
     const li = el("li", "track");
     const vol = document.createElement("input");
@@ -721,6 +722,7 @@ async function loadAudio(cid: number, box: HTMLElement) {
     rm.onclick = () => api(`/collections/${cid}/edit/audio/${encodeURIComponent(t.id)}`, "DELETE").then(refresh).catch(fail("remove the audio"));
     const name = el("span", "clip-title", t.path.split("/").pop() || t.path);
     name.title = t.path;
+    named.set(t.id, (title) => { name.textContent = title; vol.setAttribute("aria-label", `Volume of ${title}`); });
     li.append(name, el("span", "muted", `${(t.out - t.in).toFixed(1)}s`), num("Starts at", t.start, 0, 900, 0.1, (v) => put(t.id, { start: v })),
       vol, pct, rm);
     list.append(li);
@@ -732,8 +734,9 @@ async function loadAudio(cid: number, box: HTMLElement) {
   const credits = el("div", "credits");
   credits.hidden = true;
   box.replaceChildren(head, ...(audio.length ? [list] : []), credits, more);
-  api<{ credits: { title: string; creator: string; needs_credit: boolean }[]; text: string; required: boolean }>(`/collections/${cid}/credits`)
+  api<{ credits: { track_id: string; title: string; creator: string; needs_credit: boolean }[]; text: string; required: boolean }>(`/collections/${cid}/credits`)
     .then((c) => {
+      for (const x of c.credits) if (x.title) named.get(x.track_id)?.(x.title);
       if (!c.required) return;
       const copy = el("button", "", "Copy credits") as HTMLButtonElement;
       copy.type = "button";
