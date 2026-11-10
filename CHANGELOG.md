@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.0 (2026-11-10)
+
+- Four more background arts: Harmonograph, Moire, Truchet, Lattice
+- Library filters stick under the top bar while scrolling
+- Project and album covers: first, middle and last clip as a collage
+
 ## v0.3.3 (2026-11-09)
 
 - Copy project previews out of Photos once, so scrubbing stops prompting
