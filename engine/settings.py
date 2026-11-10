@@ -31,6 +31,10 @@ class Settings(BaseModel):
     sound_licenses: Literal["commercial", "noncommercial"] = Field(
         "commercial", description="free music and sounds offered: commercial = public domain and CC BY (fine for "
         "monetized posts, credit CC BY); noncommercial also offers CC BY-NC (personal posts only)")
+    jamendo_client_id: str = Field(
+        "", max_length=64, pattern=r"^[A-Za-z0-9]*$",
+        description="optional free Jamendo API client id (devportal.jamendo.com) to also search Jamendo music; "
+        "the KIOKU_JAMENDO_CLIENT_ID environment variable works too. Jamendo's API terms allow non-commercial apps only")
 
 
 _cur: Settings | None = None

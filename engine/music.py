@@ -166,6 +166,95 @@ def fit(m, target, drop_at=None):
     return {**res, "notes": notes}
 
 
+def _curve(lv, k=8):
+    """Mean level per eighth of the track as digits (the whole string when the track has fewer than k bars)."""
+    if len(lv) < k:
+        return "".join(map(str, lv))
+    return "".join(str(round(sum(c) / len(c))) for c in (lv[i * len(lv) // k:(i + 1) * len(lv) // k] for i in range(k)))
+
+
+def summary(m):
+    """Shortlist view of a music map: tempo, a short energy curve (0 to 9), its shape, drop, length, one text line."""
+    lv = [int(c) for c in m["energy"]]
+    third = max(len(lv) // 3, 1)
+    a, z = sum(lv[:third]) / third, sum(lv[-third:]) / third
+    shape = "builds" if z - a >= 2 else "fades" if a - z >= 2 else "flat" if max(lv) - min(lv) <= 2 else "varies"
+    out = {"tempo": round(m["tempo"], 1), "length_s": round(m["duration"], 1), "bars": len(lv), "curve": _curve(lv),
+           "shape": shape, "avg_level": round(sum(lv) / len(lv), 1), "drop_s": m["drop_s"], "vocals": m.get("vocals")}
+    out["summary"] = (f"{out['tempo']:g} bpm, energy {shape} (avg {out['avg_level']}/9), "
+                      + (f"drop at {m['drop_s']:.0f}s" if m["drop_s"] is not None else "no clear drop") + f", {m['duration']:.0f}s")
+    return out
+
+
+def quick_features(x, sr=beats.SR):
+    """Cheap feel of a snippet of mono audio, no beat model: tempo (onset autocorrelation, 70 to 170 bpm, a guess that can
+    be off by a factor of two), energy 0 to 9 (loudness plus onset density), brightness. A heuristic for searching a library."""
+    import numpy as np
+    from scipy import signal as sg
+    f, _, Z = sg.stft(x, fs=sr, nperseg=NPERSEG, noverlap=NPERSEG - HOP, padded=False, boundary=None)
+    A = np.abs(Z)
+    flux = np.maximum(np.diff(np.log1p(A * 50), axis=1), 0).sum(0)
+    fps = sr / HOP
+    rms_db = 20 * np.log10(float(np.sqrt(np.mean(x.astype("float64") ** 2))) + 1e-9)
+    spec = A.mean(1)
+    tempo = 0.0
+    if flux.size > fps * 4 and flux.std() > 0:
+        o = flux - flux.mean()
+        ac = np.correlate(o, o, "full")[o.size - 1:]
+        lo, hi = int(fps * 60 / 170), int(fps * 60 / 70)
+        lags = np.arange(lo, hi + 1)
+        w = ac[lo:hi + 1] * (1 - 0.15 * np.abs(np.log2(60 * fps / lags / 115)))  # mild pull toward 115 bpm
+        tempo = round(float(60 * fps / lags[int(np.argmax(w))]), 1)
+    onset = float((flux > flux.mean() + flux.std()).sum() / (flux.size / fps))  # strong onsets per second
+    energy = int(round(9 * min(1.0, max(0.0, 0.5 * (rms_db + 38) / 26 + 0.5 * onset / 4))))
+    return {"tempo": tempo, "energy": energy, "rms_db": round(float(rms_db), 1),
+            "brightness_hz": round(float((spec * f).sum() / (spec.sum() + 1e-9)))}
+
+
+QUICK_V = 1
+QUICK_S = 45  # seconds of audio read per file, from 30% in (past the intro)
+
+
+def _quick_path(p: Path):
+    return CACHE / f"qf{QUICK_V}-{beats._key(p)}.json"
+
+
+def cached_quick(path):
+    """Cached quick_features of a library file, or None; never computes. {"error": true} marks an unreadable file."""
+    try:
+        return json.loads(_quick_path(Path(path)).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def library_features(path, duration_s):
+    """quick_features of one file (cached by path, mtime and size). Decodes at most QUICK_S seconds, so a whole library
+    is affordable; a file that cannot be decoded is cached as {"error": true} and not retried until it changes."""
+    import subprocess
+
+    import numpy as np
+    p = Path(path)
+    got = cached_quick(p)
+    if got:
+        return got
+    start = max(0.0, min(30.0, duration_s * 0.3))
+    span = min(float(QUICK_S), duration_s - start)
+    out = {"error": True}
+    try:
+        r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{span:.2f}", "-i", str(p),
+                            "-vn", "-ac", "1", "-ar", str(beats.SR), "-f", "f32le", "-"], capture_output=True, timeout=60)
+        x = np.frombuffer(r.stdout[: len(r.stdout) // 4 * 4], dtype="<f4")
+        if r.returncode == 0 and x.size >= 5 * beats.SR:
+            out = quick_features(x)
+    except (subprocess.SubprocessError, OSError, ValueError):
+        pass
+    CACHE.mkdir(parents=True, exist_ok=True)
+    tmp = CACHE / f"qf{QUICK_V}-{os.getpid()}-{threading.get_ident()}.tmp"
+    tmp.write_text(json.dumps(out))
+    tmp.replace(_quick_path(p))
+    return out
+
+
 if __name__ == "__main__":
     import numpy as np
     sr = beats.SR

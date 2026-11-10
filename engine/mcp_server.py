@@ -443,19 +443,33 @@ def suggest_seams(collection_id: int) -> dict:
 
 
 @server.tool(annotations=READ_ONLY)
-def search_sounds(query: str, kind: str = "music", max_duration: float | None = None, source: str = "free") -> dict:
-    """Find music (kind="music", the default) or sound effects (kind="sfx") for a project. You cannot hear audio:
-    choose from title, tags, creator and duration_s, and tell the user what you picked so they can listen in the app.
-    source="free" (default) searches free Creative Commons audio (Openverse), already limited to licenses the user
-    allows; source="mine" searches the user's own files under ~/Music by title, artist or file name (the user handles
-    the rights for those). max_duration: seconds. Returns results; pass a result's id (free) or path (mine) to
-    add_sound."""
+def search_sounds(query: str, kind: str = "music", max_duration: float | None = None, source: str = "free",
+                  tempo_min: float | None = None, tempo_max: float | None = None, instrumental: bool | None = None,
+                  target_seconds: float | None = None, analyze: int = 3) -> dict:
+    """Find music (kind="music", the default) or sound effects (kind="sfx") for a project. You cannot hear audio, so for
+    music this returns a short SHORTLIST with data: the top `analyze` (default 3, max 5, 0 = none) candidates carry
+    `analysis` = {tempo, length_s, curve (energy 0 to 9 across eight slices of the track), shape (builds, fades, flat,
+    varies), avg_level, drop_s, summary}. Pick by that, not by the title: tempo 100 to 130 and a high curve for snappy,
+    70 to 100 and a low flat curve for calm, a drop_s for reels, length_s at least the edit length. Say what you picked
+    and name the two runners-up. Other fields: tempo (as the source states it), instrumental (true, false, null =
+    unknown), tags, license, provider. Search 2 or 3 phrasings (mood words work: "upbeat summer", "calm piano") first.
+    source="free" (default) searches free Creative Commons music: Openverse, Incompetech (Kevin MacLeod) and, when the
+    user has added a free Jamendo client id in Settings, Jamendo; all limited to licenses the user allows. Read `notes`:
+    it says when a source is off or a candidate could not be analysed. Filters: tempo_min / tempo_max (bpm),
+    instrumental=true (use it when clips have speech), max_duration (seconds), target_seconds (the edit length; shorter
+    tracks rank lower). source="mine" searches the user's own ~/Music by words (title, artist, album, genre) and by feel:
+    "upbeat", "calm", "fast", "slow", "120 bpm"; each result has tempo and energy (0 to 9, estimates). The first feel
+    search analyses the library in the background: when `message` says files are still being analysed, ask again in a
+    minute. Commercial tracks from the user's library get muted on social platforms. Pass a result's id (free) or path
+    (mine) to add_sound; analyze_music then gives the full bar by bar map."""
     if source == "mine":
         return call("GET", "/sounds/local?" + urllib.parse.urlencode({"q": query}))
     if source != "free":
         return {"error": "source must be free or mine"}
-    params = {"q": query, "kind": kind} | ({"max_dur": max_duration} if max_duration else {})
-    return call("GET", "/sounds/search?" + urllib.parse.urlencode(params))
+    params = {"q": query, "kind": kind, "limit": 8, "analyze": max(0, min(analyze, 5)) if kind == "music" else 0}
+    params |= drop_unset(max_dur=max_duration, tempo_min=tempo_min, tempo_max=tempo_max, target_seconds=target_seconds,
+                         instrumental=None if instrumental is None else str(instrumental).lower())
+    return call("GET", "/sounds/search?" + urllib.parse.urlencode(params), timeout=120)
 
 
 @server.tool()
@@ -464,7 +478,8 @@ def add_sound(collection_id: int, sound_id: str, start: float = 0, track_id: str
               target_seconds: float | None = None, drop_at: float | None = None) -> dict:
     """Put a sound from search_sounds on the project's audio as a new track (at most 3). sound_id: the id of a free
     result, or the path of a "mine" result. start: seconds on the output timeline. The free file is downloaded once
-    and checked. When the result has a "credit", say that credit line to the user: CC BY music must be credited
+    and checked (ids look like a uuid, jm-123 for Jamendo or ic-abc... for Incompetech). When the result has a "credit",
+    say that credit line to the user: CC BY music (all Incompetech, most Jamendo) must be credited
     where the video is posted (Kioku also writes credits.txt next to final renders and exports). Use set_audio to
     trim, fade or move the track afterwards. fit=true, target_seconds and drop_at fit the track to the edit like
     set_audio (see there); the result then has `fit`."""
