@@ -1317,6 +1317,7 @@ class Editor {
           sAud.append(row("Captions", check(!!fx.captions, (v) => this.patchClip(id, { captions: v }, "Change captions")), note));
           const rf = fx.reframe ?? {};
           sVid.append(row("Reframe", range(0, 1, .02, rf.pos ?? .5, (v) => this.patchClip(id, { reframe_mode: "manual", reframe_pos: v }, "Reframe clip"), (v) => `${Math.round(v * 100)}%`)));
+          sVid.append(row("Auto reframe", check(rf.mode === "auto", (v) => this.patchClip(id, { reframe_mode: v ? "auto" : "center" }, "Auto reframe")), "follows faces; render preview to see"));
         }
         const pick = (labels: Record<string, string>, vals: string[], cur: string, aria: string, commit: (v: string) => void) => {
           const s = document.createElement("select");

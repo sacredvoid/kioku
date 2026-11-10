@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import core
 import library
+import reframe
 from projects import STILL_SECONDS
 import titles
 from timeline import Seg, Timeline
@@ -277,8 +278,8 @@ def compute_timeline(items, spec, grid=None):
         n = max(1, round((b - a) / rate * fps))
         adj, rf = e.get("adjust", {}), e.get("reframe", {})
         pos, pf, pt = rf.get("pos", .5), rf.get("pos_from", .5), rf.get("pos_to", .5)
-        reframe = {"center": ("center", .5, .5), "manual": ("manual", pos, pos),
-                   "pan": ("pan", pf, pt)}[rf.get("mode", "center")]
+        rf_t = {"center": ("center", .5, .5), "manual": ("manual", pos, pos),
+                   "pan": ("pan", pf, pt), "auto": ("auto", .5, .5)}[rf.get("mode", "center")]
         lk = e["look"] if "look" in e else spec["look"]
         mo = e.get("motion", "none")
         raw.append(dict(item_id=it["item_id"], uuid=it["uuid"], kind="photo" if photo else "video",
@@ -286,7 +287,7 @@ def compute_timeline(items, spec, grid=None):
                         adjust=(adj.get("exposure", 0.0), adj.get("contrast", 1.0), adj.get("saturation", 1.0),
                                 adj.get("warmth", 0.0)),
                         look=(lk["name"], lk.get("strength", 1.0)) if lk["name"] else None,
-                        reframe=reframe, frames=n,
+                        reframe=rf_t, frames=n,
                         motion=(mo, e.get("motion_amount", MOTION_AMOUNT)) if mo != "none" else None,
                         flash=bool(e.get("flash")), shake=bool(e.get("shake")), ramp=ramp))
         raw[-1]["_rate"], raw[-1]["_avail"] = rate, (None if photo else (it["duration"] or b))
@@ -337,6 +338,18 @@ def compute_timeline(items, spec, grid=None):
         if n / fps < SHORT_CLIP:
             warnings.append(f"clip {i + 1} is only {n / fps:.2f}s long")
         beat_frames = tuple(f - start for f in (G or ()) if start < f < start + n)
+        if r["reframe"][0] == "auto":  # follow the subject when the clip was analysed, else the manual position (never an error)
+            tr = None
+            cached = reframe.load(r["uuid"]) if r["kind"] == "video" else None
+            if cached:
+                tr = reframe.track(cached, r["src_in"], r["src_out"], max(2, min(round(n / fps * 4) + 1, 241)))
+            if tr:
+                r["track"] = tr
+            else:
+                p = spec["clips"].get(str(r["item_id"]), {}).get("reframe", {}).get("pos", .5)
+                r["reframe"] = ("manual", p, p)
+                warnings.append(f"clip {i + 1}: auto reframe needs an analysed clip with a subject (analyze_clip); "
+                                "it is using the manual position")
         t = spec["transitions"].get(str(r["item_id"]))
         seg = {k: v for k, v in r.items() if not k.startswith("_")}
         segs.append(Seg(start_frame=start, trans_after=(XFADE[t["type"]], tf[i]) if tf[i] else None,
@@ -476,7 +489,7 @@ class ClipPatch(BaseModel):
     warmth: F | None = None
     look: str | None = None            # null inherits the project look, "none" means no look
     look_strength: F | None = None
-    reframe_mode: Literal["center", "manual", "pan"] | None = None
+    reframe_mode: Literal["center", "manual", "pan", "auto"] | None = None
     reframe_pos: F | None = None
     reframe_from: F | None = None
     reframe_to: F | None = None

@@ -371,7 +371,7 @@ export class LivePlayer implements Player {
     this.pill.hidden = !this.slots.some((x) => x.failed && this.busy.has(x.uuid));
   }
 
-  /** object-fit cover + object-position mirrors the renderer's crop (center / manual / pan). */
+  /** object-fit cover + object-position mirrors the renderer's crop (center / manual / pan; auto shows center, the render follows the subject). */
   private reframe(s: Slot, seg: Seg, t: number) {
     const rf = seg.fx.reframe;
     let p = 0.5;
