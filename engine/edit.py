@@ -12,7 +12,7 @@ import re
 import subprocess
 import time
 from contextlib import closing
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+import color
 import core
 import library
 import reframe
@@ -382,6 +383,12 @@ def compute_timeline(items, spec, grid=None):
             warnings.append(f"clip {i + 2} flashes right after an effect transition; drop one of them")
     sfx = tuple(sorted((segs[i + 1].start_frame + (segs[i].trans_after[1] // 2 if segs[i].trans_after else 0), name)
                        for i, s in enumerate(segs[:-1]) for name in [spec.get("sfx", {}).get(str(s.item_id))] if name))
+    mc = spec.get("match_color") or {}
+    if mc.get("on") and segs:
+        segs = _match(segs, spec, mc.get("ref"), warnings)
+    finish, why = color.resolve(spec.get("finish"), spec["format"]["aspect"])
+    if why:
+        warnings.append(why)
     texts = []
     for t in spec.get("texts", ()):  # start snaps to the nearest grid point when synced; the spec keeps it as entered
         f0 = round(t["start"] * fps)
@@ -398,13 +405,36 @@ def compute_timeline(items, spec, grid=None):
     n_sfx, cap = len(sfx) + sum(1 for t in texts if t.get("sfx")), max(3, round(total / fps / 6))
     if n_sfx > cap:  # a warning, not an error: older edits may already be over
         warnings.append(f"{n_sfx} sounds on seams and titles; about {cap} is plenty for {total / fps:.0f}s. Remove the weakest")
-    ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items], G],
-                       sort_keys=True, separators=(",", ":"))
+    # measured colour can change without the spec changing; only matched edits carry it, so older hashes stay put
+    ident = json.dumps([spec, [(i["item_id"], i["uuid"], i["t0"], i["t1"], i["pos"]) for i in items], G,
+                        *([[s.match for s in segs]] if mc.get("on") else [])], sort_keys=True, separators=(",", ":"))
     return Timeline(fps=fps, aspect=spec["format"]["aspect"], size=spec["format"]["size"], segs=tuple(segs),
                     total_frames=total, warnings=tuple(warnings), edit_hash=hashlib.sha1(ident.encode()).hexdigest(),
                     fade_in=spec["format"].get("fade_in", 0.0), fade_out=spec["format"].get("fade_out", 0.0),
                     audio=tuple(spec.get("audio", ())), clip_volume=spec.get("clip_volume", 1.0), duck=spec.get("duck", True),
-                    sfx=sfx, texts=tuple(texts))
+                    sfx=sfx, texts=tuple(texts), finish=finish)
+
+
+def _match(segs, spec, ref, warnings):
+    """Segs with the colour match filled in from cached measurements (never measures). Clips opted out keep their colour
+    and do not count toward the median."""
+    stats, missing = {}, 0
+    for s in segs:
+        if spec["clips"].get(str(s.item_id), {}).get("match") is False:
+            continue
+        c = color.cached(s.uuid)
+        missing += not c
+        stats[s.item_id] = color.clip_stats(c, s.src_in, s.src_out) if c else None
+    got, capped, used = color.solve(stats, ref)
+    if ref and used is None:
+        warnings.append("colour match: the reference clip is gone, opted out or not measured; matching to the edit median")
+    if missing:
+        warnings.append(f"colour match: {missing} clips are not measured yet; the next preview measures them")
+    pos = {s.item_id: n for n, s in enumerate(segs, 1)}
+    for k in capped:
+        warnings.append(f"colour match: clip {pos[k]} is far from the rest (night, sunset or a deliberate colour), "
+                        "so it keeps most of its own colour; adjust it by hand if it should blend in")
+    return [replace(s, match=got.get(s.item_id)) for s in segs]
 
 
 def _fit_source(r, n, fps, start, bound, G):
@@ -496,6 +526,10 @@ class EditPatch(BaseModel):
     sync_grid: Literal["beat", "half", "downbeat"] = "beat"
     sync_lead: int = Field(1, ge=0, le=3)   # frames each cut lands before its beat
     text_style: Literal["none", *titles.STYLES] = "none"   # fonts, colours and easing for every text left at its default
+    match_color: bool = False          # even out exposure and white balance across clips
+    match_ref: int | None = None       # item_id the others match; null or 0 = the edit median
+    finish: Literal[*color.FINISHES] = "none"   # grain, vignette, glow, bars on the whole edit
+    finish_strength: F = 1.0           # 0 to 1
 
 
 class AudioPut(BaseModel):
@@ -536,6 +570,7 @@ class ClipPatch(BaseModel):
     flash: bool | None = None
     shake: bool | None = None
     ramp: Literal["none", "slow-mid", "fast-in", "slow-out"] | None = None
+    match_color: bool | None = None    # false keeps this clip out of the project colour match
 
 
 class TransitionPut(BaseModel):
@@ -558,6 +593,7 @@ CLIP_FIELDS = {
     "beats": (("beats",), 0, None, None), "motion": (("motion",), "none", None, None),
     "motion_amount": (("motion_amount",), MOTION_AMOUNT, 0, 1), "flash": (("flash",), False, None, None),
     "shake": (("shake",), False, None, None), "ramp": (("ramp",), "none", None, None),
+    "match_color": (("match",), True, None, None),
 }
 
 
@@ -608,7 +644,8 @@ def get_edit(cid: int):
             "fps": tl.fps, "total_frames": tl.total_frames,
             "clips": [{"item_id": s.item_id, "uuid": s.uuid, "start": s.start_frame / tl.fps,
                        "end": (s.start_frame + s.frames) / tl.fps, "frames": s.frames,
-                       **({"energy": lv} if (lv := _clip_energy(spec, s.start_frame / tl.fps)) is not None else {})}
+                       **({"energy": lv} if (lv := _clip_energy(spec, s.start_frame / tl.fps)) is not None else {}),
+                       **({"match": list(s.match)} if s.match else {})}
                       for s in tl.segs],
             "music": _music_summary(spec),
             "warnings": list(tl.warnings),
@@ -623,7 +660,7 @@ def get_edit(cid: int):
                         "text_eases": list(titles.EASES),
                         "text_styles": {k: {"fonts": [v["display"], v["label"]], "templates": list(v["templates"])}
                                         for k, v in titles.STYLES.items()},
-                        "text_tokens": [f"{{{k}}}" for k in TOKENS], "max_texts": titles.MAX_TEXTS},
+                        "text_tokens": [f"{{{k}}}" for k in TOKENS], "max_texts": titles.MAX_TEXTS, "finishes": list(color.FINISHES)},
             "texts": [{"id": t["id"], "start": t["start_frame"] / tl.fps, "end": (t["start_frame"] + t["frames"]) / tl.fps}
                       for t in tl.texts]}
 
@@ -642,6 +679,8 @@ def patch_edit(cid: int, body: EditPatch):
             beats.analyze(t["path"])
         except (RuntimeError, OSError, subprocess.SubprocessError) as e:
             raise HTTPException(422, f"could not find the beat of {Path(t['path']).name}: {str(e)[:200]}")
+    if body.match_color and "match_color" in given:  # measure what is on disk before the write lock (cached per asset)
+        color.ensure([(i["uuid"], "photo" if i["kind"] == "image" else "video") for i in library.get_collection(cid)["items"]])
     if body.captions and "captions" in given:  # speech guesses read audio files: do them before the write lock
         import captions
         spec0, _ = load(cid)
@@ -678,6 +717,21 @@ def patch_edit(cid: int, body: EditPatch):
         for k in ("grid", "lead"):
             if f"sync_{k}" in given:
                 spec["sync"][k] = getattr(body, f"sync_{k}")
+        if given & {"match_color", "match_ref"}:
+            m = spec.setdefault("match_color", {"on": False, "ref": None})
+            if "match_color" in given:
+                m["on"] = body.match_color
+            if "match_ref" in given:
+                ref = body.match_ref or None
+                if ref is not None and not any(i["item_id"] == ref for i in col["items"]):
+                    raise HTTPException(422, f"match_ref must be an item_id of this project, not {ref}")
+                m["ref"] = ref
+        if given & {"finish", "finish_strength"}:
+            f = spec.setdefault("finish", {"preset": "none", "strength": 1.0})
+            if "finish" in given:
+                f["preset"] = body.finish
+            if "finish_strength" in given:
+                f["strength"] = _clamp(notes, "finish_strength", body.finish_strength, 0, 1)
         if "captions" in given:
             flipped.append(body.captions and not spec["captions"]["on"])
             spec["captions"]["on"] = body.captions

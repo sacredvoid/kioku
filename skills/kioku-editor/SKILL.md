@@ -98,6 +98,12 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 ## 7. Format, look, text, captions
 
 - One `set_edit` call: `aspect="9:16"` for a reel, story, TikTok, Shorts or "vertical", otherwise 16:9. One `look` for the whole edit at `look_strength` 0.6 to 0.8 unless the user wants it strong. Options are in `get_edit`; film LUTs (`teal-orange`, `warm-film`, `bleach`, `clean-pop`) suit trips and nights, `warm` / `film` suit memories.
+- **Colour match**: when the clips come from different moments, cameras or light (most trips and recaps), add `match_color=true` to that same `set_edit`, before judging the look. It evens exposure and white balance under the look. Pass `match_ref` (an item_id) when one shot has the colour you want everything near, else it matches to the edit's median. It leaves night shots, sunsets and deliberate colour mostly alone and says so in `get_edit` warnings; that is intended, do not force them. If one clip should keep its own colour (a stylised shot, a black-and-white moment), `set_clip_fx(match_color=false)`. Only hand-tune `exposure` / `warmth` if the preview still shows a jump after matching.
+- **Finish** (`set_edit(finish=..., finish_strength=...)`): one texture layer for the whole video, under the text. Subtle by default; match the vibe:
+  - Calm, nostalgic, memories: `film` at 0.5 to 0.8 (grain, vignette, warm halation round lights and the sun).
+  - Cinematic 16:9 (travel films, "make it cinematic"): `cinematic` at 0.6 to 1. Its letterbox bars only appear on 16:9, so on a reel it is just light grain, vignette and glow.
+  - Clean, bright, product-like or most snappy reels: `clean` at 0.5 to 1, or `none`.
+  - Never pair a strong finish with a strong look (look_strength above 0.8): pick one to carry the style. Grain makes the file about 10 to 15% larger; that is expected.
 - **Titles** (`set_text`), on snappy and reference edits, or when the brief wants them:
   - An opener: `title-pop` or `title-slide` on the first downbeat (a `grid` time), 1.5 to 2.5 s.
   - A `location-tag` (text `{place}`) when the place changes, on that clip's first beat. `big-number` for a year or a count.
@@ -109,7 +115,7 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
   - Do not add a box or change `color` for readability: the render adds a soft scrim or a box only when the background under the text is too bright or busy for the shadow alone.
 - **Captions** (`set_edit(captions=true)`) only when clips contain speech, never on a music montage. Check `get_edit` `captions_status.pending` reaches 0 before rendering. If whisper is missing, tell the user the install command the tool returns.
 - **Vertical from wide footage** (9:16 edit, landscape clips): set `reframe_mode="auto"` on each clip that has people or a clear subject, after the clips are analysed (`find_moments` / `analyze_clip`). It follows faces, then the main subject, with a slow smoothed pan. Clips without analysis or a subject use `reframe_pos` (default center), and `get_edit` warns. Check the preview; fix only the clips that are wrong with a manual `reframe_pos`. Default stays center, so do not set auto on clips that do not crop.
-- `set_clip_fx` adjustments only for a reason: `speed` 0.5 for slow-mo, 1.5-2 for a boring stretch, `reframe_mode="auto"` when the crop cuts off the subject (see below), other `reframe_*` for a fixed or panned crop, `exposure` / `warmth` to match a shot to its neighbours.
+- `set_clip_fx` adjustments only for a reason: `speed` 0.5 for slow-mo, 1.5-2 for a boring stretch, `reframe_mode="auto"` when the crop cuts off the subject (see below), other `reframe_*` for a fixed or panned crop, `exposure` / `warmth` to fix one shot that colour match left alone or got wrong.
 
 ## 8. Check
 

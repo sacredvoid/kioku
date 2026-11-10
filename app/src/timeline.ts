@@ -302,6 +302,7 @@ class Editor {
       else if (k === "look_strength") inv.look_strength = fx.look?.strength ?? 1;
       else if (ADJ.some((a) => a[0] === k)) inv[k] = fx.adjust?.[k as "exposure"] ?? DEFAULTS[k];
       else if (k === "reframe_mode") inv[k] = fx.reframe?.mode ?? "center";
+      else if (k === "match_color") inv[k] = fx.match ?? true;
       else if (k.startsWith("reframe_")) inv[k] = fx.reframe?.[(k === "reframe_pos" ? "pos" : k === "reframe_from" ? "pos_from" : "pos_to") as "pos"] ?? .5;
       else inv[k] = (fx as Flat)[k] ?? DEFAULTS[k];
     }
@@ -313,6 +314,7 @@ class Editor {
     for (const k of ["speed", "volume", "mute", "captions", "beats", "hit", "motion", "motion_amount", "flash", "shake", "ramp"] as const) if (fx[k] != null) o[k] = fx[k];
     for (const [k, v] of Object.entries(fx.adjust ?? {})) o[k] = v;
     if (fx.look) { o.look = fx.look.name ?? "none"; o.look_strength = fx.look.strength; }
+    if (fx.match === false) o.match_color = false;
     if (fx.reframe) {
       if (fx.reframe.mode) o.reframe_mode = fx.reframe.mode;
       if (fx.reframe.pos != null) o.reframe_pos = fx.reframe.pos;
@@ -1314,6 +1316,7 @@ class Editor {
         look.onchange = () => this.patchClip(id, { look: look.value === "" ? null : look.value }, "Change look");
         sCol.append(row("Look", look));
         if (fx.look?.name) sCol.append(row("Strength", range(0, 1, .05, fx.look.strength, (v) => this.patchClip(id, { look_strength: v }, "Change look strength"))));
+        if (this.spec.match_color?.on) sCol.append(row("Match", check(fx.match !== false, (v) => this.patchClip(id, { match_color: v }, "Change colour match")), "even out with the other clips"));
         if (it.video) {
           sAud.append(row("Volume", range(0, 2, .05, fx.volume ?? 1, (v) => this.patchClip(id, { volume: v }, "Change volume"), (v) => `${Math.round(v * 100)}%`)));
           sAud.append(row("Mute", check(!!fx.mute, (v) => this.patchClip(id, { mute: v }, "Mute clip"))));
@@ -1385,7 +1388,17 @@ class Editor {
       const head = el("div", "tl-ih");
       head.append(el("strong", "", "Project"), el("span", "muted tl-in", this.c.name));
       f.append(head);
-      const sAud = sec("Audio"), sBeat = sec("Beat sync"), sCap = sec("Captions");
+      const sAud = sec("Audio"), sBeat = sec("Beat sync"), sCap = sec("Captions"), sFin = sec("Finish");
+      const mc = this.spec.match_color?.on ?? false;
+      sFin.append(row("Match colour", check(mc, (v) => this.patchEdit({ match_color: v }, "Change colour match", { match_color: mc })), "even exposure and white balance"));
+      const fin = this.spec.finish ?? { preset: "none" as const, strength: 1 };
+      const fs = document.createElement("select");
+      fs.setAttribute("aria-label", "Finish");
+      (this.model.edit.options.finishes ?? ["none"]).forEach((v) => fs.append(new Option(v === "none" ? "None" : v[0].toUpperCase() + v.slice(1), v)));
+      fs.value = fin.preset;
+      fs.onchange = () => this.patchEdit({ finish: fs.value }, "Change finish", { finish: fin.preset });
+      sFin.append(row("Finish", fs));
+      if (fin.preset !== "none") sFin.append(row("Strength", range(0, 1, .05, fin.strength, (v) => this.patchEdit({ finish_strength: v }, "Change finish strength", { finish_strength: fin.strength }))));
       sAud.append(row("Clip sound", range(0, 1, .05, this.spec.clip_volume ?? 1, (v) => this.patchEdit({ clip_volume: v }, "Change clip sound", { clip_volume: this.spec.clip_volume ?? 1 }), (v) => `${Math.round(v * 100)}%`)));
       sAud.append(row("Duck", check(!!this.spec.duck, (v) => this.patchEdit({ duck: v }, "Change ducking", { duck: !v })), "lower clip sound under music"));
       const sy = this.spec.sync ?? { track: null, grid: "beat", lead: 1 };
@@ -1406,7 +1419,7 @@ class Editor {
         sBeat.append(row("Cut early", range(0, 3, 1, sy.lead, (v) => this.patchEdit({ sync_lead: v }, "Change cut lead", { sync_lead: sy.lead }), (v) => `${v} fr`)));
       }
       if (this.deps.captions) sCap.append(this.deps.captions);
-      addSecs(sAud, sBeat, sCap);
+      addSecs(sFin, sAud, sBeat, sCap);
       f.append(el("p", "muted tl-hint", "Click a clip to edit it. Drag to reorder, drag its edges to trim, click a seam for a transition, press S to split."));
     }
     this.insp.replaceChildren(f);

@@ -22,6 +22,7 @@ export type TransitionType = "cut" | "dissolve" | "fade-black" | "wipe-left" | "
   | "zoom-through" | "light-leak" | "luma-fade" | "glitch";
 export type Motion = "none" | "push" | "pull" | "drift-left" | "drift-right" | "punch";
 export type Ramp = "none" | "slow-mid" | "fast-in" | "slow-out";
+export type Finish = "none" | "clean" | "film" | "cinematic";
 export type Sfx = "whoosh" | "swish" | "hit" | "riser" | "swell" | "pop" | "shutter";
 
 export type ClipFx = {
@@ -39,6 +40,7 @@ export type ClipFx = {
   flash?: boolean;
   shake?: boolean;
   ramp?: Exclude<Ramp, "none">;
+  match?: false;           // out of the project colour match; absent = in
 };
 
 // Output-time seconds on the project timeline. `in` and `out` are seconds inside the audio file.
@@ -71,10 +73,13 @@ export type Spec = {
   sync: { track: string | null; grid: "beat" | "half" | "downbeat"; lead: number };
   sfx: Record<string, Sfx>;                            // key = item_id of the clip BEFORE the seam
   texts: TextSpec[];                                   // up to Edit.options.max_texts
+  match_color?: { on: boolean; ref: number | null };   // absent = off; ref null = the edit median
+  finish?: { preset: Finish; strength: number };       // absent = none
 };
 
 // GET /collections/{cid}/edit.clips[]: output-time layout, transition overlaps already applied
-export type EditClip = { item_id: number; uuid: string; start: number; end: number; frames: number };
+export type EditClip = { item_id: number; uuid: string; start: number; end: number; frames: number;
+  match?: [number, number, number] };  // colour match per-channel power when it moves this clip
 
 export type EditOptions = {
   looks: string[]; aspects: string[]; sizes: number[]; fps: number[]; transitions: TransitionType[];
@@ -83,6 +88,7 @@ export type EditOptions = {
   motions: Motion[]; ramps: Ramp[]; sfx: ("none" | Sfx)[]; sync_grids: string[];
   text_templates: TextTemplate[]; text_fonts: string[]; text_positions: string[]; max_texts: number;
   text_eases: string[]; text_styles: Record<string, { fonts: string[]; templates: TextTemplate[] }>; text_tokens: string[];
+  finishes: Finish[];
 };
 
 // GET /collections/{cid}/edit
