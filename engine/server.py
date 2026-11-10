@@ -204,7 +204,9 @@ def client_log(body: ClientLog):
 @app.get("/health")
 def health():
     idx = fresh_index()
-    out = {"assets": len(idx.assets) if idx else 0, "reindex": state["reindex"], "version": VERSION}
+    # items that failed to index (kind "missing") are not in the library grid; counting them said 58,403 next to 58,395
+    shown = sum(a[0] != "missing" for a in idx.assets.values()) if idx else 0
+    out = {"assets": shown, "reindex": state["reindex"], "version": VERSION}
     if state["reindex"] == "running":
         out["progress"] = index_progress()
     return out
