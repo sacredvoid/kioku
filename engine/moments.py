@@ -376,20 +376,19 @@ def snippet(lines, t0, t1, limit=160):
 
 # ---------- brief match
 
-def brief_series(proxy, dur, n, query):
-    """Cosine of the query text with frame embeddings at 1 frame/s, spread onto the grid; None when the model is unavailable.
-    ponytail: re-embeds on every query (cached text vector, not frames); cache frame vectors per clip if queries repeat."""
-    import cv2
-    cap = cv2.VideoCapture(str(proxy))
-    try:
-        ts = [min(k + 0.5, dur - 0.05) for k in range(max(1, int(dur)))]
-        frames = [media.frame_at(cap, t) for t in ts]
-    finally:
-        cap.release()
-    vecs = media.embed_frames(frames)
+def brief_series(uuid, n, query):
+    """Cosine of the query text with the clip's stored scene embeddings (from analyze_clip), spread onto the grid;
+    None if the clip has not been analyzed. ponytail: scene resolution (<= 8 s), not 1 frame/s: embedding 1 fps frames took
+    ~0.8 s per frame (40 s for a 54 s clip), far over budget. Embed frames per clip once if finer matching is needed."""
+    with core.connect() as c:
+        rows = c.execute("select t0, t1, vec from segments where uuid = ? and source = 'scene'", (uuid,)).fetchall()
+    if not rows:
+        return None
     q = core.embed_query(query)
-    sims = [float(v @ q) if v is not None else 0.0 for v in vecs]
-    return [sims[min(int(i / HZ), len(sims) - 1)] for i in range(n)]
+    out = np.zeros(n)
+    for t0, t1, vec in rows:
+        out[int(t0 * HZ):max(int(t0 * HZ) + 1, int(np.ceil(t1 * HZ)))] = float(np.frombuffer(vec, np.float32) @ q)
+    return out.tolist()
 
 
 # ---------- service + routes
@@ -402,7 +401,7 @@ def find(uuid, profile="auto", q="", top=5):
     try:
         proxy = media.fetch(uuid, "preview", "")
         sig = signals(uuid, proxy)
-        brief = brief_series(proxy, sig["duration"], len(sig["series"]["motion"]), q) if q.strip() else None
+        brief = brief_series(uuid, len(sig["series"]["motion"]), q) if q.strip() else None
     except RuntimeError as e:
         raise HTTPException(502, str(e))
     moms = fuse(sig["series"], sig["duration"], sig["cuts"], profile, brief, top)
@@ -417,7 +416,8 @@ def find(uuid, profile="auto", q="", top=5):
             m["transcript"] = snippet(got[1], m["t0"], m["t1"])
             if m["transcript"] is None:
                 del m["transcript"]
-    return {"uuid": uuid, "profile": profile, "duration": sig["duration"], "moments": moms}
+    note = {"note": "query ignored: run analyze_clip on this video first"} if q.strip() and brief is None else {}
+    return {"uuid": uuid, "profile": profile, "duration": sig["duration"], "moments": moms, **note}
 
 
 @router.get("/media/{uuid}/moments")

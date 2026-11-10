@@ -114,4 +114,16 @@ assert (tmp / "moments" / "U.json").is_file() and first["duration"] > 3.5
 assert moments.signals("U", clip) == first
 os.utime(clip, (1, 1))
 assert moments.signals("U", clip)["mtime"] == 1.0
+
+# 11. brief match from stored scene embeddings (text embedding stubbed: no model load in tests)
+import numpy as np  # noqa: E402
+
+core.embed_query = lambda text: np.array([1.0, 0.0], np.float32)
+with core.connect() as c:
+    c.execute("insert into assets(uuid, kind, path, duration, meta) values ('B', 'video', 'x', 20, 'x')")
+    for t0, t1, v in ((0, 8, [0.0, 1.0]), (8, 16, [1.0, 0.0])):
+        c.execute("insert into segments(uuid, t0, t1, source, vec) values ('B', ?, ?, 'scene', ?)", (t0, t1, np.array(v, np.float32).tobytes()))
+bs = moments.brief_series("B", N, "cake")
+assert bs[at(4)] == 0.0 and bs[at(12)] == 1.0 and len(bs) == N
+assert moments.brief_series("nope", N, "cake") is None
 print("ok")
