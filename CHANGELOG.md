@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.2 (2026-11-09)
+
+- Run the engine bundled in Kioku.app, venv in ~/Kioku
+
 ## v0.3.1 (2026-11-09)
 
 - Replace a leftover engine from another version at launch; Month says to pick a year
