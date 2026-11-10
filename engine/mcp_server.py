@@ -74,6 +74,58 @@ def analyze_clip(uuid: str) -> list:
 
 
 @server.tool(annotations=READ_ONLY)
+def find_moments(uuids: list[str], profile: str = "auto", query: str = "", top: int = 5) -> list:
+    """Find the best 1-4 s moments (laughs, cheers, motion peaks, pretty or face shots) across videos, ranked, with a sheet of
+    before/peak/after frames. profile: auto, action, people, scenic or talk. query (optional) boosts shots matching a phrase.
+    Cut a moment with set_clip_range(t0, t1); the peak is where a beat hit should land. Up to 6 videos per call."""
+    top = max(1, min(top, 12))
+    found = []
+    for k, u in enumerate(uuids[:6]):
+        res = call("GET", f"/media/{urllib.parse.quote(u)}/moments?" + urllib.parse.urlencode({"profile": profile, "q": query, "top": top}), timeout=600)
+        if "error" in res:
+            found.append({"uuid": u, "error": res["error"]})
+            continue
+        found += [{"uuid": u, "tag": chr(65 + k), **m} for m in res["moments"]]
+    ranked = sorted((m for m in found if "error" not in m), key=lambda m: -m["score"])[:top]
+    seen: dict = {}
+    lines = []
+    for m in ranked:  # label = clip letter + rank within that clip, same as the sheet's
+        seen[m["tag"]] = seen.get(m["tag"], 0) + 1
+        lines.append(f"{m['tag']}{seen[m['tag']]}  {m['uuid']}  {m['t0']:.2f}-{m['t1']:.2f}s  peak {m['peak']:.2f}  score {m['score']:.2f}  "
+                     f"{', '.join(m['reasons'])}" + (f'  "{m["transcript"]}"' if m.get("transcript") else ""))
+    lines += [f"{m['uuid']}: {m['error']}" for m in found if "error" in m]
+    out: list = ["\n".join(lines) or "no moments found"]
+    imgs = []
+    for k, u in enumerate(uuids[:6]):  # one sheet per clip with its share of the top list, stacked into one image
+        n = sum(1 for m in ranked if m["uuid"] == u)
+        if n:
+            req = f"{API}/media/{urllib.parse.quote(u)}/moments/sheet?" + urllib.parse.urlencode({"profile": profile, "q": query, "top": n, "prefix": chr(65 + k)})
+            try:
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    imgs.append(r.read())
+            except (urllib.error.URLError, TimeoutError):
+                pass  # the table is still useful without the picture
+    if imgs:
+        out.append(Image(data=stack(imgs), format="jpeg"))
+    return out
+
+
+def stack(jpegs):
+    """Stack JPEG sheets vertically into one JPEG."""
+    import io
+    from PIL import Image as Pil
+    ims = [Pil.open(io.BytesIO(b)) for b in jpegs]
+    sheet = Pil.new("RGB", (max(i.width for i in ims), sum(i.height for i in ims)), (12, 11, 11))
+    y = 0
+    for i in ims:
+        sheet.paste(i, (0, y))
+        y += i.height
+    buf = io.BytesIO()
+    sheet.save(buf, "JPEG", quality=82)
+    return buf.getvalue()
+
+
+@server.tool(annotations=READ_ONLY)
 def get_media(uuid: str) -> dict:
     """Details for one item: date, place, labels, your tags and caption, collections it's in."""
     return call("GET", f"/asset/{uuid}")

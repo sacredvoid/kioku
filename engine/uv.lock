@@ -572,6 +572,7 @@ dependencies = [
     { name = "osxphotos" },
     { name = "otio-fcp-adapter" },
     { name = "pillow" },
+    { name = "pyobjc-framework-soundanalysis" },
     { name = "scenedetect" },
     { name = "sentence-transformers", extra = ["image"] },
     { name = "soundfile" },
@@ -593,6 +594,7 @@ requires-dist = [
     { name = "osxphotos", specifier = ">=0.78.0" },
     { name = "otio-fcp-adapter", specifier = ">=1.0.0" },
     { name = "pillow", specifier = ">=13.0.0" },
+    { name = "pyobjc-framework-soundanalysis", specifier = "==13.0" },
     { name = "scenedetect", extras = ["opencv-headless"], specifier = ">=0.7.2" },
     { name = "sentence-transformers", extras = ["image"], specifier = ">=6.2.0" },
     { name = "soundfile", specifier = ">=0.14.0" },
@@ -2084,6 +2086,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5a/68/386315bab519e19f091fe99d30db87a5245f960326fb6b33a6562dddd6fc/pyobjc_framework_scriptingbridge-13.0-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:65402007140c870b16a277ca82b569e5329b4f111ae119d26620da84979c20e6", size = 8582, upload-time = "2026-10-30T10:43:28.976Z" },
     { url = "https://files.pythonhosted.org/packages/44/47/ca761bc19a1ac78c025735336e3e26b191fd065c24541c65a6c837e914ee/pyobjc_framework_scriptingbridge-13.0-cp315-cp315-macosx_10_15_universal2.whl", hash = "sha256:61b39fd9ff40120e865068a6bd97b3cdbc3ea9896a990814e8bff7026e97895c", size = 8425, upload-time = "2026-10-30T10:43:29.727Z" },
     { url = "https://files.pythonhosted.org/packages/85/c8/6fde0dcff90c3ff5804973c720857a2f9a52535e435d7856200fce90ba3a/pyobjc_framework_scriptingbridge-13.0-cp315-cp315t-macosx_10_15_universal2.whl", hash = "sha256:ab2f6ecc9133438cd6a04f7586900b022c733901c91632829b8abdc65dc1a931", size = 8579, upload-time = "2026-10-30T10:43:30.462Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-soundanalysis"
+version = "13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d3/03/466f2cefc6c2020b77267a8b87a6d59cec67e0144bd4b80745ffb5e2b613/pyobjc_framework_soundanalysis-13.0.tar.gz", hash = "sha256:7c3ef1050d2161fe6e7355957c9daac11efba25f6602b0adda3a47ffc844f3b5", size = 15587, upload-time = "2026-10-30T10:47:41.879Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/b4/1f7714714b4d2669d051b8326e21997bf0c72c059e6e8db316ba10260800/pyobjc_framework_soundanalysis-13.0-py2.py3-none-any.whl", hash = "sha256:9d02ac26ed03dad82aad6f81e847d81b3e5c8f87f330e0b4413348a245eec8fa", size = 4226, upload-time = "2026-10-30T10:44:14.012Z" },
 ]
 
 [[package]]
