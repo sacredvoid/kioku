@@ -5,7 +5,7 @@ import { Grid } from "./grid";
 import { Viewer } from "./viewer";
 import * as review from "./review";
 import { timeline } from "./timeline";
-import { openComposer, type Composed } from "./compose";
+import { openComposer, DIRECTION, type Composed } from "./compose";
 import { ARTS, ART_INFO, currentArt, initArt, preview, setArt } from "./art";
 import { harmo, Loader, type Motif } from "./loaders";
 import { endLive, onPillShow, renderLive, type MediaAct } from "./live";
@@ -969,7 +969,7 @@ function renderRuns(cid: number, box: HTMLElement, runs: Run[]) {
   if (bad && last.prompt) {
     const retry = el("button", "ghost", "Retry") as HTMLButtonElement;
     retry.type = "button";
-    retry.title = `Run “${last.prompt}” again`;
+    retry.title = `Run “${said(last.prompt)}” again`;
     retry.onclick = async () => {
       const out = document.getElementById("ask-out"), btn = project.querySelector<HTMLButtonElement>("form.ask button");
       if (!out || !btn) return;
@@ -998,7 +998,7 @@ function runItem(r: Run): HTMLElement {
   const li = el("li", "run");
   const head = el("div", "run-head");
   const took = r.started && r.finished ? `took ${fmtDur(r.finished - r.started)}` : "";
-  head.append(el("p", "run-prompt", r.prompt ? `“${r.prompt}”` : "Edit"),
+  head.append(el("p", "run-prompt", r.prompt ? `“${said(r.prompt)}”` : "Edit"),
     el("span", `status ${r.status}`, r.status === "done" ? "Done" : r.status === "failed" ? "Failed" : r.status),
     el("span", "run-meta", [r.model, when(r.started), took].filter(Boolean).join(" · ")));
   li.append(head);
@@ -1370,6 +1370,9 @@ $("index-new").onclick = async () => {
   }
 };
 
+/** What the person typed: compose.ts appends the picked direction for Claude, which reads as clutter in lists */
+const said = (p: string | null | undefined) => (p || "").split(DIRECTION)[0];
+
 // ---------- settings: form built from the engine's schema, so new settings show up without app changes
 const LABELS: Record<string, [string, string]> = {
   max_agents: ["Claude edits and videos at once", ""],
@@ -1388,7 +1391,7 @@ async function renderSettings() {
   msg.textContent = "Loading…";
   try { cur = await api("/settings"); } catch (e) { msg.className = "set-msg error"; msg.textContent = `Couldn't load settings: ${errMsg(e)}`; return; }
   const fields = Object.entries(cur.schema).map(([key, f]) => {
-    const [label, unit] = LABELS[key] ?? [key.replace(/_/g, " "), ""];
+    const [label, unit] = LABELS[key] ?? [key[0].toUpperCase() + key.slice(1).replace(/_/g, " "), ""];  // "album_model" -> "Album model"
     const row = el("label", "set-row");
     let input: HTMLInputElement | HTMLSelectElement;
     if (f.enum) {
@@ -1540,12 +1543,12 @@ async function renderBoard() {
     const state = el("span", `run-state ${r0.status}`);
     state.append(icon(ok ? "check" : bad ? "close" : "spark"), el("strong", "", ok ? "Done" : bad ? "Failed" : r0.status));
     latest(state, [r0.project, r0.model, when(r0.started)].filter(Boolean).join(" · "), "Open project", r0.cid,
-      el("p", "k-me", r0.prompt || "Edit"),
+      el("p", "k-me", said(r0.prompt) || "Edit"),
       el("p", "k-ko", bad ? gist(r0.error || "no reason given") : gist(r0.output || "Done")));
   } else { live.hidden = true; live.replaceChildren(); }
 
   $("board-asks").replaceChildren(...runs.slice(0, 5).map((r) =>
-    row(() => go({ type: "col", id: r.cid }), el("strong", "", r.prompt || "Edit"), el("span", "", `${r.project} · ${when(r.started)}`))));
+    row(() => go({ type: "col", id: r.cid }), el("strong", "", said(r.prompt) || "Edit"), el("span", "", `${r.project} · ${when(r.started)}`))));
   if (!runs.length) $("board-asks").append(el("li", "empty-row", "Your asks show up here."));
 
   const fact = (title: string, big: string, text: string, onclick: () => void) => {

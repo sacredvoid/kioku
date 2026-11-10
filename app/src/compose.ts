@@ -1,4 +1,5 @@
 // Creative direction composer: opens on the home page when a request starts with make / cut / recap, before any edit
+export const DIRECTION = "\n\nCreative direction, already decided by the user (do not ask again):\n";  // main.ts trims it off for display
 // starts. Fixed questions (vibe, length, shape, music, reference, titles) answer at once; Claude looks through the
 // library meanwhile (POST /direction/questions) and adds up to 3 questions about the actual footage. "Make it" turns
 // every answer into one request for the edit job, so the editing Claude never has to ask.
@@ -217,7 +218,7 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
     for (const q of dir?.questions ?? []) if (picks[q.id]?.size) lines.push(`${q.question} ${[...picks[q.id]].join(", ")}`);
     if (notes.value.trim()) lines.push(`Notes: ${notes.value.trim()}`);
     const direction = lines.map((l) => `- ${l}`).join("\n");
-    return { prompt: `${prompt}\n\nCreative direction, already decided by the user (do not ask again):\n${direction}`,
+    return { prompt: `${prompt}${DIRECTION}${direction}`,
       brief: `${prompt}\n${direction}` };
   };
   const go = async () => {
