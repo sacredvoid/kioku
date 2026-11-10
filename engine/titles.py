@@ -18,6 +18,12 @@ DEFAULT_FONT = {"title-pop": "anton", "title-slide": "inter", "word-stagger": "g
                 "location-tag": "inter", "big-number": "anton"}
 SIZE = {"title-pop": .13, "title-slide": .095, "word-stagger": .09, "lower-third": .055, "location-tag": .042, "big-number": .34}
 SAFE = 0.10        # title-safe margin, fraction of each side
+# 9:16 posts sit under app UI: caption, handle and buttons along the bottom, a button column on the right. Conservative
+# guesses (left, top, right, bottom), unverified against current Reels / TikTok / Shorts templates; centred text needs
+# equal sides, so left matches right. Feed (1:1, 4:5) and 16:9 have no UI over the picture: title-safe covers them.
+SAFE_916 = (.12, .12, .12, .26)
+FACE_W, SALIENT_W = 1.0, 0.3  # placement cost per fully covered face / salient region
+BACKED = ("title-pop", "title-slide", "word-stagger", "big-number")  # lower-third and location-tag carry their own box
 OUT = 0.3          # seconds, every template
 MAX_FRAMES = 600   # distinct text frames per render; past it animations step every 2nd (3rd...) frame
 MAX_TEXTS = 30
@@ -205,16 +211,46 @@ def _wrap(words, f, width):
 
 # ---------- layout (per text and frame size)
 
+def safe_area(dims):
+    """(left, top, right, bottom) margins, fractions of the frame, that text keeps clear of."""
+    W, H = dims
+    return SAFE_916 if H >= 1.6 * W else (SAFE,) * 4
+
+
+def covered(rect, avoid):
+    """Placement cost of a text rect (x0, y0, x1, y1 in 0..1): per box (x0, y0, x1, y1, weight, is_face), the weight
+    times the fraction of that box the rect covers."""
+    x0, y0, x1, y1 = rect
+    c = 0.0
+    for bx0, by0, bx1, by1, w, _ in avoid:
+        area = (bx1 - bx0) * (by1 - by0)
+        if area > 0:
+            c += w * max(0.0, min(x1, bx1) - max(x0, bx0)) * max(0.0, min(y1, by1) - max(y0, by0)) / area
+    return c
+
+
+def candidates(template, position, avoid_bottom):
+    """Bands to try, preferred first. An explicit position is kept as asked."""
+    if position != "auto":
+        return ("top",) if template == "location-tag" and position == "middle" else (position,)
+    return {"big-number": ("middle", "top", "bottom"), "location-tag": ("top", "bottom"),
+            "lower-third": ("bottom", "top")}.get(template, ("top", "middle") if avoid_bottom else ("bottom", "top", "middle"))
+
+
 @functools.lru_cache(128)
-def layout(template, text, fkey, dims, position, avoid_bottom):
-    """Fitted lines inside the title-safe area: dict(lines, fkey, size, uni, cap (cap height), pitch, top, x0, x1, align)."""
+def layout(template, text, fkey, dims, position, avoid_bottom, avoid=()):
+    """Fitted lines inside the safe area: dict(lines, fkey, size, uni, cap (cap height), pitch, top, x0, x1, align,
+    band, rect (the text block in 0..1 frame units), hit (how much of the faces in `avoid` it covers, 1 = one whole face)).
+    avoid: ((x0, y0, x1, y1, weight, is_face), ...) subject boxes in 0..1 frame units; position="auto" takes the band
+    that covers the least of them, ties going to the template's usual place."""
     W, H = dims
     S = min(W, H)
+    ml, mt, mr, mb = safe_area(dims)
     uni = _uni(text)
     if template in ("title-pop", "big-number") and fkey == "anton":
         text = text.upper()
     size = max(10, round(SIZE[template] * S))
-    sx0, sx1 = SAFE * W, (1 - SAFE) * W
+    sx0, sx1 = ml * W, (1 - mr) * W
     width = sx1 - sx0
     if template == "lower-third":
         width *= .8
@@ -237,19 +273,145 @@ def layout(template, text, fkey, dims, position, avoid_bottom):
     pitch = cap * (1.32 if fkey == "anton" else 1.55)
     block = cap + pitch * (len(lines) - 1)
     land = W >= H
-    if position == "auto":
-        position = {"big-number": "middle", "location-tag": "top", "lower-third": "bottom"}.get(
-            template, "top" if avoid_bottom else "bottom")
-    if template == "location-tag" and position == "middle":
-        position = "top"
-    top = {"top": (.13 if land else .15) * H, "middle": (H - block) / 2,
-           "bottom": (.84 if land else .76) * H - block}[position]
-    if template == "lower-third" and position == "bottom":
-        top = (.86 if land else .80) * H - block
-    top = min(max(top, SAFE * H + cap * .9), (1 - SAFE) * H - block - cap * .7)  # room for rules, pills, descenders
     align = "left" if template in ("lower-third", "location-tag") else "center"
+    tw = max(f.getlength(ln) for ln in lines)
+    if template == "lower-third":
+        tw += size * 1.1  # the bar's padding
+    elif template == "location-tag":
+        tw += cap * 4  # pill padding and pin
+    hx0, hx1 = (sx0, sx0 + tw) if align == "left" else ((sx0 + sx1 - tw) / 2, (sx0 + sx1 + tw) / 2)
+    best = None
+    for rank, band in enumerate(candidates(template, position, avoid_bottom)):
+        top = {"top": (.13 if land else .15) * H, "middle": (H - block) / 2,
+               "bottom": (.84 if land else .76) * H - block}[band]
+        if template == "lower-third" and band == "bottom":
+            top = (.86 if land else .80) * H - block
+        top = min(max(top, mt * H + cap * .9), (1 - mb) * H - block - cap * .7)  # room for rules, pills, descenders
+        rect = (hx0 / W, (top - cap * .9) / H, hx1 / W, (top + block + cap * .7) / H)
+        cost = covered(rect, avoid) + .08 * rank
+        if best is None or cost < best[0]:
+            best = (cost, band, top, rect)
+    _, band, top, rect = best
     return {"lines": tuple(lines), "fkey": fkey, "size": size, "uni": uni, "cap": cap, "pitch": pitch, "top": top,
-            "x0": sx0, "x1": sx1, "align": align, "text": text}
+            "x0": sx0, "x1": sx1, "align": align, "text": text, "band": band, "rect": rect,
+            "hit": round(covered(rect, tuple(b for b in avoid if b[5])), 3)}
+
+
+# ---------- what is under a text: subjects to avoid and how bright the background is
+
+@functools.lru_cache(256)
+def look(path, idx):
+    """(subject boxes, luminance grid) of frame idx of a rendered clip file, or None if it cannot be read. Boxes are
+    (x0, y0, x1, y1, weight, is_face) in 0..1 frame units, y down: faces weigh FACE_W, salient regions SALIENT_W; none
+    without Vision. The grid is 64 px wide, linear relative luminance 0..1. Clip files are named by content, so the
+    cache cannot go stale."""
+    import cv2
+    import numpy as np
+    if not Path(path).is_file():
+        return None
+    cap = cv2.VideoCapture(str(path))
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ok, bgr = cap.read()
+    finally:
+        cap.release()
+    if not ok or bgr is None:
+        return None
+    h, w = bgr.shape[:2]
+    small = cv2.resize(bgr, (64, max(1, round(64 * h / w))), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    lin = np.where(small <= .04045, small / 12.92, ((small + .055) / 1.055) ** 2.4)
+    grid = .0722 * lin[..., 0] + .7152 * lin[..., 1] + .2126 * lin[..., 2]  # BGR order
+    return _subjects(bgr), grid
+
+
+def _subjects(bgr):
+    """Face and salient-object boxes from Apple Vision (same requests as moments.vision_signals); () when unavailable."""
+    try:
+        import cv2
+        import Vision
+        from Foundation import NSData
+        import core
+    except ImportError:
+        return ()
+    h, w = bgr.shape[:2]
+    ok, jpg = cv2.imencode(".jpg", cv2.resize(bgr, (384, max(1, round(384 * h / w)))), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        return ()
+    try:
+        data = NSData.dataWithBytes_length_(jpg.tobytes(), len(jpg))
+        reqs = [Vision.VNDetectFaceRectanglesRequest.alloc().init(), Vision.VNGenerateAttentionBasedSaliencyImageRequest.alloc().init()]
+        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(data, {})
+        with core.VISION_SLOTS:  # unbounded parallel Vision calls deadlock (core.VISION_SLOTS)
+            done, _ = handler.performRequests_error_(reqs, None)
+        if not done:
+            return ()
+        out = []
+        for o in reqs[0].results() or []:  # grow the face box to the head: hair above, chin below. Vision's y is bottom-up
+            b = o.boundingBox()
+            x, y, bw, bh = b.origin.x, 1 - b.origin.y - b.size.height, b.size.width, b.size.height
+            out.append((x - .15 * bw, y - .4 * bh, x + 1.15 * bw, y + 1.15 * bh, FACE_W, True))
+        sal = reqs[1].results() or []
+        for o in (sal[0].salientObjects() or []) if sal else []:
+            b = o.boundingBox()
+            out.append((b.origin.x, 1 - b.origin.y - b.size.height, b.origin.x + b.size.width, 1 - b.origin.y, SALIENT_W, False))
+        return tuple((*(round(min(max(float(v), 0.0), 1.0), 3) for v in o[:4]), o[4], o[5]) for o in out)
+    except Exception:  # Vision only helps placement here: the text still renders, placed by template
+        import logging
+        logging.getLogger("kioku.titles").exception("subject detection")
+        return ()
+
+
+def scene(tx, at):
+    """(avoid boxes, luminance grids) under a text, from 3 frames of it. at(output frame) -> (clip file, frame index) or
+    None. Box weights are divided by the frames read, so a face there throughout weighs FACE_W. ((), []) if none read."""
+    boxes, grids = [], []
+    n = tx["frames"]
+    for p in (.25, .5, .75):
+        src = at(tx["start_frame"] + int(n * p)) if at else None
+        got = look(*src) if src else None
+        if got:
+            boxes += got[0]
+            grids.append(got[1])
+    k = max(len(grids), 1)
+    return tuple((*b[:4], b[4] / k, b[5]) for b in boxes), grids
+
+
+def backing(rect, grids, color):
+    """How to keep text legible over the background in rect (0..1 units): "shadow" (the sprite's own soft shadow: the
+    default, and the answer when nothing was measured), "scrim" (a feathered dark glow) or "box" (a translucent panel),
+    from the worst contrast between the text colour and the mean background over the sampled frames; a busy background
+    (wide luminance spread) steps up one level unless the contrast is already high. Dark text gets light backing."""
+    import numpy as np
+    lt = _lum(color)
+    worst, busy = None, False
+    for g in grids:
+        gh, gw = g.shape
+        x0, y0 = min(max(int(rect[0] * gw), 0), gw - 1), min(max(int(rect[1] * gh), 0), gh - 1)
+        x1, y1 = max(min(int(np.ceil(rect[2] * gw)), gw), x0 + 1), max(min(int(np.ceil(rect[3] * gh)), gh), y0 + 1)
+        cell = g[y0:y1, x0:x1]
+        lb = float(cell.mean())
+        ratio = (max(lt, lb) + .05) / (min(lt, lb) + .05)
+        worst = ratio if worst is None else min(worst, ratio)
+        busy |= float((cell ** (1 / 2.2)).std()) > .2  # spread in perceptual units
+    if worst is None:
+        return "shadow"
+    level = 0 if worst >= 4.5 else 1 if worst >= 2 else 2
+    if busy and worst < 7:
+        level = min(level + 1, 2)
+    return ("shadow", "scrim", "box")[level]
+
+
+@functools.lru_cache(32)
+def panel(w, h, kind, color, cap):
+    """(image, x margin, y margin): the backing for a w x h text block, a feathered glow (scrim) or a translucent box."""
+    from PIL import Image, ImageFilter
+    if kind == "box":
+        mx, my = round(cap * .7), round(cap * .45)
+        return rounded(w + 2 * mx, h + 2 * my, max(2, round(cap * .35)), color, 150), mx, my
+    pad = round(cap * .8)
+    im = Image.new("RGBA", (w + 6 * pad, h + 6 * pad), (0, 0, 0, 0))  # 2 pad of room so the blur never clips
+    im.alpha_composite(rounded(w + 2 * pad, h + 2 * pad, pad, color, 120), (2 * pad, 2 * pad))
+    return im.filter(ImageFilter.GaussianBlur(pad * .7)), 3 * pad, 3 * pad
 
 
 # ---------- templates: draw(canvas, tx, L, t, r) where t = seconds since start (capped), r = seconds left (capped)
@@ -394,14 +556,33 @@ DRAW = {"title-pop": _pop, "title-slide": _slide, "word-stagger": _stagger, "low
         "location-tag": _location, "big-number": _big_number}
 
 
-def frame(tx, dims, a, b, fps, avoid_bottom=False):
-    """Full-frame RGBA of one text at key (a, b) = frame_key(...)."""
-    from PIL import Image
+def place(tx, dims, avoid_bottom=False, avoid=(), grids=()):
+    """(layout, backing kind) of one text over what is under it (scene())."""
     fkey = tx.get("font", "auto")
     fkey = DEFAULT_FONT[tx["template"]] if fkey in (None, "auto") else fkey
-    L = layout(tx["template"], tx["text"], fkey, tuple(dims), tx.get("position", "auto"), avoid_bottom)
+    L = layout(tx["template"], tx["text"], fkey, tuple(dims), tx.get("position", "auto"), avoid_bottom, tuple(avoid))
+    kind = backing(L["rect"], grids, _rgb(tx.get("color") or DEFAULT["color"])) if tx["template"] in BACKED else "shadow"
+    return L, kind
+
+
+def frame(tx, dims, a, b, fps, avoid_bottom=False, placed=None):
+    """Full-frame RGBA of one text at key (a, b) = frame_key(...). placed: place(...) of this text (default: nothing
+    known about the picture, so the template's usual band and shadow only)."""
+    from PIL import Image
+    L, kind = placed or place(tx, dims, avoid_bottom)
     cv = Image.new("RGBA", tuple(dims), (0, 0, 0, 0))
-    DRAW[tx["template"]](cv, {**DEFAULT, **tx}, L, a / fps, b / fps)
+    tx = {**DEFAULT, **tx}
+    t, r = a / fps, b / fps
+    if kind != "shadow":  # behind the text, fading with it
+        vis = min(ease_out_cubic(t / (in_seconds(tx) * .5)), ease_out_cubic(r / OUT))
+        if vis > 0:
+            f = font(L["fkey"], L["size"], L["uni"])
+            tw = round(max(f.getlength(ln) for ln in L["lines"]))
+            bh = round(L["cap"] + L["pitch"] * (len(L["lines"]) - 1) + L["cap"] * .35)
+            back = (17, 17, 17) if _lum(_rgb(tx["color"])) > .3 else (255, 255, 255)
+            im, mx, my = panel(tw, bh, kind, back, round(L["cap"]))
+            put(cv, fade(im, vis), (L["x0"] + L["x1"] - tw) / 2 - mx, L["top"] - my)
+    DRAW[tx["template"]](cv, tx, L, t, r)
     return cv
 
 
@@ -426,10 +607,12 @@ def _per_frame(tl, f0, total):
         step += 1
 
 
-def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False):
+def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False, at=None, warnings=None):
     """ffconcat list (workdir/overlay.txt) of full-frame PNGs carrying both the texts and the captions (cap: the
     captions.Captions from captions.build, or None), or cap's own list when there are no texts. window: (start, end)
-    output seconds of a window preview. One PNG per distinct (caption state, text frames) pair."""
+    output seconds of a window preview. One PNG per distinct (caption state, text frames) pair. at(output frame) ->
+    (rendered clip file, frame index) or None lets each text see the picture under it (scene()); warnings (a list)
+    gets a line per text that still covers a face."""
     if not tl.texts:
         return cap.list_file if cap else None
     from PIL import Image
@@ -453,8 +636,17 @@ def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False):
     if not any(ks for (_, ks), _ in runs):
         return cap.list_file if cap else None
     workdir.mkdir(parents=True, exist_ok=True)
+    placed = {}
+    for k in sorted({k for (_, ks), _ in runs for k, _ in ks}):
+        tx = tl.texts[k]
+        placed[k] = place(tx, dims, avoid_bottom, *scene(tx, at))
+        if placed[k][0]["hit"] > .25 and warnings is not None:
+            warnings.append(f"text {tx.get('id', k)!r} covers a face" + (
+                ": no band is free, move it to another clip" if tx.get("position", "auto") == "auto"
+                else f" at position={tx['position']}; try position=auto"))
     names = {}
-    sig = hashlib.sha1(repr((tl.texts, tuple(dims), avoid_bottom)).encode()).hexdigest()[:10]
+    sig = hashlib.sha1(repr((tl.texts, tuple(dims), avoid_bottom,
+                             sorted((k, L["top"], kind) for k, (L, kind) in placed.items()))).encode()).hexdigest()[:10]
 
     def png(state):
         if state not in names:
@@ -465,7 +657,7 @@ def build(tl, dims, workdir: Path, window=None, cap=None, avoid_bottom=False):
             else:
                 im = Image.open(workdir / c).convert("RGBA") if c else Image.new("RGBA", tuple(dims), (0, 0, 0, 0))
                 for k, (a, b) in ks:
-                    im.alpha_composite(frame(tl.texts[k], dims, a, b, fps, avoid_bottom))
+                    im.alpha_composite(frame(tl.texts[k], dims, a, b, fps, avoid_bottom, placed[k]))
             im.save(workdir / name, compress_level=1)
         return names[state]
 

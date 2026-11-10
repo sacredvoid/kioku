@@ -85,7 +85,8 @@ Create the project with `create_collection(name, "project")`, then `set_brief` w
 - **Titles** (`set_text`), on snappy and reference edits, or when the brief wants them:
   - An opener: `title-pop` or `title-slide` on the first downbeat (a `grid` time), 1.5 to 2.5 s.
   - A `location-tag` when the place changes, on that clip's first beat. `big-number` for a year or a count.
-  - At most 1 text on screen, under 6 words. Keep `position="auto"` so text stays off faces.
+  - At most 1 text on screen, under 6 words. Keep `position="auto"`: at render time it looks at the frames under the text and picks the band (bottom, top, or middle as a last resort) that covers the fewest faces and subjects. 9:16 text also stays clear of the app's buttons and caption area. If the render warns that a text covers a face, move it to another clip before forcing a position.
+  - Do not add a box or change `color` for readability: the render adds a soft scrim or a box only when the background under the text is too bright or busy for the shadow alone.
 - **Captions** (`set_edit(captions=true)`) only when clips contain speech, never on a music montage. Check `get_edit` `captions_status.pending` reaches 0 before rendering. If whisper is missing, tell the user the install command the tool returns.
 - `set_clip_fx` adjustments only for a reason: `speed` 0.5 for slow-mo, 1.5-2 for a boring stretch, `reframe_*` when the crop cuts off the subject, `exposure` / `warmth` to match a shot to its neighbours.
 

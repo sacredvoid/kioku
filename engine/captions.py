@@ -500,7 +500,8 @@ def draw_png(text, cfg, dims, path: Path, active=None):
     elif cfg["position"] == "middle":
         y = (H - bh) / 2
     else:
-        y = (0.92 if land else 0.80) * H - bh
+        import titles
+        y = (0.92 if land else min(0.80, 1 - titles.safe_area(dims)[3])) * H - bh  # 9:16: above the app's caption and buttons
     if style == "box":
         pad = size // 3
         d.rounded_rectangle(((W - bw) / 2 - pad, y - pad, (W + bw) / 2 + pad, y + bh + pad), radius=pad, fill=(0, 0, 0, 140))

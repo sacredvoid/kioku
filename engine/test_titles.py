@@ -64,14 +64,63 @@ for dims in ((540, 960), (960, 540), (540, 540)):
             im = titles.frame(x, dims, ti, to, FPS)
             box = im.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox()
             assert box, (t, pos, dims)
-            m = 0.1
-            assert box[0] >= W * m - 2 and box[2] <= W * (1 - m) + 2 and box[1] >= H * m - 2 and box[3] <= H * (1 - m) + 2, \
+            ml, mt, mr, mb = titles.safe_area(dims)  # 9:16 keeps clear of app UI: more at the bottom and sides
+            assert box[0] >= W * ml - 2 and box[2] <= W * (1 - mr) + 2 and box[1] >= H * mt - 2 and box[3] <= H * (1 - mb) + 2, \
                 (t, pos, dims, box)
             if t != "big-number" and pos == "auto":  # auto never sits on the middle of the frame
                 assert not (box[1] < H * .45 and box[3] > H * .55), (t, dims, box)
+assert titles.safe_area((540, 960))[3] >= .2 and titles.safe_area((960, 540)) == titles.safe_area((540, 540)) == (.1,) * 4
 # first in-frame is empty or nearly (things animate in), last frame is gone
 im = titles.frame(tx("title-pop", "Hello"), (540, 960), 0, 9, FPS)
 assert not im.getchannel("A").point(lambda v: 255 if v > 200 else 0).getbbox()
+
+# ---------- face-aware auto placement: the band that covers the least face, explicit positions kept
+V = (540, 960)
+
+
+def placed(template="title-pop", pos="auto", avoid=(), grids=(), avoid_bottom=False, **kw):
+    return titles.place(tx(template, "Summer in Lisbon", position=pos, **kw), V, avoid_bottom, avoid, grids)
+
+
+low, high = (.3, .62, .7, .9, 1.0, True), (.3, .05, .7, .3, 1.0, True)  # a face low in the frame, one high
+assert placed()[0]["band"] == "bottom" and placed()[0]["hit"] == 0           # nothing known: the usual place
+L = placed(avoid=(low,))[0]
+assert L["band"] == "top" and L["hit"] == 0, L["band"]                          # face at the bottom: moves up
+assert placed(avoid=(low, high))[0]["band"] == "middle"                        # faces top and bottom: middle
+assert placed(avoid=(high,))[0]["band"] == "bottom"
+assert placed(avoid_bottom=True)[0]["band"] == "top" and placed(avoid=(high,), avoid_bottom=True)[0]["band"] == "middle"
+L = placed(pos="bottom", avoid=(low,))[0]
+assert L["band"] == "bottom" and L["hit"] > .25                                 # asked for: kept, and reported
+assert placed("big-number", avoid=(low,))[0]["band"] == "middle"
+assert placed("lower-third", avoid=(low,))[0]["band"] == "top"
+assert placed("location-tag", avoid=((.05, .05, .5, .3, 1.0, True),))[0]["band"] == "bottom"
+sal = (.2, .6, .8, .8, titles.SALIENT_W, False)  # a salient region tips the choice, but counts as no face
+L = placed(avoid=(sal,))[0]
+assert L["band"] == "top" and L["hit"] == 0
+assert titles.covered((0, 0, .5, .5), ((0, 0, 1, 1, 1.0, True),)) == .25
+
+# ---------- legibility backing from the background under the text: shadow on dark, scrim on mid, box on bright
+flat = lambda v: np.full((114, 64), v, np.float32)  # noqa: E731  linear luminance grids, 9:16
+assert placed()[1] == "shadow"                                     # nothing measured
+assert placed(grids=[flat(.02)])[1] == "shadow"
+assert placed(grids=[flat(.3)])[1] == "scrim"
+assert placed(grids=[flat(.95)])[1] == "box"
+assert placed(grids=[flat(.02), flat(.95)])[1] == "box"            # the worst sampled frame decides
+assert placed(grids=[flat(.95)], color="#111111")[1] == "shadow"   # dark text on a bright sky reads as is
+assert placed("lower-third", grids=[flat(.95)])[1] == "shadow"     # carries its own bar
+busy = np.tile(np.array([[.005, .6], [.6, .005]], np.float32), (57, 32))
+assert placed(grids=[busy])[1] == "box" and placed(grids=[flat(.1)])[1] == "shadow"
+# drawn: a box puts dark translucent pixels around the glyphs, shadow leaves the frame clear there
+x = tx("title-pop", "Summer in Lisbon")
+ti, to = titles.phase_frames(x, 90, FPS)
+for kind, want in (("shadow", False), ("box", True), ("scrim", True)):
+    L = placed(grids=[flat({"shadow": .02, "scrim": .3, "box": .95}[kind])])
+    assert L[1] == kind
+    im = titles.frame(x, V, ti, to, FPS, placed=L)
+    a = np.asarray(im)
+    y = round(L[0]["top"] - L[0]["cap"] * .2)  # just above the cap line, between letters and backing edge
+    row = a[y, round(V[0] * .3):round(V[0] * .7)]
+    assert (row[:, 3].max() > 60 and row[:, :3].max() < 40) == want, (kind, row[:, 3].max())
 
 # ---------- spec -> timeline: snapped to the grid when synced, clipped to the edit, warned past the end
 def item(i, t1=4.0):
@@ -137,6 +186,23 @@ def lit(im):  # white title pixels in the frame
 a, m, z = frame_at(10), frame_at(60), frame_at(100)
 assert a.getpixel((180, 620))[1] > 200 and z.getpixel((180, 620))[1] < 80  # caption bar until frame 60
 assert lit(a) == 0 and lit(m) > 200 and lit(z) == 0, (lit(a), lit(m), lit(z))
+
+# texts see the rendered clip under them: a bright clip gets a box, the dark one keeps the plain shadow
+bright = W / "b.mov"
+subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0xF4F4F0:s=360x640:r=30:d=4",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(bright)], check=True)
+got = titles.look(str(bright), 45)
+assert got and got[1].mean() > .8 and not any(b[5] for b in got[0]), got  # no faces in a flat frame
+assert titles.look(str(W / "missing.mov"), 0) is None
+seen = []
+tl4 = types.SimpleNamespace(fps=FPS, duration=4.0, texts=(tx("title-pop", "Hello", 60, start_frame=30),))
+for clip, kind in ((bright, "box"), (src, "shadow")):
+    sc = titles.scene(tl4.texts[0], lambda f, c=clip: (str(c), f) if f < 120 else None)
+    assert len(sc[1]) == 3 and titles.place(tl4.texts[0], (360, 640), False, *sc)[1] == kind, (clip, kind)
+    seen.append(titles.build(tl4, (360, 640), T / f"w_{kind}", None, None, at=lambda f, c=clip: (str(c), f),
+                             warnings=[]).read_text())
+assert seen[0] != seen[1]  # the backing is part of the overlay names, so a cached PNG is never reused for the other
+assert titles.scene(tl4.texts[0], lambda f: None) == ((), [])
 
 # ---------- LUT looks: lut3d exists, strength blends toward identity, and the filter runs
 assert edit.look_filters(("teal-orange", 0.0)) == ""

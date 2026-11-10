@@ -342,7 +342,10 @@ def set_text(collection_id: int, text_id: str, template: str = "", text: str = "
     subtitle-style title), word-stagger (words appear one by one), lower-third (name or caption on a bar),
     location-tag (small pin label, top-left), big-number (a year or count that counts up). text: at most 80 characters,
     best under 6 words. start / dur: output seconds (start snaps to the beat when synced; dur 0.5 to 15).
-    position: auto (default; keeps off the middle), top, middle, bottom. font: auto, inter, anton, playfair, grotesk.
+    position: auto (default: at render, the band covering the fewest faces and subjects, the template's usual place
+    when free, middle only as a last resort), top, middle, bottom (kept as asked; the render warns if it covers a face).
+    9:16 text keeps clear of the app's buttons and caption area. Readability is automatic (shadow, or a soft scrim or
+    box on bright or busy footage), so don't change color for it. font: auto, inter, anton, playfair, grotesk.
     color / accent: #RRGGBB (accent colours the bar, rule or pin). Returns the edit."""
     p = f"/collections/{collection_id}/edit/texts/{text_id}"
     if template.lower() == "none":
