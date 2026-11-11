@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.14.2 (2026-11-10)
+
+- Index info counts unreadable items as failed, not as library items (fixes the Ask page and index dialog totals)
+- Index details: item total is photos plus videos; unreadable items stay on their own row
+- Text style presets (clean, bold, editorial, playful) can be picked in the inspector, not only by Claude
+- Exact playback of a partial preview falls back to the rough cut outside the rendered part (was a frozen frame, playback stalled)
+- Inspector no longer collapses to a strip in windows under 1100 px (media rule was overridden)
+- Top bar count leaves out items that failed to index, matching the library (58,395 not 58,403)
+- suggest_seams compares places by distance first, so a street in Salem is not a new place from Salem
+- View enter animation fills backwards only, so sections don't keep a translate after it ends
+- Transition picker is no longer cut off: fixed on body, flips above the seam when needed
+- Audio panel names searched music by title, not its uuid filename
+- Viewer makes the page behind it inert, so VoiceOver stays in the dialog
+- Timeline clips named by place and date, audio tracks no longer called Voiceover
+- Asks show what you typed, not the creative-direction block sent to Claude; settings labels capitalised
+- Library tiles have VoiceOver labels (kind, length, date)
+- Reference links over 15 min use their first 15 min instead of failing
+
 ## v0.14.1 (2026-11-10)
 
 - Long location tags widen before shrinking in 9:16 (28 px -> 37 px at 1080)
