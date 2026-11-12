@@ -255,4 +255,8 @@ assert cl.patch(f"/collections/{cid}/edit/clips/{ids[1]}", json={"match_color": 
 r = cl.patch(f"/collections/{cid}/edit", json={"match_color": False, "finish": "none"}).json()
 tl = edit.compute_timeline(items, r["spec"])
 assert tl.finish is None and all(s.match is None for s in tl.segs)
+# colour match warnings: one line, never one per clip
+assert edit.colour_far_warning([3], 10).startswith("colour match: clip 3 is far")
+assert "clips 2, 5 and 9 are far" in edit.colour_far_warning([2, 5, 9], 10)
+assert edit.colour_far_warning(list(range(2, 33)), 40).startswith("colour match: 31 of 40 clips have very different light")
 print("color ok")
