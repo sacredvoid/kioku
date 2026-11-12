@@ -20,7 +20,7 @@ const PHASE_OF: Record<string, Phase> = {
   analyze_reference: "reference",
   search_media: "footage", get_media: "footage", look_at: "footage", analyze_clip: "footage", tag_media: "footage",
   find_moments: "moments",
-  search_sounds: "music", set_audio: "music", add_sound: "music",
+  search_sounds: "music", find_track: "music", set_audio: "music", add_sound: "music",
   add_to_collection: "cut", set_clip_range: "cut", move_clip: "cut", remove_from_collection: "cut",
   set_clip_fx: "polish", set_transition: "polish", set_text: "polish", set_edit: "polish", compare_to_reference: "polish",
   render_preview: "render", render_final: "render", render_status: "render", export_project: "render",

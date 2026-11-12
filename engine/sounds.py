@@ -352,6 +352,88 @@ def write_credits(cid: int, folder: Path, stem: str = "credits") -> str | None:
     return str(p)
 
 
+# ---------- a named song or a link, from YouTube (or any site yt-dlp reads)
+
+YT = SOUNDS / "yt"
+TRACK_MIN_S, TRACK_MAX_S = 60, 12 * 60  # a song, not a 90 min live set or a 10 s short
+_yt_lock = threading.Lock()  # ponytail: one download at a time; per-url locks if several edits fetch at once
+
+
+class TrackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    q: str = Field(min_length=1, max_length=300)
+
+
+def _ytdlp(args: list[str], timeout: int) -> str:
+    import reference  # its yt-dlp lookup handles the app's bare PATH
+    exe = reference.ytdlp_bin()
+    if not exe:
+        raise HTTPException(422, "finding songs needs yt-dlp: run `brew install yt-dlp deno`, or give a file instead")
+    try:
+        r = subprocess.run([exe, "--no-playlist", "--no-progress", *args], capture_output=True, text=True,
+                           timeout=timeout, env=reference.tool_env())
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "YouTube took too long, try again")
+    if r.returncode != 0:
+        why = (r.stderr.strip().splitlines() or ["yt-dlp failed"])[-1]
+        if "403" in r.stderr or "JavaScript runtime" in r.stderr:
+            why = "YouTube refused this yt-dlp (out of date or no JavaScript runtime). Run `brew install yt-dlp deno`"
+        raise HTTPException(502, f"could not get the song: {why[:300]}")
+    return r.stdout
+
+
+def _yt_search(q: str) -> dict:
+    j = json.loads(_ytdlp(["--flat-playlist", "-J", "--", f"ytsearch15:{q}"], 60) or "{}")
+    out = []
+    for e in j.get("entries") or []:
+        d = e.get("duration")
+        if not e.get("id") or "/watch?" not in (e.get("url") or "") or not d or not TRACK_MIN_S <= d <= TRACK_MAX_S:
+            continue  # channels, playlists, live sets, shorts
+        ch = e.get("channel") or e.get("uploader") or ""
+        out.append({"url": e["url"], "title": e.get("title") or "", "channel": ch, "seconds": round(d),
+                    "official_audio": ch.endswith(" - Topic")})  # YouTube's auto "Artist - Topic" channels = studio audio
+    return {"candidates": out[:8],
+            "notes": "" if out else f"no 1 to 12 minute songs found for “{q}”; try artist and song title"}
+
+
+def fetch_track(url: str) -> dict:
+    """Audio of one link as m4a in ~/Kioku/sounds/yt, downloaded once. Returns path, title, channel, seconds."""
+    key = hashlib.sha1(url.encode()).hexdigest()[:16]
+    dest, meta = YT / f"{key}.m4a", YT / f"{key}.json"
+    with _yt_lock:
+        if dest.is_file() and meta.is_file():
+            return json.loads(meta.read_text())
+        YT.mkdir(mode=0o700, parents=True, exist_ok=True)
+        tmpl = str(YT / f"{key}.part-dl.%(ext)s")
+        try:
+            printed = _ytdlp(["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a",
+                              "--match-filter", f"duration<={TRACK_MAX_S * 2} & !is_live", "--max-filesize", "100M",
+                              "-o", tmpl, "--print", "after_move:%(title)s\t%(channel,uploader)s\t%(webpage_url)s",
+                              "--no-simulate", "--", url], 600)
+            got = next((f for f in YT.glob(f"{key}.part-dl.*") if f.suffix == ".m4a"), None)
+            if not got:
+                raise HTTPException(422, f"no audio downloaded: longer than {TRACK_MAX_S * 2 // 60} min, live, or not a video")
+            edit.audio_info(str(got))  # 422 unless it is readable audio
+            info = _probe(got) or {}
+            got.replace(dest)
+        finally:
+            for f in YT.glob(f"{key}.part-dl.*"):
+                f.unlink(missing_ok=True)
+        title, channel, page = ((printed.strip().splitlines() or [""])[-1].split("\t") + ["", ""])[:3]
+        res = {"path": str(dest.resolve()), "title": title, "channel": channel, "url": page or url,
+               "seconds": info.get("duration_s")}
+        meta.write_text(json.dumps(res))
+        return res
+
+
+@router.post("/sounds/track")
+def track(body: TrackBody):
+    """Text: up to 8 song-length YouTube candidates (nothing downloaded). A link: its audio, ready for set_audio."""
+    import reference
+    q = body.q.strip()
+    return fetch_track(q) if reference.is_link(q) else _yt_search(q)
+
+
 # ---------- your own files under ~/Music
 
 _local: dict[str, tuple[float, dict | None]] = {}  # path -> (mtime, info or None when unusable)

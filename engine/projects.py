@@ -350,6 +350,7 @@ STEP_LABELS = {
     "analyze_reference": lambda i: "Studying the reference video",
     "compare_to_reference": lambda i: "Comparing the cut to the reference",
     "search_sounds": lambda i: f"Looking for {'sound effects' if i.get('kind') == 'sfx' else 'music'}: “{i.get('query', '')}”",
+    "find_track": lambda i: f"Finding the song: “{i.get('query_or_link', '')[:80]}”",
     "set_audio": lambda i: "Removing an audio track" if i.get("remove") else "Laying in the audio track",
     "add_sound": lambda i: "Adding a sound effect",
     "set_text": lambda i: f"Adding text: “{i.get('text', '')[:40]}”" if i.get("text") else "Editing on-screen text",

@@ -26,7 +26,7 @@ const VIBES: Opt[] = [
 ];
 const LENGTHS: Opt[] = [{ v: "15", label: "15 s" }, { v: "30", label: "30 s" }, { v: "60", label: "1 min" }, { v: "90", label: "90 s" }];
 const SHAPES: Opt[] = [{ v: "9:16", label: "Vertical", hint: "9:16 reel" }, { v: "16:9", label: "Wide", hint: "16:9" }, { v: "1:1", label: "Square", hint: "1:1" }];
-const MUSIC: Opt[] = [{ v: "pick", label: "Pick for me" }, { v: "file", label: "My own track" }, { v: "none", label: "No music" }];
+const MUSIC: Opt[] = [{ v: "pick", label: "Pick for me" }, { v: "song", label: "A song", hint: "name or link" }, { v: "file", label: "My own track" }, { v: "none", label: "No music" }];
 
 /** Defaults read from the request itself: "a 45 second vertical reel" preselects the nearest length and 9:16. */
 function guess(prompt: string) {
@@ -87,8 +87,14 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
 
   const musicPath = field("/Users/you/Music/track.mp3, or drop a file here", "Path to your music file");
   musicPath.hidden = st.music !== "file";
+  const song = field("Ben Böhmer - Beyond Beliefs, just an artist, or a YouTube link", "Song to use: artist, title or a link");
+  song.hidden = st.music !== "song";
   const musicBox = el("div", "cmp-stack");
-  musicBox.append(chips("music", MUSIC, (v) => { musicPath.hidden = v !== "file"; if (v === "file") musicPath.focus(); }), musicPath);
+  musicBox.append(chips("music", MUSIC, (v) => {
+    musicPath.hidden = v !== "file";
+    song.hidden = v !== "song";
+    (v === "file" ? musicPath : v === "song" ? song : null)?.focus();
+  }), musicPath, song);
 
   const ref = field("Paste a YouTube link, or drop a video here (optional)", "Reference video: a link or a file path");
   const refHint = el("p", "cmp-note", "Claude measures its pacing, cuts on the beat, motion, text and colour, then edits yours the same way.");
@@ -187,6 +193,7 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
       if (["mp3", "m4a", "wav", "aac", "aiff", "caf"].includes(ext)) {
         st.music = "file";
         musicPath.hidden = false;
+        song.hidden = true;
         musicPath.value = path;
         musicBox.querySelectorAll<HTMLButtonElement>(".cmp-chip").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.v === "file")));
       } else if (["mp4", "mov", "m4v"].includes(ext)) ref.value = path;
@@ -210,7 +217,8 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
       `Length: about ${len} s`,
       `Format: ${st.shape}${st.shape === "9:16" ? " vertical" : ""}`,
       st.music === "none" ? "Music: none" : st.music === "file" && musicPath.value.trim() ? `Music: use my file ${musicPath.value.trim()} and cut to its beat`
-        : "Music: pick a track that fits the vibe and cut to its beat",
+        : st.music === "song" && song.value.trim() ? `Music: get “${song.value.trim()}” with find_track and cut to its beat`
+        : "Music: pick a track that fits the vibe and cut to its beat (if the request names a song or artist, get that with find_track instead)",
     ];
     if (ref.value.trim()) lines.push(`Reference: edit it like ${ref.value.trim()} (run analyze_reference on it first and follow its plan)`);
     if (opener.value.trim()) lines.push(`Opening title: "${opener.value.trim()}"`);
@@ -222,7 +230,8 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
       brief: `${prompt}\n${direction}` };
   };
   const go = async () => {
-    if (st.music === "file" && !musicPath.value.trim()) { musicPath.focus(); musicPath.setAttribute("aria-invalid", "true"); return; }
+    for (const [k, f] of [["file", musicPath], ["song", song]] as const)
+      if (st.music === k && !f.value.trim()) { f.focus(); f.setAttribute("aria-invalid", "true"); return; }
     make.disabled = true;
     make.textContent = "Starting…";
     try { await onMake(compose()); close(); }
@@ -236,5 +245,6 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
   cancel.onclick = close;
   make.onclick = go;
   musicPath.oninput = () => musicPath.removeAttribute("aria-invalid");
+  song.oninput = () => song.removeAttribute("aria-invalid");
   return { close };
 }
