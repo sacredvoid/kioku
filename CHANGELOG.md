@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.15.2 (2026-11-12)
+
+- Review fixes: render cache sweep runs after each render (caps were never applied), tests always use a temp data folder (testenv.py), one ~/Music walk at a time, timeouts on ffmpeg/ffprobe calls, cached proxies skip the video slot queue, per-sound download locks
+
 ## v0.15.1 (2026-11-12)
 
 - Ask screen detects a song or artist named in the request and preselects "A song" with it filled in (BUNT reel got free music and the song name as a title)
