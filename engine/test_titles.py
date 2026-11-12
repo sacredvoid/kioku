@@ -1,5 +1,6 @@
 """Checks for animated titles and LUT looks (notes/pro-editing-design.md phase 3).
 uv run test_titles.py   (ffmpeg; a few seconds)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import subprocess
 import sys
@@ -13,6 +14,8 @@ os.environ["KIOKU_DATA"] = str(T / "data")
 os.environ["KIOKU_DB_KEY"] = "0" * 64
 
 import core  # noqa: E402
+
+testenv.check()
 assert str(core.DATA).startswith(str(T)), core.DATA
 import edit  # noqa: E402
 import render  # noqa: E402

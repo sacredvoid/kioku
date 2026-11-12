@@ -1,5 +1,6 @@
 """Auto reframe: subject track, smoothed crop path, timeline fallback, cache key, and a real render of a moving subject.
 uv run test_reframe.py   (ffmpeg)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import subprocess
@@ -15,6 +16,8 @@ os.environ["KIOKU_DATA"] = str(T / "data")
 os.environ["KIOKU_DB_KEY"] = "0" * 64
 
 import core  # noqa: E402
+
+testenv.check()
 assert str(core.DATA).startswith(str(T)), core.DATA
 import edit  # noqa: E402
 import moments  # noqa: E402

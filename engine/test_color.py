@@ -1,6 +1,7 @@
 """Colour match and finish layer: the match math converges on tinted frames, measuring through ffmpeg, the API, cache
 keys, presets, and that edits without either render with the same filter graphs as before.
 uv run test_color.py   (ffmpeg, a few seconds)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import hashlib
 import json
 import os
@@ -18,6 +19,8 @@ os.environ["KIOKU_DATA"] = str(T / "data")
 os.environ["KIOKU_DB_KEY"] = "0" * 64
 
 import core  # noqa: E402
+
+testenv.check()
 assert str(core.DATA).startswith(str(T)), core.DATA
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

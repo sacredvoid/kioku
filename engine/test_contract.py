@@ -1,9 +1,10 @@
 """media.fetch lock order + label plumbing; no downloads, no ffmpeg.  uv run test_contract.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import tempfile
 from pathlib import Path
 
-os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
@@ -11,7 +12,7 @@ import media  # noqa: E402
 import settings  # noqa: E402
 import timeline  # noqa: E402
 
-assert "data/index.db" not in str(core.DB_PATH)
+testenv.check()
 assert core.fts_query("photos of the beach") == '"beach"'
 timeline.Timeline(30, "9:16", 1080, (), 0, (), "h").duration == 0
 
@@ -34,6 +35,11 @@ try:
 except ValueError:
     pass
 assert media.RUNNING == 0
+# a proxy that already exists is returned without queueing for a video slot
+order.clear()
+media.PROXIES.mkdir(parents=True, exist_ok=True)
+(media.PROXIES / "u2.mp4").write_bytes(b"x")
+assert media.fetch("u2", "preview", Path(".")) == media.PROXIES / "u2.mp4" and order == [], order
 print("ok")
 
 # connections from core.connect() go back to the pool when their `with` block ends (they used to leak until the

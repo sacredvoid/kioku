@@ -85,7 +85,7 @@ def ffmpeg_signals(proxy, dur):
     with tempfile.TemporaryDirectory(prefix="cs-mom-") as d:
         vf, af = Path(d) / "v.txt", Path(d) / "a.txt"
         run = lambda *a: subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(proxy), *a, "-f", "null", "-"],
-                                        capture_output=True, text=True)
+                                        capture_output=True, text=True, timeout=max(120, 4 * dur))
         v = run("-an", "-vf", f"scale=160:-2,fps=10,signalstats,scdet=t=8,blurdetect,metadata=print:file={vf}")
         a = run("-vn", "-af", f"ebur128=metadata=1,ametadata=print:file={af}")
         if v.returncode != 0:
@@ -111,7 +111,8 @@ def vision_signals(proxy, dur, n):
         return {}
     with tempfile.TemporaryDirectory(prefix="cs-vis-") as d:
         r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(proxy), "-vf", f"fps={VISION_FPS},scale=384:-2",
-                            "-q:v", "4", str(Path(d) / "%05d.jpg")], capture_output=True, text=True)
+                            "-q:v", "4", str(Path(d) / "%05d.jpg")], capture_output=True, text=True,
+                           timeout=max(120, 4 * dur))
         if r.returncode != 0:
             raise RuntimeError(f"ffmpeg: {r.stderr.strip()[-300:]}")
         files = sorted(Path(d).glob("*.jpg"))
@@ -193,7 +194,7 @@ def sound_signals(proxy, n):
     with tempfile.TemporaryDirectory(prefix="cs-snd-") as d:
         wav = Path(d) / "a.wav"
         r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(proxy), "-vn", "-ac", "1", "-ar", "16000", str(wav)],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, timeout=600)
         if r.returncode != 0 or not wav.is_file():
             return {}  # no audio track
         analyzer, err = S.SNAudioFileAnalyzer.alloc().initWithURL_error_(NSURL.fileURLWithPath_(str(wav)), None)

@@ -1,4 +1,5 @@
 """Checks for suggest_seams (notes/editing-power-research.md, X4). uv run test_seams.py  (no ffmpeg; caches are written by hand)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import sys
@@ -17,6 +18,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import beats  # noqa: E402
 import core  # noqa: E402
+
+testenv.check()
 import edit  # noqa: E402
 import library  # noqa: E402
 import media  # noqa: E402

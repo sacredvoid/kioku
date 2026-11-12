@@ -151,10 +151,15 @@ def ensure_proxy(uuid):
         src = local or download_original(uuid, tmp)
         stage(uuid, "making a playable copy")
         part = out.with_suffix(".part.mp4")
-        r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
-                            "-vf", f"scale=-2:'min({settings.get().proxy_height},ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
-                            "-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(part)],
-                           capture_output=True, text=True)
+        limit = max(600, 4 * (probe_duration(src) or 0))  # a hung encode would hold the video slot forever
+        try:
+            r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
+                                "-vf", f"scale=-2:'min({settings.get().proxy_height},ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
+                                "-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(part)],
+                               capture_output=True, text=True, timeout=limit)
+        except subprocess.TimeoutExpired:
+            part.unlink(missing_ok=True)
+            raise RuntimeError(f"making the playable copy took over {limit / 60:.0f} min")
         if r.returncode != 0:
             part.unlink(missing_ok=True)
             raise RuntimeError(f"ffmpeg: {r.stderr.strip()[-300:]}")
@@ -182,7 +187,7 @@ def detect_scenes(proxy):
 
 def probe_duration(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, timeout=60)
     try:
         return float(r.stdout.strip())
     except ValueError:
@@ -265,6 +270,8 @@ def fetch(uuid, mode, tmp):
     """A file ffmpeg can read for this video: mode "preview" = the proxy, "final" = the original (local, or
     downloaded into tmp). Lock order is lock_for(uuid), then video_slot, then release, same as analyze;
     call it before taking any render slot."""
+    if mode == "preview" and (have := PROXIES / f"{uuid}.mp4").is_file():
+        return have  # already made (written as .part then renamed): no need to queue for a video slot
     with lock_for(uuid):
         video_slot(uuid)
         try:

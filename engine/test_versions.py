@@ -1,4 +1,5 @@
 """Checks for saved edit versions: save, dedupe, load (with fresh item ids), the data-loss guard.  uv run test_versions.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import sys
 import tempfile
@@ -11,7 +12,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import core  # noqa: E402
-assert "data/index.db" not in str(core.DB_PATH), core.DB_PATH
+testenv.check()
 sys.modules["captions"] = types.SimpleNamespace(start_transcription=lambda cid: None, likely_speech=lambda u: False)
 import edit  # noqa: E402
 import library  # noqa: E402

@@ -1,4 +1,5 @@
 """Scene detection pipeline check on a synthetic 3-shot video.  uv run test_media.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import subprocess
 import tempfile
@@ -10,6 +11,8 @@ os.environ["CS_DB"] = str(tmp / "t.db")
 os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
+
+testenv.check()
 
 core.DATA = tmp  # keep proxies/sheets out of the real data folder
 import media  # noqa: E402

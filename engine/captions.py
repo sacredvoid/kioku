@@ -202,7 +202,7 @@ def clean(lines):
 
 def mean_db(path):
     r = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, timeout=600)
     m = re.search(r"mean_volume:\s*(-?[\d.]+|-inf)", r.stderr)
     return float(m.group(1)) if m else None
 
@@ -304,7 +304,7 @@ def transcribe(uuid, words=False):
             try:
                 wav = tmp / "a.wav"
                 r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(opus), "-ar", "16000", "-ac", "1",
-                                    "-c:a", "pcm_s16le", str(wav)], capture_output=True, text=True)
+                                    "-c:a", "pcm_s16le", str(wav)], capture_output=True, text=True, timeout=600)
                 if r.returncode != 0:
                     raise RuntimeError("could not read the clip's audio: " + r.stderr.strip()[-200:])
                 with _whisper:

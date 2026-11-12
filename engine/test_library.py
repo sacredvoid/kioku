@@ -1,4 +1,5 @@
 """Checks for tags, captions and collections against a throwaway db.  uv run test_library.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import tempfile
 
@@ -9,6 +10,8 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import core  # noqa: E402
+
+testenv.check()
 import library  # noqa: E402
 
 db = core.connect()

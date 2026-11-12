@@ -1,17 +1,20 @@
 """Preview cache: /full and project warm read the Photos library once, then only Kioku's copy.
 uv run test_previews.py   (no Photos, no network)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import tempfile
 import time
 from pathlib import Path
 
-os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import core  # noqa: E402
+
+testenv.check()
 import media  # noqa: E402
 import server  # noqa: E402
 

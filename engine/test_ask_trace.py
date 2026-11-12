@@ -1,11 +1,12 @@
 """The Ask runner's live trace: tool calls open entries, tool results close them as done or error.  uv run test_ask_trace.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import stat
 import tempfile
 from pathlib import Path
 
-os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import projects  # noqa: E402
@@ -48,6 +49,8 @@ print("ask trace ok")
 
 # an edit is recorded as running when it starts; a restart turns it into a visible failure with Retry text
 import core  # noqa: E402
+
+testenv.check()
 import library  # noqa: E402
 with library.conn() as c:
     cid = c.execute("insert into collections(name, kind) values ('t', 'project')").lastrowid

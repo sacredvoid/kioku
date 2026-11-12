@@ -1,5 +1,6 @@
 """Checks for beat sync, hits, ramps, motion, flash, shake and seam sounds (notes/pro-editing-design.md phase 1).
 uv run test_rhythm.py   (ffmpeg; the API part runs beat_this once on a synthetic 120 BPM track, about 2 s)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import subprocess
@@ -14,6 +15,8 @@ os.environ["KIOKU_DATA"] = str(T / "data")
 os.environ["KIOKU_DB_KEY"] = "0" * 64
 
 import core  # noqa: E402
+
+testenv.check()
 assert str(core.DATA).startswith(str(T)), core.DATA
 import beats  # noqa: E402
 import edit  # noqa: E402

@@ -1,5 +1,6 @@
 """Render pipeline on lavfi clips: cache, orientation, HDR, chunked joins, captions overlay, cancel, paths, slots.
 uv run test_render.py   (about a minute; ffmpeg + VideoToolbox, no network, no Photos)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import hashlib
 import json
 import os
@@ -15,12 +16,12 @@ import types
 from pathlib import Path
 
 tempfile.tempdir = tempfile.mkdtemp(prefix="cs-test-tmp-")  # private, so renders running in other shells cannot confuse the leak check
-os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
 
-assert "data/index.db" not in str(core.DB_PATH)
+testenv.check()
 
 import cv2  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
@@ -667,7 +668,7 @@ try:
 except RuntimeError as e:
     assert "limited to 200" in str(e)
 assert_clean()
-assert "data/index.db" not in str(core.DB_PATH)
+testenv.check()
 # saved preview survives an engine restart (job state gone) and says when the edit changed since
 projects.jobs.pop((1, "preview"), None)
 j = c.get("/collections/1/render/preview").json()
@@ -708,4 +709,11 @@ xd = root / "export-media"
 got = projects.export_sources([{"uuid": "A", "kind": "video"}, {"uuid": "A", "kind": "video"}, {"uuid": "V1", "kind": "video"}], xd)
 assert set(got) == {"A"} and got["A"].read_bytes() == (fx / "A.mp4").read_bytes() and asked == [["V1"]], (got, asked)
 assert not list(xd.glob("*.part"))
+# a real render applies the caps itself (it used to count itself as active, so its own sweep always skipped)
+cap0 = dict(render.CACHE_CAP)
+render.CACHE_CAP["preview"] = 1
+projects.jobs[(1, "preview")] = {}
+go(1)
+assert not list((render.CACHE / "preview").glob("*.mov")), list((render.CACHE / "preview").glob("*.mov"))
+render.CACHE_CAP.update(cap0)
 print("render checks passed")

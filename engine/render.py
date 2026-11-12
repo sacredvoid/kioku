@@ -73,7 +73,7 @@ class Source:
 
 def probe_source(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, timeout=60)
     info = json.loads(r.stdout or "{}")
     streams = info.get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None)
@@ -1103,7 +1103,6 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         state["stage"] = "Checking frames"  # not prog.stage: the activity entry was cleared with the slot
         sheet = _sheet(target, sel, win, fps, rdir / f"{mode}-sheet.jpg")
         prog.state["progress"] = 1.0
-        _gc_cache()
         import sounds  # late: sounds imports edit, which the render job already uses
         credit = sounds.write_credits(cid, target.parent, f"{target.stem}-credits") if mode == "final" else None
         result = {"path": str(target), "folder": str(target.parent), "seconds": round(out_s, 2), "credits": credit,
@@ -1123,6 +1122,10 @@ def render(cid, mode, start=None, end=None, codec="hevc"):
         media.stage(f"render:{cid}:{mode}", None)  # the last stages run after the slot is released; never leave a card behind
         with _gate:
             _active -= 1
+        try:  # after the decrement: while this render counted as active the sweep always skipped (caps never applied)
+            _gc_cache()
+        except OSError as e:
+            log.warning("render cache sweep failed: %s", e)
         if CANCEL.get(jkey) is cancel:
             del CANCEL[jkey]
 
