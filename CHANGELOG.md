@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.15.0 (2026-11-11)
+
+- Find a song by name or link: find_track searches YouTube for song-length candidates and downloads the chosen one; Ask screen gets an "A song" music option
+
 ## v0.14.2 (2026-11-10)
 
 - Index info counts unreadable items as failed, not as library items (fixes the Ask page and index dialog totals)
