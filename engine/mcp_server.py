@@ -493,6 +493,19 @@ def search_sounds(query: str, kind: str = "music", max_duration: float | None = 
 
 
 @server.tool()
+def find_track(query_or_link: str) -> dict:
+    """Get a specific song the user named or linked, from YouTube (or any site yt-dlp reads). Text such as
+    "Ben Böhmer - Beyond Beliefs" or just "Ben Böhmer" returns up to 8 song-length candidates {url, title, channel,
+    seconds, official_audio} and downloads nothing: pick one (prefer official_audio, the original over remixes, live
+    versions, "slowed", lyric or 1 hour loops unless asked, and seconds at least the edit length; for an artist only,
+    pick a well-known track that fits the vibe), then call find_track again with its url. A link downloads its audio
+    once (songs up to 24 min) and returns {path, title, channel, url, seconds}: pass path to set_audio (fit=true), then
+    analyze_music. Say which song you used. These are commercial tracks: fine for personal videos, but social platforms
+    mute or claim them, so tell the user once."""
+    return call("POST", "/sounds/track", {"q": query_or_link}, timeout=660)
+
+
+@server.tool()
 def add_sound(collection_id: int, sound_id: str, start: float = 0, track_id: str = "", volume: float | None = None,
               fade_in: float | None = None, fade_out: float | None = None, fit: bool = False,
               target_seconds: float | None = None, drop_at: float | None = None) -> dict:
