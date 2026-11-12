@@ -4,6 +4,7 @@ export const DIRECTION = "\n\nCreative direction, already decided by the user (d
 // library meanwhile (POST /direction/questions) and adds up to 3 questions about the actual footage. "Make it" turns
 // every answer into one request for the edit job, so the editing Claude never has to ask.
 import { api, errMsg } from "./api";
+import { songIn } from "./song";
 
 type Q = { id: string; question: string; options: string[]; multi: boolean };
 type Direction = { summary: string; questions: Q[] };
@@ -42,7 +43,8 @@ function guess(prompt: string) {
 
 export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Composed) => Promise<void>, onClose: () => void) {
   const g = guess(prompt);
-  const st: Record<string, string> = { vibe: g.vibe, length: g.length, shape: g.shape, music: "pick" };
+  const named = songIn(prompt);
+  const st: Record<string, string> = { vibe: g.vibe, length: g.length, shape: g.shape, music: named ? "song" : "pick" };
   const picks: Record<string, Set<string>> = {};
   let dir: Direction | null = null;
   let closed = false;
@@ -89,6 +91,7 @@ export function openComposer(host: HTMLElement, prompt: string, onMake: (c: Comp
   musicPath.hidden = st.music !== "file";
   const song = field("Ben Böhmer - Beyond Beliefs, just an artist, or a YouTube link", "Song to use: artist, title or a link");
   song.hidden = st.music !== "song";
+  song.value = named;
   const musicBox = el("div", "cmp-stack");
   musicBox.append(chips("music", MUSIC, (v) => {
     musicPath.hidden = v !== "file";

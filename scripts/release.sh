@@ -45,6 +45,7 @@ EOF
 tmp=$(mktemp -d)
 (cd engine && for t in test_*.py selfcheck.py; do KIOKU_DATA="$tmp" .venv/bin/python "$t" >/dev/null || { echo "FAIL $t" >&2; exit 1; }; done)
 (cd app && npx tsc --noEmit)
+(cd app && node --experimental-strip-types --no-warnings src/song.check.mjs >/dev/null) || { echo "FAIL src/song.check.mjs" >&2; exit 1; }
 
 # 3. the signed DMG (Kioku_<version>_aarch64.dmg; older versions stay next to it)
 (cd app && npx tauri build --bundles dmg)
