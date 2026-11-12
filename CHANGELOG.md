@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.15.3 (2026-11-12)
+
+- Colour match: one summary warning instead of one line per clip (a 40-clip concert edit showed 31 identical lines)
+
 ## v0.15.2 (2026-11-12)
 
 - Review fixes: render cache sweep runs after each render (caps were never applied), tests always use a temp data folder (testenv.py), one ~/Music walk at a time, timeouts on ffmpeg/ffprobe calls, cached proxies skip the video slot queue, per-sound download locks
