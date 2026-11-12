@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.15.1 (2026-11-12)
+
+- Ask screen detects a song or artist named in the request and preselects "A song" with it filled in (BUNT reel got free music and the song name as a title)
+
 ## v0.15.0 (2026-11-11)
 
 - Find a song by name or link: find_track searches YouTube for song-length candidates and downloads the chosen one; Ask screen gets an "A song" music option
