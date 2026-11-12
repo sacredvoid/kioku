@@ -165,7 +165,7 @@ def originals(uuids, dest):
 def probe(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                         "stream=r_frame_rate:format=duration", "-of", "json", str(path)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, timeout=60)
     info = json.loads(r.stdout or "{}")
     # r_frame_rate is the nominal rate (30/1, 30000/1001, 60000/1001). avg_frame_rate is not: iPhone video is
     # variable-rate, so its average lands on values like 2550/91 (28.02) that no editor timeline uses.

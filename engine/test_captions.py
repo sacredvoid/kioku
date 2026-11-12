@@ -1,5 +1,6 @@
 """Captions: cue mapping, srt, PNG cue track, fake whisper-cli, cache, routes.  uv run test_captions.py
 No real whisper, no network. edit.* is stubbed (it belongs to the spec branch)."""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import math
 import os
 import subprocess
@@ -14,7 +15,7 @@ os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 import core  # noqa: E402
 
-assert "data/index.db" not in str(core.DB_PATH)
+testenv.check()
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

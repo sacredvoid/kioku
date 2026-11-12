@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import core
 import edit
+import media
 import music
 import music_sources
 import settings
@@ -59,7 +60,6 @@ create table if not exists sounds(
 """
 
 _cache: dict[str, tuple[float, object]] = {}
-_dl_lock = threading.Lock()  # ponytail: one download at a time; per-id locks if many previews start together
 
 
 def _cached(key, fn):
@@ -232,7 +232,7 @@ def download(sid: str) -> Path:
     if host.scheme != "https" or not host.hostname:
         raise HTTPException(422, "sound has no https download")
     dest = SOUNDS / f"{sid}.{s['filetype']}"
-    with _dl_lock:
+    with media.lock_for(f"sound:{sid}"):  # per sound: the shortlist pool downloads in parallel
         if dest.is_file():
             return dest
         SOUNDS.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -356,7 +356,6 @@ def write_credits(cid: int, folder: Path, stem: str = "credits") -> str | None:
 
 YT = SOUNDS / "yt"
 TRACK_MIN_S, TRACK_MAX_S = 60, 12 * 60  # a song, not a 90 min live set or a 10 s short
-_yt_lock = threading.Lock()  # ponytail: one download at a time; per-url locks if several edits fetch at once
 
 
 class TrackBody(BaseModel):
@@ -400,7 +399,7 @@ def fetch_track(url: str) -> dict:
     """Audio of one link as m4a in ~/Kioku/sounds/yt, downloaded once. Returns path, title, channel, seconds."""
     key = hashlib.sha1(url.encode()).hexdigest()[:16]
     dest, meta = YT / f"{key}.m4a", YT / f"{key}.json"
-    with _yt_lock:
+    with media.lock_for(f"yt:{key}"):
         if dest.is_file() and meta.is_file():
             return json.loads(meta.read_text())
         YT.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -438,6 +437,7 @@ def track(body: TrackBody):
 
 _local: dict[str, tuple[float, dict | None]] = {}  # path -> (mtime, info or None when unusable)
 _local_at = 0.0
+_local_lock = threading.Lock()
 
 
 def _probe(p: Path) -> dict | None:
@@ -471,24 +471,30 @@ def _probe(p: Path) -> dict | None:
 def local_index(force=False) -> list[dict]:
     """Every usable audio file under ~/Music. Re-walked at most every 5 minutes; only new or changed files are probed."""
     global _local_at
-    if force or time.time() - _local_at > 300:
-        seen = set()
-        root = MUSIC.resolve()
-        # ponytail: probes serially and caps at 5000 files; a background indexer if libraries are bigger
-        for p in sorted(root.rglob("*"))[:20000]:
-            if p.suffix.lower() not in LOCAL_EXTS or not p.is_file() or len(seen) >= 5000:
-                continue
-            key, mt = str(p), p.stat().st_mtime
-            seen.add(key)
-            if key not in _local or _local[key][0] != mt:
-                info = _probe(p)
-                if info and (f := music.cached_quick(p)):
-                    info["feat"] = f  # computed in an earlier session
-                _local[key] = (mt, info)
-        for k in set(_local) - seen:
-            del _local[k]
-        _local_at = time.time()
-    return [v[1] for v in _local.values() if v[1]]
+    with _local_lock:  # one walk at a time: overlapping requests used to re-probe the same files in parallel
+        if force or time.time() - _local_at > 300:
+            _walk_music()
+            _local_at = time.time()
+        return [v[1] for v in list(_local.values()) if v[1]]
+
+
+def _walk_music():
+    """Probe new or changed files under ~/Music into _local; caller holds _local_lock."""
+    seen = set()
+    root = MUSIC.resolve()
+    # ponytail: probes serially and caps at 5000 files; a background indexer if libraries are bigger
+    for p in sorted(root.rglob("*"))[:20000]:
+        if p.suffix.lower() not in LOCAL_EXTS or not p.is_file() or len(seen) >= 5000:
+            continue
+        key, mt = str(p), p.stat().st_mtime
+        seen.add(key)
+        if key not in _local or _local[key][0] != mt:
+            info = _probe(p)
+            if info and (f := music.cached_quick(p)):
+                info["feat"] = f  # computed in an earlier session
+            _local[key] = (mt, info)
+    for k in set(_local) - seen:
+        del _local[k]
 
 
 def in_music(path: str) -> Path:

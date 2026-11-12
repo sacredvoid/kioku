@@ -1,4 +1,5 @@
 """Checks for smart-album drafts against a throwaway db, fake search and fake planner.  uv run test_albums.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import tempfile
 import threading
@@ -16,7 +17,7 @@ import core  # noqa: E402
 import library  # noqa: E402
 import settings  # noqa: E402
 
-assert "data/index.db" not in str(core.DB_PATH), core.DB_PATH
+testenv.check()
 settings.FILE = Path(tempfile.mkdtemp()) / "settings.json"
 settings._cur = settings.Settings()
 

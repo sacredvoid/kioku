@@ -1,6 +1,7 @@
 """Music search v2: shortlist ranking and analysis, Jamendo and Incompetech records, licensing, missing key, and the
 ~/Music library searched by feel. No network (sources are stubbed), synthetic audio only.
 uv run test_music_search.py   (needs ffmpeg for the tagged mp3)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import subprocess
@@ -24,6 +25,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import beats  # noqa: E402
 import core  # noqa: E402
+
+testenv.check()
 sys.modules["captions"] = types.SimpleNamespace(start_transcription=lambda cid: None, likely_speech=lambda u: False)
 import edit  # noqa: E402
 import library  # noqa: E402

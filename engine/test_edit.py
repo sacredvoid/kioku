@@ -1,4 +1,5 @@
 """Checks for the edit spec: validation, storage, timeline math, looks.  uv run test_edit.py  (ffprobe and ffmpeg for one tiny audio fixture)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import re
@@ -16,7 +17,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import core  # noqa: E402
-assert "data/index.db" not in str(core.DB_PATH), core.DB_PATH
+testenv.check()
 import edit  # noqa: E402
 import library  # noqa: E402
 

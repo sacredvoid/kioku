@@ -1,4 +1,5 @@
 """find_track route with a fake yt-dlp: no network.  uv run test_track.py  (needs ffmpeg)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import sys
 import tempfile

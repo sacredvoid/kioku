@@ -1,4 +1,5 @@
 """Curated CC0 seam sounds, text sounds and the audio declick at hard cuts. No network.  uv run test_seam_sounds.py  (needs ffmpeg)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import json
 import os
 import subprocess

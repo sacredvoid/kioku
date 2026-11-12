@@ -1,5 +1,6 @@
 """Checks for the music map and auto fit (notes/editing-power-research.md M1, M2).
 uv run test_music.py   (no ffmpeg needed; beats.analyze is stubbed with the exact grid of the synthetic track)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import sys
 import tempfile
@@ -16,6 +17,8 @@ import numpy as np  # noqa: E402
 
 import beats  # noqa: E402
 import core  # noqa: E402
+
+testenv.check()
 import edit  # noqa: E402
 import library  # noqa: E402
 import music  # noqa: E402

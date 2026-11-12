@@ -1,4 +1,5 @@
 """Settings round-trip, validation, the Claude agent queue, and the quiet access-log filter.  uv run test_settings.py"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import logging
 import os
 import tempfile
@@ -6,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")  # never touch the real data/index.db
+os.environ["CS_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 os.environ["KIOKU_DB_KEY"] = "0" * 64  # never touch the Keychain
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -98,6 +99,8 @@ assert TestClient(server.app, base_url="http://localhost:8765").get("/settings")
 # export keeps the exact 30000/1001 rate: FCP XML says timebase 30 + ntsc TRUE (Resolve reads 29.97); true 30 stays FALSE
 import opentimelineio as otio  # noqa: E402
 import core  # noqa: E402
+
+testenv.check()
 from core import sqlite3  # noqa: E402
 ntsc = 30000 / 1001
 for rate, flag in [(ntsc, "TRUE"), (30, "FALSE")]:

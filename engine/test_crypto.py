@@ -1,4 +1,5 @@
 """The index is encrypted at rest and the key logic never silently starts over. Never touches the real Keychain."""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import sys
 import tempfile
@@ -14,6 +15,8 @@ sys.modules["keyring"] = types.SimpleNamespace(  # fake Keychain
     get_password=lambda s, a: store.get((s, a)), set_password=lambda s, a, k: store.__setitem__((s, a), k))
 
 import core  # noqa: E402
+
+testenv.check()
 
 # first run: no index, no key -> a fresh 256-bit key is created and saved
 with core.connect() as c:

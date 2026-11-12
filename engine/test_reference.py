@@ -1,6 +1,7 @@
 """Style reference checks (notes/pro-editing-design.md phase 4) on a synthetic 120 BPM video with known cuts, one crossfade,
 one zoom-in, one punch-in, one white flash and one shot of text.
 uv run test_reference.py   (ffmpeg, TransNetV2 and beat_this on CPU; about 30 s)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import subprocess
 import sys
@@ -14,6 +15,8 @@ os.environ["KIOKU_DATA"] = str(T / "data")
 os.environ["KIOKU_DB_KEY"] = "0" * 64
 
 import core  # noqa: E402
+
+testenv.check()
 assert str(core.DATA).startswith(str(T)), core.DATA
 import edit  # noqa: E402
 import reference  # noqa: E402

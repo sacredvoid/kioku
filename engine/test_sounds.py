@@ -1,9 +1,12 @@
 """Free sounds + ~/Music browsing with Openverse mocked: no network.  uv run test_sounds.py  (needs ffmpeg/ffprobe)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import io
 import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import types
 import urllib.error
 from pathlib import Path
@@ -18,6 +21,8 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import core  # noqa: E402
+
+testenv.check()
 sys.modules["captions"] = types.SimpleNamespace(start_transcription=lambda cid: None, likely_speech=lambda u: False)
 import edit  # noqa: E402
 import library  # noqa: E402
@@ -164,4 +169,19 @@ assert c.get("/sounds/local", params={"q": "fake"}).json()["results"] == []
 assert c.get("/sounds/local/file", params={"path": str(music / "Album" / "01.mp3")}).status_code == 200
 assert c.get("/sounds/local/file", params={"path": str(good)}).status_code == 422  # outside ~/Music
 assert c.get("/sounds/local/file", params={"path": str(music / "Album" / ".." / ".." / "tone.mp3")}).status_code == 422
+# overlapping cold walks probe each file once (they used to re-probe the same files in parallel)
+for k in range(40):
+    (music / "Many").mkdir(exist_ok=True)
+    (music / "Many" / f"{k:02}.mp3").write_bytes(GOOD)
+probes, real_probe = [], sounds._probe
+sounds._probe = lambda p: (probes.append(p), time.sleep(0.01), real_probe(p))[2]
+threads = [threading.Thread(target=sounds.local_index, kwargs={"force": True}) for _ in range(6)]
+sounds._local.clear()
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+sounds._probe = real_probe
+n_files = sum(1 for f in music.rglob("*") if f.is_file())
+assert len(probes) <= n_files, (len(probes), n_files)
 print("ok")

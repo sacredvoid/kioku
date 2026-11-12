@@ -1,5 +1,6 @@
 """Seam clip transitions (seamfx): frame exact seams, exact join lengths, untouched neighbours, a real effect mid-seam,
 caching, validation. uv run test_seamfx.py   (ffmpeg + VideoToolbox, about 15 s)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import subprocess
 import sys
@@ -17,6 +18,8 @@ os.environ["KIOKU_DB_KEY"] = "0" * 64
 import numpy as np  # noqa: E402
 
 import core  # noqa: E402
+
+testenv.check()
 assert str(core.DATA).startswith(str(T)), core.DATA
 import edit  # noqa: E402
 import render  # noqa: E402

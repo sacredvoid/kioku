@@ -1,5 +1,6 @@
 """Timeline editor routes: strip, replace, split, insert at pos, cues, audio file + peaks, proxy GOP.
 uv run test_timeline_api.py   (ffmpeg lavfi fixtures, no network, no Photos)"""
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import subprocess
 import tempfile
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import captions  # noqa: E402
 import core  # noqa: E402
-assert "data/index.db" not in str(core.DB_PATH), core.DB_PATH
+testenv.check()
 import edit  # noqa: E402
 import library  # noqa: E402
 import media  # noqa: E402
@@ -83,6 +84,8 @@ index.extract_audio = lambda *a, **k: None
 
 
 def fake_run(cmd, *a, **k):
+    if cmd[0] == "ffprobe":  # the encode timeout probes the source's length first
+        return subprocess.CompletedProcess(cmd, 0, "", "")
     seen.append(cmd)
     Path(cmd[-1]).write_bytes(b"x")
     return subprocess.CompletedProcess(cmd, 0, "", "")

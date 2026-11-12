@@ -2,6 +2,7 @@
 
   uv run selfcheck.py
 """
+import testenv  # noqa: F401  (first: temp data folder, never ~/Kioku)
 import os
 import subprocess
 import sys
@@ -30,6 +31,8 @@ here = Path(__file__).parent
 subprocess.run([sys.executable, here / "index.py", "--folder", media], check=True)
 
 import core  # noqa: E402  (after CS_DB is set)
+
+testenv.check()
 
 idx = core.Index(core.connect())
 for name, (_, query) in SAMPLES.items():
