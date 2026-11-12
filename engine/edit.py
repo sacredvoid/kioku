@@ -430,11 +430,19 @@ def _match(segs, spec, ref, warnings):
         warnings.append("colour match: the reference clip is gone, opted out or not measured; matching to the edit median")
     if missing:
         warnings.append(f"colour match: {missing} clips are not measured yet; the next preview measures them")
-    pos = {s.item_id: n for n, s in enumerate(segs, 1)}
-    for k in capped:
-        warnings.append(f"colour match: clip {pos[k]} is far from the rest (night, sunset or a deliberate colour), "
-                        "so it keeps most of its own colour; adjust it by hand if it should blend in")
+    if capped:
+        warnings.append(colour_far_warning(sorted(n for n, s in enumerate(segs, 1) if s.item_id in capped), len(stats)))
     return [replace(s, match=got.get(s.item_id)) for s in segs]
+
+
+def colour_far_warning(nums, total):
+    """One line for every clip colour match leaves mostly alone (it used to be one line per clip)."""
+    if len(nums) > total / 2:
+        return (f"colour match: {len(nums)} of {total} clips have very different light (stage lights, night, sunsets), "
+                "so they keep their own colour and only the closer ones are evened out")
+    names = ", ".join(map(str, nums[:-1])) + f" and {nums[-1]}" if len(nums) > 1 else str(nums[0])
+    return (f"colour match: clip{'s' if len(nums) > 1 else ''} {names} {'are' if len(nums) > 1 else 'is'} far from the "
+            "rest (night, sunset or a deliberate colour), so they keep most of their own colour; adjust by hand to blend")
 
 
 def _fit_source(r, n, fps, start, bound, G):
