@@ -16,3 +16,7 @@ src-tauri/gen/
 .playwright-mcp/
 .DS_Store
 .claude/worktrees/
+
+# Private working notes (kept locally, not published)
+HANDOFF.md
+notes/requests.md
